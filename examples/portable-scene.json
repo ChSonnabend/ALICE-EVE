@@ -1,0 +1,100 @@
+{
+  "defaults": {},
+  "geometry": {},
+  "scene": {
+    "azimuth": -55.0,
+    "camera": "perspective",
+    "camera_pose": {},
+    "cluster_color_mode": "solid",
+    "cluster_radius_cm": 0.35,
+    "color_ranges": {},
+    "colors": {
+      "CPV": "#243a82",
+      "EMC": "#243a82",
+      "FDD": "#243a82",
+      "FT0": "#243a82",
+      "FV0": "#243a82",
+      "HMP": "#243a82",
+      "ITS": "#243a82",
+      "MCH": "#243a82",
+      "MFT": "#243a82",
+      "MID": "#243a82",
+      "PHS": "#243a82",
+      "TOF": "#243a82",
+      "TPC": "#243a82",
+      "TRD": "#243a82",
+      "ZDC": "#243a82",
+      "background": "#070b20",
+      "clusters": "#94e5ff",
+      "magnet": "#315285",
+      "tracks": "#ee8ff5"
+    },
+    "colors_linear": {},
+    "cutaway": true,
+    "detectors": [
+      "ITS",
+      "TPC"
+    ],
+    "distance_cm": 1600.0,
+    "elevation": 22.0,
+    "frame_aspect": 1.7777777777777777,
+    "geometry": [],
+    "geometry_lod": "full",
+    "geometry_opacities": {},
+    "geometry_opacity": 0.18,
+    "geometry_openings": {},
+    "geometry_units": "cm",
+    "lights": [
+      {
+        "color": "#ffffff",
+        "energy": 1800.0,
+        "position_m": [
+          5.0,
+          -5.0,
+          10.0
+        ],
+        "size_m": 8.0
+      },
+      {
+        "color": "#ffffff",
+        "energy": 1200.0,
+        "position_m": [
+          -8.0,
+          3.0,
+          4.0
+        ],
+        "size_m": 10.0
+      },
+      {
+        "color": "#ffffff",
+        "energy": 1000.0,
+        "position_m": [
+          0.0,
+          0.0,
+          -10.0
+        ],
+        "size_m": 8.0
+      }
+    ],
+    "magnet": false,
+    "metallic": 0.15,
+    "missing_color": "#808080",
+    "mode": "tracks",
+    "palette": "viridis",
+    "roughness": 0.38,
+    "scale_max": null,
+    "scale_min": null,
+    "schematic": false,
+    "shading": "smooth",
+    "target_cm": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "track_color_mode": "solid",
+    "track_radius_cm": 0.12,
+    "world_strength": 0.45
+  },
+  "schema": "alice-eve-scene",
+  "version": 1
+}

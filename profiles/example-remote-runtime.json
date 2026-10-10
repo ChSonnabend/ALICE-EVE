@@ -1,0 +1,7 @@
+{
+  "host": "YOUR_SSH_HOST",
+  "job": 0,
+  "cpus": 4,
+  "image": "/path/to/o2-container.sif",
+  "work_directory": "/path/to/isolated/ALICE-event-renderer-work"
+}

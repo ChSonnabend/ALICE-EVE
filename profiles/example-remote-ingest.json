@@ -1,0 +1,39 @@
+{
+  "configuration_files": [
+    "remote-runtime.local.json",
+    "run-reconstruction.local.json",
+    "../native/canonical_export.h",
+    "../native/timeframe_export.h",
+    "../native/export_run.inc",
+    "../tools/prepare_o2_exporter.py",
+    "../tools/o2_workflow_driver.py",
+    "../tools/virgo_ingest.py",
+    "../src/alice_renderer/timeframe_views.py"
+  ],
+  "preflight_timeout_seconds": 900,
+  "preflight_argv": [
+    "{python}",
+    "{project}/tools/virgo_ingest.py",
+    "--runtime",
+    "{profile_dir}/remote-runtime.local.json",
+    "--configuration",
+    "{profile_dir}/run-reconstruction.local.json",
+    "--input",
+    "{input}",
+    "--output",
+    "{output}",
+    "--check"
+  ],
+  "argv": [
+    "{python}",
+    "{project}/tools/virgo_ingest.py",
+    "--runtime",
+    "{profile_dir}/remote-runtime.local.json",
+    "--configuration",
+    "{profile_dir}/run-reconstruction.local.json",
+    "--input",
+    "{input}",
+    "--output",
+    "{output}"
+  ]
+}
