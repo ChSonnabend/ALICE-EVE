@@ -111,7 +111,10 @@ class Window(QMainWindow):
         widget=self.tab('Detectors');layout=QVBoxLayout(widget)
         self.mode=QComboBox();self.mode.addItems(['tracks','clusters','both']);self.mode.setCurrentText(self.base.mode);self.mode.currentTextChanged.connect(self.update_availability)
         form=QFormLayout();form.addRow('Objects',self.mode);layout.addLayout(form)
-        note=QLabel('Data controls are disabled when unavailable in the selected events. Matched tracks are shown once in full when any source detector is selected.');note.setWordWrap(True);layout.addWidget(note)
+        note=QLabel('Data controls are disabled when unavailable in the selected events. Tracks are trimmed to the selected source detectors when clipping is enabled.');note.setWordWrap(True);layout.addWidget(note)
+        controls=QHBoxLayout();layout.addLayout(controls)
+        none=QPushButton('Select no detectors');none.clicked.connect(self.select_no_detectors);controls.addWidget(none)
+        complete=QPushButton('Show complete detectors');complete.clicked.connect(self.show_complete_detectors);controls.addWidget(complete)
         grid=QGridLayout();layout.addLayout(grid)
         for c,name in enumerate(['Detector','Data','Geometry','Colour']):grid.addWidget(QLabel(name),0,c)
         for row,name in enumerate(DETECTORS,1):
@@ -121,9 +124,16 @@ class Window(QMainWindow):
             grid.addWidget(label,row,0);grid.addWidget(data,row,1);grid.addWidget(geometry,row,2);grid.addWidget(self.color_button(name),row,3)
         self.magnet=QCheckBox('L3 magnet');self.magnet.setChecked(self.base.magnet);layout.addWidget(self.magnet)
         self.schematic=QCheckBox('Use approximate schematic envelopes');self.schematic.setChecked(self.base.schematic);self.schematic.setToolTip('Approximate dimensions, not calibrated detector geometry. This choice is recorded in render metadata.');layout.addWidget(self.schematic)
-        self.cutaway=QCheckBox('Half cutaway (global Y plane)');self.cutaway.setChecked(self.base.cutaway);layout.addWidget(self.cutaway)
+        self.cutaway=QCheckBox('Half cutaway (global Y plane)');self.cutaway.setChecked(self.base.cutaway);self.cutaway.toggled.connect(self.change_cutaway);layout.addWidget(self.cutaway)
         self.geometry_lod=QComboBox();self.geometry_lod.addItems(['full','simplified']);self.geometry_lod.setCurrentText(self.base.geometry_lod);layout.addWidget(QLabel('Geometry detail'));layout.addWidget(self.geometry_lod)
         self.opacity=number(self.base.geometry_opacity,0,1,2);form=QFormLayout();form.addRow('Geometry opacity',self.opacity);layout.addLayout(form);layout.addStretch()
+    def select_no_detectors(self):
+        for box in (*self.data_checks.values(),*self.geometry_checks.values()):box.setChecked(False)
+        self.magnet.setChecked(False)
+    def change_cutaway(self,on):
+        self.scene_overrides['geometry_openings']={name:180 if on else 0 for name in (*DETECTORS,'L3')}
+    def show_complete_detectors(self):
+        self.cutaway.setChecked(False);self.scene_overrides['geometry_openings']={name:0 for name in (*DETECTORS,'L3')}
     def color_button(self,key):
         button=QPushButton(self.base.colors.get(key,'#243a82'));button.clicked.connect(lambda:self.pick_color(key));self.color_buttons[key]=button;return button
     def pick_color(self,key):
@@ -142,7 +152,7 @@ class Window(QMainWindow):
         self.palette=QComboBox();self.palette.addItems(['viridis','coolwarm','hsv']);self.palette.setCurrentText(self.base.palette);layout.addRow('Colour scale',self.palette)
         self.auto_range=QCheckBox('Automatic scale range per event');self.auto_range.setChecked(self.base.scale_min is None);layout.addRow(self.auto_range)
         self.minimum=number(self.base.scale_min or 0,-1000000,1000000,3);self.maximum=number(self.base.scale_max or 10,-1000000,1000000,3);layout.addRow('Minimum',self.minimum);layout.addRow('Maximum',self.maximum)
-        self.track_radius=number(self.base.track_radius_cm,.001,10,3);self.cluster_radius=number(self.base.cluster_radius_cm,.001,20,3);layout.addRow('Track radius (cm)',self.track_radius);layout.addRow('Cluster radius (cm)',self.cluster_radius)
+        self.track_radius=number(self.base.track_radius_cm*2,.002,20,3);self.cluster_radius=number(self.base.cluster_radius_cm,.001,20,3);layout.addRow('Track linewidth (cm)',self.track_radius);self.clip_tracks=QCheckBox('Clip tracks to selected detectors');self.clip_tracks.setChecked(self.base.clip_tracks);layout.addRow(self.clip_tracks);layout.addRow('Cluster radius (cm)',self.cluster_radius)
     def build_render(self):
         widget=self.tab('Render');layout=QFormLayout(widget)
         self.width=number(self.base.width,64,16384);self.height=number(self.base.height,64,16384);self.samples=number(self.base.samples,1,8192)
@@ -182,8 +192,9 @@ class Window(QMainWindow):
         button.clicked.connect(choose);layout.addWidget(button);return widget
 
     def settings(self):
-        cfg=RenderSettings(detectors=[d for d,c in self.data_checks.items() if c.isChecked() and c.isEnabled()],geometry=[d for d,c in self.geometry_checks.items() if c.isChecked()],magnet=self.magnet.isChecked(),mode=self.mode.currentText(),track_color_mode=self.track_mode.currentText(),cluster_color_mode=self.cluster_mode.currentText(),colors={k:b.text() for k,b in self.color_buttons.items()},scale_min=None if self.auto_range.isChecked() else self.minimum.value(),scale_max=None if self.auto_range.isChecked() else self.maximum.value(),palette=self.palette.currentText(),geometry_assets={k:v.text() for k,v in self.asset_fields.items() if v.text()},geometry_units=self.geometry_units.currentText(),geometry_opacity=self.opacity.value(),cutaway=self.cutaway.isChecked(),schematic=self.schematic.isChecked(),width=self.width.value(),height=self.height.value(),samples=self.samples.value(),denoise=self.denoise.isChecked(),backend=self.backend.currentText(),device=self.device.currentData() or '',threads=self.threads.value(),track_radius_cm=self.track_radius.value(),cluster_radius_cm=self.cluster_radius.value(),camera=self.camera.currentText(),azimuth=self.azimuth.value(),elevation=self.elevation.value(),distance_cm=self.distance.value(),target_cm=[s.value() for s in self.target],save_blend=self.save_blend.isChecked())
+        cfg=RenderSettings(detectors=[d for d,c in self.data_checks.items() if c.isChecked() and c.isEnabled()],geometry=[d for d,c in self.geometry_checks.items() if c.isChecked()],magnet=self.magnet.isChecked(),mode=self.mode.currentText(),track_color_mode=self.track_mode.currentText(),cluster_color_mode=self.cluster_mode.currentText(),colors={k:b.text() for k,b in self.color_buttons.items()},scale_min=None if self.auto_range.isChecked() else self.minimum.value(),scale_max=None if self.auto_range.isChecked() else self.maximum.value(),palette=self.palette.currentText(),geometry_assets={k:v.text() for k,v in self.asset_fields.items() if v.text()},geometry_units=self.geometry_units.currentText(),geometry_opacity=self.opacity.value(),cutaway=self.cutaway.isChecked(),schematic=self.schematic.isChecked(),width=self.width.value(),height=self.height.value(),samples=self.samples.value(),denoise=self.denoise.isChecked(),backend=self.backend.currentText(),device=self.device.currentData() or '',threads=self.threads.value(),track_radius_cm=self.track_radius.value()/2,cluster_radius_cm=self.cluster_radius.value(),camera=self.camera.currentText(),azimuth=self.azimuth.value(),elevation=self.elevation.value(),distance_cm=self.distance.value(),target_cm=[s.value() for s in self.target],save_blend=self.save_blend.isChecked())
         for key,value in self.scene_overrides.items():setattr(cfg,key,value)
+        cfg.clip_tracks=self.clip_tracks.isChecked()
         cfg.geometry_lod=self.geometry_lod.currentText()
         cfg.frame_aspect=cfg.width/cfg.height
         return cfg.validate()
@@ -312,15 +323,17 @@ class Window(QMainWindow):
         for name,button in self.color_buttons.items():
             button.setText(cfg.colors[name]);button.setStyleSheet('background:'+cfg.colors[name])
         for name,value in [('mode',cfg.mode),('track_mode',cfg.track_color_mode),('cluster_mode',cfg.cluster_color_mode),('palette',cfg.palette),('camera',cfg.camera),('geometry_units',cfg.geometry_units)]:getattr(self,name).setCurrentText(value)
-        for name,value in [('opacity',cfg.geometry_opacity),('track_radius',cfg.track_radius_cm),('cluster_radius',cfg.cluster_radius_cm),('azimuth',cfg.azimuth),('elevation',cfg.elevation),('distance',cfg.distance_cm)]:getattr(self,name).setValue(value)
+        for name,value in [('opacity',cfg.geometry_opacity),('track_radius',cfg.track_radius_cm*2),('cluster_radius',cfg.cluster_radius_cm),('azimuth',cfg.azimuth),('elevation',cfg.elevation),('distance',cfg.distance_cm)]:getattr(self,name).setValue(value)
         for spin,value in zip(self.target,cfg.target_cm):spin.setValue(value)
         self.geometry_lod.setCurrentText(cfg.geometry_lod)
+        self.clip_tracks.setChecked(cfg.clip_tracks)
         self.magnet.setChecked(cfg.magnet);self.cutaway.setChecked(cfg.cutaway);self.schematic.setChecked(cfg.schematic)
         self.auto_range.setChecked(cfg.scale_min is None)
         if cfg.scale_min is not None:self.minimum.setValue(cfg.scale_min)
         if cfg.scale_max is not None:self.maximum.setValue(cfg.scale_max)
         self.width.setValue(1920);self.height.setValue(max(64,round(1920/cfg.frame_aspect)))
         self.scene_overrides['camera_pose']=cfg.camera_pose
+        self.scene_overrides['geometry_openings']=cfg.geometry_openings
     def open_editor(self):
         if not self.catalogue or not self.model.selected:return
         try:cfg=self.settings();event=self.catalogue.event_path(min(self.model.selected))

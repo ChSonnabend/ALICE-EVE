@@ -45,7 +45,9 @@ def recipe(settings, event=None, *, default_input=None, default_event=None):
             if settings.scale_max is not None:hi=settings.scale_max
             scene['color_ranges'][kind]=[lo,hi]
     refs={}
-    for name in settings.geometry+(['L3'] if settings.magnet else []):
+    required=settings.geometry+(['L3'] if settings.magnet else [])
+    clipping=[d for d in settings.detectors if d in settings.geometry_assets and (not settings.geometry or d in settings.geometry)] if settings.clip_tracks and settings.mode!='clusters' else []
+    for name in dict.fromkeys(required+clipping):
         if settings.schematic:continue
         value=settings.geometry_assets.get(name)
         if not value or not Path(value).is_file():raise ValueError(f'{name}: provide geometry before exporting a portable scene')

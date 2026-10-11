@@ -32,17 +32,23 @@ def preflight(settings: RenderSettings, events, devices: dict, output: Path) -> 
     if not available:
         if settings.device:errors.append(f'Selected device {settings.device!r} is not available for {settings.backend}. Check devices and choose a current device ID.')
         else:errors.append(f'No usable {settings.backend} device found in this Blender build. Select CPU or install a compatible backend/driver.')
-    if not settings.detectors:errors.append('Select at least one detector with event data')
-    count=0;peak_points=0;peak_clusters=0
+    count=0;peak_points=0;peak_clusters=0;clip_assets=set()
     for event in events:
         count+=1
         tracks=[t for t in event['tracks'] if set(t['detectors'])&set(settings.detectors)]
         clusters=[c for c in event['clusters'] if c['detector'] in settings.detectors]
+        if settings.clip_tracks and settings.mode!='clusters' and event['kind']!='synthetic' and not settings.schematic:
+            from .track_clipping import selected_track_detectors
+            clip_assets.update(d for t in tracks for d in selected_track_detectors({'detectors':settings.detectors,'geometry':settings.geometry},t))
         peak_points=max(peak_points,sum(len(t['points']) for t in tracks));peak_clusters=max(peak_clusters,len(clusters))
         for name,mode,objects,active in [('tracks',settings.track_color_mode,tracks,settings.mode!='clusters'),('clusters',settings.cluster_color_mode,clusters,settings.mode!='tracks')]:
-            if active and mode not in capabilities(objects): errors.append(f'Event {event["id"]}: {mode} is unavailable for selected {name}')
-        if (settings.mode=='tracks' and not tracks) or (settings.mode=='clusters' and not clusters) or (settings.mode=='both' and not tracks and not clusters):
+            if active and settings.detectors and mode not in capabilities(objects): errors.append(f'Event {event["id"]}: {mode} is unavailable for selected {name}')
+        if settings.detectors and ((settings.mode=='tracks' and not tracks) or (settings.mode=='clusters' and not clusters) or (settings.mode=='both' and not tracks and not clusters)):
             errors.append(f'Event {event["id"]}: no selected objects for {settings.mode}')
+    for name in sorted(clip_assets):
+        asset=settings.geometry_assets.get(name,'')
+        if not asset or not Path(asset).is_file():errors.append(f'{name}: aligned geometry is required for track clipping. Provide its asset in Setup or explicitly disable Clip tracks to selected detectors.')
+        elif Path(asset).suffix.lower() not in ('.glb','.gltf','.obj','.blend'):errors.append(f'{name}: unsupported track-clipping geometry format')
     if not count:errors.append('Select at least one event')
     # Conservative scene-buffer estimate; geometry, Blender and driver allocations add overhead.
     estimated=peak_points*768+peak_clusters*1536+settings.width*settings.height*128

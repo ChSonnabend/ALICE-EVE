@@ -5,6 +5,7 @@ import bpy
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from mathutils import Vector
+BOUND_CACHE={}
 
 def probe(path):
     prefs=bpy.context.preferences.addons['cycles'].preferences
@@ -99,6 +100,22 @@ def angular_cut(mat,opening):
 def collection(name):
     coll=bpy.data.collections.new(name);bpy.context.scene.collection.children.link(coll);return coll
 
+def remove_owned_collection(coll):
+    """Release scene buffers during interactive redraws, including orphan node groups."""
+    objects=list(coll.objects)
+    data={o.data for o in objects if o.type in ('MESH','CURVE')}
+    groups={m.node_group for o in objects for m in o.modifiers if m.type=='NODES' and m.node_group}
+    for obj in objects:bpy.data.objects.remove(obj,do_unlink=True)
+    bpy.data.collections.remove(coll)
+    for group in groups:
+        if not group.users:bpy.data.node_groups.remove(group)
+    for block in data:
+        if not block.users:
+            if isinstance(block,bpy.types.Mesh):bpy.data.meshes.remove(block)
+            elif isinstance(block,bpy.types.Curve):bpy.data.curves.remove(block)
+    for mat in list(bpy.data.materials):
+        if not mat.users and mat.name.startswith(('Track ','Cluster ')):bpy.data.materials.remove(mat)
+
 def buckets(objects,mode,base,settings,kind):
     values=[value(o,mode) for o in objects] if mode!='solid' else []
     usable=[v for v in values if v is not None and math.isfinite(v)]
@@ -123,17 +140,29 @@ def buckets(objects,mode,base,settings,kind):
     return groups,{'mode':mode,'min':low,'max':high,'missing':missing,'palette':settings['palette']}
 
 def tracks(objects,settings):
+    from alice_renderer.track_clipping import prepare_regions,clip_polyline,selected_track_detectors
     coll=collection('Tracks')
     groups,legend=buckets(objects,settings['track_color_mode'],settings['colors']['tracks'],settings,'tracks')
+    regions=prepare_regions(settings.get('_track_regions',{}))
+    clipped=0;splines=0
     for key,group in groups.items():
         curve=bpy.data.curves.new('Tracks '+key,'CURVE');curve.dimensions='3D'
         curve.bevel_depth=settings['track_radius_cm']*.01;curve.bevel_resolution=2;curve.resolution_u=2
         curve.materials.append(materials('Track '+key,group['color'],emission=.7,settings=settings))
         for track in group['items']:
-            spline=curve.splines.new('POLY');spline.points.add(len(track['points'])-1)
-            coordinates=[c for p in track['points'] for c in (p[0]*.01,p[1]*.01,p[2]*.01,1.)]
-            spline.points.foreach_set('co',coordinates)
-        obj=bpy.data.objects.new('Tracks '+key,curve);coll.objects.link(obj)
+            if settings.get('clip_tracks',True):
+                names=selected_track_detectors(settings,track)
+                pieces=clip_polyline(track['points'],[regions[d] for d in names if d in regions],margin_cm=settings['track_radius_cm'])
+            else:pieces=[track['points']]
+            if not pieces:clipped+=1
+            for points in pieces:
+                spline=curve.splines.new('POLY');spline.points.add(len(points)-1)
+                coordinates=[c for p in points for c in (p[0]*.01,p[1]*.01,p[2]*.01,1.)]
+                spline.points.foreach_set('co',coordinates);splines+=1
+        if curve.splines:
+            obj=bpy.data.objects.new('Tracks '+key,curve);coll.objects.link(obj)
+        else:bpy.data.curves.remove(curve)
+    legend.update(clipped_away_tracks=clipped,visible_tracks=len(objects)-clipped,trajectory_pieces=splines)
     return legend
 
 def clusters(objects,settings):
@@ -183,7 +212,7 @@ def envelope(name,settings):
         objects,_=display_geometry([obj],obj.users_collection[0],name,style);obj=objects[0]
     obj.data.materials.append(materials(name, settings.get('colors_linear',{}).get(key,rgb(settings['colors'][key])),settings.get('geometry_opacities',{}).get(name,settings['geometry_opacity']),settings=settings))
 
-def imported_geometry(name,path,settings):
+def imported_geometry(name,path,settings,bounds_only=False):
     path=Path(path);before=set(bpy.data.objects)
     if path.suffix=='.blend':
         with bpy.data.libraries.load(str(path),link=False) as (source,target):target.objects=source.objects
@@ -213,6 +242,15 @@ def imported_geometry(name,path,settings):
     # while retaining their data for the visible instancer.
     for obj in objects:
         if obj.hide_render:obj.hide_set(True)
+    track_region=None
+    if settings.get('clip_tracks',True) and name in settings['detectors']:
+        from track_bounds import bounds
+        stat=path.stat();cache_key=(str(path.resolve()),stat.st_size,stat.st_mtime_ns,settings['geometry_units'])
+        if cache_key not in BOUND_CACHE:BOUND_CACHE[cache_key]=bounds(objects,name)
+        track_region=BOUND_CACHE[cache_key]
+    if bounds_only:
+        remove_owned_collection(coll)
+        return track_region
     lod={}
     style=settings.get('geometry_display',{}).get(name,'surfaces')
     coll['alice_display']=style;coll['alice_geometry_lod']=settings.get('geometry_lod','full')
@@ -280,7 +318,7 @@ def imported_geometry(name,path,settings):
             from mathutils import Matrix
             mesh=obj.data.copy();clip_mesh(mesh,obj.matrix_world)
             obj.data=mesh;obj.parent=None;obj.matrix_world=Matrix.Identity(4)
-    return {**lod,'meshes':len(meshes),'cutaway_crossing_instances':crossing_count,
+    return {**lod,'track_region':track_region,'meshes':len(meshes),'cutaway_crossing_instances':crossing_count,
             'cutaway_discarded_instances':discarded_count,
             'cutaway_method':'ALICE global Y>=0 mesh clipping' if physical_cut else 'shader wedge' if name in settings.get('geometry_openings',{}) else 'none'}
 
@@ -315,11 +353,32 @@ def render(job_path,interactive=False):
     ts=[t for t in event['tracks'] if selected.intersection(t['detectors'])]
     cs=[c for c in event['clusters'] if c['detector'] in selected]
     metadata={'event_id':event['id'],'kind':event['kind'],'source_warnings':event.get('warnings',[]),'rendered_tracks':0,'rendered_clusters':0,'geometry':{},'coordinates':'ALICE global XYZ, converted from centimetres to metres'}
-    if interactive or settings['mode']!='clusters':metadata['track_legend']=tracks(ts,settings);metadata['rendered_tracks']=len(ts)
-    if interactive or settings['mode']!='tracks':metadata['cluster_legend']=clusters(cs,settings);metadata['rendered_clusters']=len(cs)
+    regions={}
+    from alice_renderer.track_clipping import selected_track_detectors
+    required={d for t in ts for d in selected_track_detectors(settings,t)} if settings.get('clip_tracks',True) and settings['mode']!='clusters' else set()
     for name in settings['geometry']+(['L3'] if settings['magnet'] else []):
-        if settings['schematic']:envelope(name,settings);metadata['geometry'][name]={'type':'schematic'}
-        else:metadata['geometry'][name]={'type':'asset','path':settings['geometry_assets'][name],**imported_geometry(name,settings['geometry_assets'][name],settings)}
+        if settings['schematic']:
+            envelope(name,settings);metadata['geometry'][name]={'type':'schematic'}
+        else:
+            info=imported_geometry(name,settings['geometry_assets'][name],settings)
+            region=info.pop('track_region',None)
+            if region:regions[name]=region
+            metadata['geometry'][name]={'type':'asset','path':settings['geometry_assets'][name],**info}
+    for name in required-set(regions):
+        asset=settings['geometry_assets'].get(name)
+        if asset and not settings['schematic']:regions[name]=imported_geometry(name,asset,settings,bounds_only=True)
+        elif settings['schematic'] or event['kind']=='synthetic':
+            # Explicitly approximate demo/envelope bounds; real data never falls back to them.
+            inner,outer,length=ENVELOPES[name];z=ZPOSITIONS.get(name,0.)
+            from track_bounds import DIRECTIONS
+            planes=[[*n,outer if i<64 else z+length/2 if i==64 else -z+length/2] for i,n in enumerate(DIRECTIONS.tolist())]
+            regions[name]={'planes':planes,'units':'cm','basis':'explicit schematic/demo outer envelope'}
+        else:raise ValueError(name+': aligned geometry is required to clip tracks to the selected detector')
+    settings['_track_regions']=regions
+    metadata['track_clipping']={'enabled':settings.get('clip_tracks',True),'regions':regions,'basis':'selected source detectors; outer extent mask, not active-volume selection'}
+    if settings['mode']!='clusters':
+        metadata['track_legend']=tracks(ts,settings);metadata['rendered_tracks']=metadata['track_legend']['visible_tracks']
+    if interactive or settings['mode']!='tracks':metadata['cluster_legend']=clusters(cs,settings);metadata['rendered_clusters']=len(cs)
     az,el=map(math.radians,(settings['azimuth'],settings['elevation']))
     target=Vector([v*.01 for v in settings['target_cm']]);distance=settings['distance_cm']*.01
     position=target+Vector((distance*math.cos(el)*math.cos(az),distance*math.cos(el)*math.sin(az),distance*math.sin(el)))
@@ -345,11 +404,13 @@ def render(job_path,interactive=False):
         lamp.data.energy=light['energy'];lamp.data.shape='DISK';lamp.data.size=light['size_m'];lamp.data.color=light.get('color_linear',rgb(light['color']))
         lamp.rotation_euler=light.get('rotation') or (target-lamp.location).to_track_quat('-Z','Y').to_euler()
     scene.view_settings.view_transform='AgX'
-    metadata['settings']=settings;metadata['source']=job['event'];metadata['blender_version']=bpy.app.version_string
+    metadata['settings']={k:v for k,v in settings.items() if not k.startswith('_')};metadata['source']=job['event'];metadata['blender_version']=bpy.app.version_string
     (output/'metadata.json').write_text(json.dumps(metadata,indent=2))
     if interactive:
         from editor import start_editor
         settings.pop('_interactive',None)
+        settings.pop('_track_regions',None)
+        job['track_regions']=regions
         start_editor(job,event,metadata)
         return
     if settings['save_blend']:bpy.ops.wm.save_as_mainfile(filepath=str(output/'scene.blend'))

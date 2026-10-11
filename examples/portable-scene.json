@@ -5,6 +5,7 @@
     "azimuth": -55.0,
     "camera": "perspective",
     "camera_pose": {},
+    "clip_tracks": true,
     "cluster_color_mode": "solid",
     "cluster_radius_cm": 0.35,
     "color_ranges": {},
@@ -30,7 +31,7 @@
       "tracks": "#ee8ff5"
     },
     "colors_linear": {},
-    "cutaway": true,
+    "cutaway": false,
     "detectors": [
       "ITS",
       "TPC"

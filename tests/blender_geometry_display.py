@@ -22,7 +22,12 @@ with tempfile.TemporaryDirectory(prefix='alice-geometry-qa-') as tmp:
     assert any('num_instances' in o for o in bpy.data.collections['TPC'].objects)
     assert all(o.hide_get() for o in bpy.data.collections['TPC'].objects if o.hide_render)
     assert all(m.surface_render_method=='BLENDED' for o in bpy.data.collections['TPC'].objects if o.type=='MESH' for m in o.data.materials)
+    ui.track_width_cm=.5
+    assert all(abs(o.data.bevel_depth-.0025)<1.e-8 for o in bpy.data.collections['Tracks'].objects)
     assert bpy.ops.alice_eve.apply_data()=={'FINISHED'}
+    curve_count=len(bpy.data.curves)
+    for _ in range(3):assert bpy.ops.alice_eve.apply_data()=={'FINISHED'}
+    assert len(bpy.data.curves)==curve_count
     for style,kind in [('outline','CURVE'),('shell','MESH')]:
         item.display=style;assert bpy.ops.alice_eve.apply_geometry()=={'FINISHED'}
         assert any(o.type==kind for o in bpy.data.collections['TPC'].objects)
@@ -32,4 +37,17 @@ with tempfile.TemporaryDirectory(prefix='alice-geometry-qa-') as tmp:
     assert bpy.ops.alice_eve.full_geometry()=={'FINISHED'}
     assert ui.geometry_lod=='full' and item.display=='surfaces'
     assert all(o.hide_get() for o in bpy.data.collections['TPC'].objects if o.hide_render)
+    assert bpy.ops.alice_eve.complete_geometry()=={'FINISHED'}
+    assert item.opening==0
+    for o in bpy.data.collections['TPC'].objects:
+        if o.type=='MESH':
+            for material in o.data.materials:
+                node=material.node_tree.nodes.get('ALICE opening')
+                if node:assert node.inputs[1].default_value==0
+    assert bpy.ops.alice_eve.select_no_detectors()=={'FINISHED'}
+    assert not any(i.data or i.visible for i in ui.detectors)
+    assert not bpy.data.collections['Tracks'].objects
+    ui.export_path=str(root/'none.json');assert bpy.ops.alice_eve.export()=={'FINISHED'}
+    data=json.loads(Path(ui.export_path).read_text());assert data['scene']['detectors']==[] and data['scene']['geometry']==[]
+    assert data['scene']['track_radius_cm']==.25
 print('Blender geometry visibility, styles, opacity, data and export QA passed')

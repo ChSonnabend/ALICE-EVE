@@ -1,5 +1,5 @@
 """Blender sidebar for interactive ALICE-EVE scene editing and portable export."""
-import copy, json, math, subprocess
+import copy, json, math, subprocess, time
 from pathlib import Path
 import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, StringProperty
@@ -38,6 +38,7 @@ def current_settings():
     cfg['colors']['background']=hex_color(ui.background)
     cfg['colors']['tracks']=hex_color(ui.track_color);cfg['colors']['clusters']=hex_color(ui.cluster_color)
     cfg['colors_linear'].update(background=list(ui.background),tracks=list(ui.track_color),clusters=list(ui.cluster_color))
+    cfg['track_radius_cm']=ui.track_width_cm/2;cfg['clip_tracks']=ui.clip_tracks
     cfg['geometry_lod']=ui.geometry_lod
     cfg['world_strength']=ui.world_strength;cfg['roughness']=ui.roughness;cfg['metallic']=ui.metallic;cfg['shading']=ui.shading
     cfg['mode']=ui.mode;cfg['track_color_mode']=ui.track_mode;cfg['cluster_color_mode']=ui.cluster_mode;cfg['palette']=ui.palette
@@ -46,9 +47,31 @@ def current_settings():
     cfg['lights']=[{'position_m':list(o.location),'rotation':list(o.rotation_euler),'energy':o.data.energy,'size_m':o.data.size,'color':hex_color(o.data.color),'color_linear':list(o.data.color)} for o in scene.objects if o.type=='LIGHT' and o.data.type=='AREA']
     return RenderSettings(**cfg).validate()
 
+def track_signature(ui):
+    return (tuple(i.name for i in ui.detectors if i.data and i.data_available),tuple(i.name for i in ui.detectors if i.visible and i.geometry_available and i.name!='L3'),ui.track_width_cm,ui.clip_tracks,ui.mode)
+
+def selection_update(self,context):
+    if not JOB or not hasattr(context.scene,'alice_eve'):return
+    ui=context.scene.alice_eve
+    if JOB.get('applied_track_signature')==track_signature(ui):return
+    JOB['track_update_time']=time.monotonic()
+    if JOB.get('track_update_pending'):return
+    JOB['track_update_pending']=True
+    def update():
+        if time.monotonic()-JOB['track_update_time']<.2:return .2
+        JOB['track_update_pending']=False
+        if JOB.get('applied_track_signature')!=track_signature(bpy.context.scene.alice_eve):bpy.ops.alice_eve.apply_data()
+        return None
+    bpy.app.timers.register(update,first_interval=.2)
+
 def appearance_update(self,context):
     if not JOB or not hasattr(context.scene,'alice_eve'):return
     ui=context.scene.alice_eve
+    selection_update(self,context)
+    coll=bpy.data.collections.get('Tracks')
+    if coll:
+        for obj in coll.objects:
+            if obj.type=='CURVE':obj.data.bevel_depth=ui.track_width_cm*.005
     world=context.scene.world.node_tree.nodes['Background'];world.inputs[0].default_value=(*ui.background,1);world.inputs[1].default_value=ui.world_strength
     for mat in bpy.data.materials:
         if not mat.use_nodes:continue
@@ -85,9 +108,9 @@ def appearance_update(self,context):
 class DetectorSettings(bpy.types.PropertyGroup):
     data_available: BoolProperty(default=False)
     geometry_available: BoolProperty(default=False)
-    data: BoolProperty(name='Event data',default=True)
+    data: BoolProperty(name='Event data',default=True,update=selection_update)
     visible: BoolProperty(name='Surface',default=True,update=appearance_update)
-    opening: FloatProperty(name='Opening (degrees)',min=0,max=360,default=180,update=appearance_update)
+    opening: FloatProperty(name='Opening (degrees)',min=0,max=360,default=0,update=appearance_update)
     opacity: FloatProperty(name='Opacity',min=0,max=1,default=.18,update=appearance_update)
     display: EnumProperty(name='Appearance',items=[('surfaces','Existing surfaces','Keep the current aligned surfaces or simplified cells'),('shell','Outer shell','Approximate outer hull; removes internal structures and openings'),('outline','Outline','Edges of the approximate outer hull')])
     color: FloatVectorProperty(name='Colour',subtype='COLOR',size=3,min=0,max=1,default=(.02,.04,.2),update=appearance_update)
@@ -97,6 +120,8 @@ class SceneSettings(bpy.types.PropertyGroup):
     detectors: CollectionProperty(type=DetectorSettings)
     geometry_lod: EnumProperty(name='Geometry detail',items=[('full','Full aligned surfaces','Preserve the actual detector geometry'),('simplified','Coarse cells','Reduce complexity; approximate bounding cells')])
     mode: EnumProperty(name='Objects',items=[(v,v,'') for v in ('tracks','clusters','both')],update=appearance_update)
+    track_width_cm: FloatProperty(name='Track linewidth (cm)',min=.002,max=20,default=.24,precision=3,update=appearance_update)
+    clip_tracks: BoolProperty(name='Clip tracks to selected detectors',default=True,update=selection_update)
     track_mode: EnumProperty(name='Track coding',items=COLOR_ITEMS)
     cluster_mode: EnumProperty(name='Cluster coding',items=COLOR_ITEMS)
     palette: EnumProperty(name='Palette',items=[(v,v,'') for v in ('viridis','coolwarm','hsv')])
@@ -116,17 +141,29 @@ class ApplyData(bpy.types.Operator):
     bl_idname='alice_eve.apply_data';bl_label='Apply data selection / colour coding'
     def execute(self,context):
         try:
-            from worker import tracks,clusters
+            from worker import tracks,clusters,remove_owned_collection
             cfg=current_settings().to_dict();selected=set(cfg['detectors'])
+            cfg['_track_regions']=JOB.get('track_regions',{})
+            from alice_renderer.track_clipping import selected_track_detectors
+            missing={d for t in EVENT['tracks'] for d in selected_track_detectors(cfg,t) if d not in cfg['_track_regions']} if cfg['clip_tracks'] and cfg['mode']!='clusters' else set()
+            if missing:
+                from worker import imported_geometry
+                for name in missing:
+                    asset=cfg['geometry_assets'].get(name)
+                    if not asset:raise ValueError(name+': provide its aligned geometry before selecting clipped tracks')
+                    cfg['_track_regions'][name]=imported_geometry(name,asset,cfg,bounds_only=True)
+                JOB['track_regions']=cfg['_track_regions']
             ts=[t for t in EVENT['tracks'] if selected.intersection(t['detectors'])];cs=[c for c in EVENT['clusters'] if c['detector'] in selected]
-            for kind,mode,objects in [('tracks',cfg['track_color_mode'],ts),('clusters',cfg['cluster_color_mode'],cs)]:
-                if mode not in capabilities(objects):raise ValueError(f'{mode} is unavailable for {kind} in selected data')
+            for kind,mode,objects,active in [('tracks',cfg['track_color_mode'],ts,cfg['mode']!='clusters'),('clusters',cfg['cluster_color_mode'],cs,cfg['mode']!='tracks')]:
+                if active and selected and mode not in capabilities(objects):raise ValueError(f'{mode} is unavailable for {kind} in selected data')
             for name in ('Tracks','Clusters'):
                 old=bpy.data.collections.get(name)
-                if old:
-                    for obj in list(old.objects):bpy.data.objects.remove(obj,do_unlink=True)
-                    bpy.data.collections.remove(old)
-            tracks(ts,cfg);clusters(cs,cfg);appearance_update(self,context)
+                if old:remove_owned_collection(old)
+            if cfg['mode']!='clusters':tracks(ts,cfg)
+            else:
+                from worker import collection
+                collection('Tracks')
+            clusters(cs,cfg);JOB['applied_track_signature']=track_signature(context.scene.alice_eve);appearance_update(self,context)
             self.report({'INFO'},'Data selection and fixed colour ranges applied')
             return {'FINISHED'}
         except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
@@ -135,21 +172,31 @@ class ApplyGeometry(bpy.types.Operator):
     bl_idname='alice_eve.apply_geometry';bl_label='Apply geometry appearance'
     def execute(self,context):
         try:
-            from worker import imported_geometry,envelope
+            from worker import imported_geometry,envelope,remove_owned_collection
             cfg=current_settings().to_dict();cfg['_interactive']=True
             for item in context.scene.alice_eve.detectors:
                 if not item.geometry_available:continue
                 old=bpy.data.collections.get(item.name)
                 if old and old.get('alice_display')==item.display and old.get('alice_geometry_lod')==cfg['geometry_lod']:continue
-                if old:
-                    for obj in list(old.objects):bpy.data.objects.remove(obj,do_unlink=True)
-                    bpy.data.collections.remove(old)
+                if old:remove_owned_collection(old)
                 if cfg['schematic']:envelope(item.name,cfg)
                 else:imported_geometry(item.name,cfg['geometry_assets'][item.name],cfg)
             appearance_update(self,context)
             self.report({'INFO'},'Geometry appearance applied; shell/outline are approximate outer hulls')
             return {'FINISHED'}
         except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
+
+class SelectNoDetectors(bpy.types.Operator):
+    bl_idname='alice_eve.select_no_detectors';bl_label='Select no detectors'
+    def execute(self,context):
+        for item in context.scene.alice_eve.detectors:item.data=False;item.visible=False
+        return bpy.ops.alice_eve.apply_data()
+
+class CompleteGeometry(bpy.types.Operator):
+    bl_idname='alice_eve.complete_geometry';bl_label='Show complete detectors'
+    def execute(self,context):
+        for item in context.scene.alice_eve.detectors:item.opening=0
+        return {'FINISHED'}
 
 class FullAlignedGeometry(bpy.types.Operator):
     bl_idname='alice_eve.full_geometry';bl_label='Full aligned surfaces'
@@ -178,7 +225,8 @@ class ExportConfig(bpy.types.Operator):
             selected=set(cfg.detectors)
             for kind,mode,active in [('tracks',cfg.track_color_mode,cfg.mode!='clusters'),('clusters',cfg.cluster_color_mode,cfg.mode!='tracks')]:
                 objects=[o for o in EVENT[kind] if selected.intersection(o['detectors'])] if kind=='tracks' else [o for o in EVENT[kind] if o['detector'] in selected]
-                if active and mode not in capabilities(objects):raise ValueError(f'{mode} is unavailable for selected {kind}')
+                if active and selected and mode not in capabilities(objects):raise ValueError(f'{mode} is unavailable for selected {kind}')
+            if bpy.ops.alice_eve.apply_data()!={'FINISHED'}:return {'CANCELLED'}
             if bpy.ops.alice_eve.apply_geometry()!={'FINISHED'}:return {'CANCELLED'}
             data=recipe(cfg)
             if ui.include_defaults:data['defaults']={'input':JOB['event'],'event':str(EVENT['id'])}
@@ -224,11 +272,12 @@ class EVEPanel(bpy.types.Panel):
         layout=self.layout;ui=context.scene.alice_eve
         layout.label(text='Aligned detector geometry')
         layout.prop(ui,'geometry_lod');layout.operator('alice_eve.full_geometry')
+        layout.operator('alice_eve.select_no_detectors');layout.operator('alice_eve.complete_geometry')
         layout.label(text='Outer shell / outline are approximate hulls.')
         layout.label(text='Orbit/pan/zoom, then use view as camera.')
         layout.operator('alice_eve.camera_from_view');layout.prop(context.scene.camera.data,'type');layout.prop(context.scene.camera.data,'lens');layout.prop(context.scene.camera.data,'ortho_scale')
         layout.operator('alice_eve.opaque_geometry');layout.operator('alice_eve.apply_geometry')
-        layout.prop(ui,'mode');layout.prop(ui,'track_color');layout.prop(ui,'cluster_color')
+        layout.prop(ui,'mode');layout.prop(ui,'track_width_cm');layout.prop(ui,'clip_tracks');layout.prop(ui,'track_color');layout.prop(ui,'cluster_color')
         for kind in ('track','cluster'):
             box=layout.box();box.prop(ui,kind+'_mode');row=box.row();row.prop(ui,kind+'_min');row.prop(ui,kind+'_max')
         layout.prop(ui,'palette');layout.operator('alice_eve.apply_data')
@@ -244,7 +293,7 @@ class EVEPanel(bpy.types.Panel):
         layout.prop(ui,'export_path');layout.prop(ui,'include_defaults')
         row=layout.row();row.operator('alice_eve.export');row.operator('alice_eve.render_full')
 
-CLASSES=(DetectorSettings,SceneSettings,ApplyData,ApplyGeometry,FullAlignedGeometry,OpaqueGeometry,CameraFromView,ExportConfig,RenderFull,EVEPanel)
+CLASSES=(DetectorSettings,SceneSettings,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,CameraFromView,ExportConfig,RenderFull,EVEPanel)
 
 def start_editor(job,event,metadata):
     global JOB,EVENT,DEVICES,RECOMMENDATION
@@ -254,6 +303,7 @@ def start_editor(job,event,metadata):
     scene=bpy.context.scene;ui=scene.alice_eve;settings=job['settings']
     # Suppress updates during property initialization.
     from worker import rgb
+    ui.track_width_cm=settings['track_radius_cm']*2;ui.clip_tracks=settings.get('clip_tracks',True)
     ui.geometry_lod=settings.get('geometry_lod','full')
     ui.mode=settings['mode'];ui.track_mode=settings['track_color_mode'];ui.cluster_mode=settings['cluster_color_mode'];ui.palette=settings['palette']
     ui.background=settings.get('colors_linear',{}).get('background',rgb(settings['colors']['background']));ui.track_color=settings.get('colors_linear',{}).get('tracks',rgb(settings['colors']['tracks']));ui.cluster_color=settings.get('colors_linear',{}).get('clusters',rgb(settings['colors']['clusters']))
@@ -267,7 +317,7 @@ def start_editor(job,event,metadata):
     locked=recipe(RenderSettings(**settings),event)['scene']['color_ranges']
     ui.track_min,ui.track_max=locked['tracks'];ui.cluster_min,ui.cluster_max=locked['clusters']
     ui.export_path=str(Path(job['output'])/'scene-config.json')
-    JOB=job;appearance_update(ui,bpy.context)
+    JOB=job;JOB['applied_track_signature']=track_signature(ui);appearance_update(ui,bpy.context)
     scene.render.engine='BLENDER_EEVEE';scene.render.resolution_percentage=100
     for screen in bpy.data.screens:
         for area in screen.areas:

@@ -108,7 +108,7 @@ class RenderSettings:
     geometry_assets: dict[str,str] = field(default_factory=dict)
     geometry_units: str = 'cm'
     geometry_opacity: float = 0.18
-    cutaway: bool = True
+    cutaway: bool = False
     schematic: bool = False
     width: int = 1920
     height: int = 1080
@@ -118,6 +118,7 @@ class RenderSettings:
     device: str = ''
     threads: int = 0
     track_radius_cm: float = 0.12
+    clip_tracks: bool = True
     cluster_radius_cm: float = 0.35
     camera: str = 'perspective'
     azimuth: float = -55.0
@@ -144,6 +145,7 @@ class RenderSettings:
         {'position_m':[0.,0.,-10.], 'energy':1000., 'size_m':8., 'color':'#ffffff'}])
 
     def validate(self):
+        if not isinstance(self.clip_tracks,bool):raise ValueError('Track clipping must be a boolean')
         if self.mode not in ('tracks','clusters','both'): raise ValueError('Invalid rendering mode')
         for v in self.detectors+self.geometry: detector(v)
         if self.backend not in ('CPU','METAL','HIP','CUDA','OPTIX'): raise ValueError('Invalid Cycles backend')
