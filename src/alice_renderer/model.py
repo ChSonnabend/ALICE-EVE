@@ -149,6 +149,7 @@ class RenderSettings:
     colors_linear: dict = field(default_factory=dict)
     geometry_lod: str = 'full'
     geometry_lods: dict = field(default_factory=dict)
+    geometry_schematics: dict = field(default_factory=dict)
     geometry_display: dict = field(default_factory=dict)
     geometry_openings: dict = field(default_factory=dict)
     geometry_opacities: dict = field(default_factory=dict)
@@ -201,6 +202,9 @@ class RenderSettings:
         for name,lod in self.geometry_lods.items():
             if name!='L3':detector(name)
             if lod not in ('full','simplified'):raise ValueError('Invalid per-detector geometry detail')
+        for name,approximate in self.geometry_schematics.items():
+            if name!='L3':detector(name)
+            if not isinstance(approximate,bool):raise ValueError('Per-detector schematic choice must be boolean')
         if self.shading not in ('smooth','flat'):raise ValueError('Invalid shading')
         for key in ('roughness','metallic'):
             if not math.isfinite(getattr(self,key)) or not 0<=getattr(self,key)<=1:raise ValueError('Invalid '+key)
@@ -222,6 +226,11 @@ class RenderSettings:
             if len(matrix)!=4 or any(len(row)!=4 or any(not math.isfinite(v) for v in row) for row in matrix):raise ValueError('Invalid camera matrix')
             for key in ('lens','ortho_scale'):
                 if not math.isfinite(self.camera_pose.get(key,0)) or self.camera_pose.get(key,0)<=0:raise ValueError('Invalid camera '+key)
+            for key in ('sensor_width','sensor_height','clip_start','clip_end'):
+                if key in self.camera_pose and (not math.isfinite(self.camera_pose[key]) or self.camera_pose[key]<=0):raise ValueError('Invalid camera '+key)
+            for key in ('shift_x','shift_y'):
+                if key in self.camera_pose and not math.isfinite(self.camera_pose[key]):raise ValueError('Invalid camera '+key)
+            if self.camera_pose.get('sensor_fit','HORIZONTAL') not in ('AUTO','HORIZONTAL','VERTICAL'):raise ValueError('Invalid camera sensor fit')
         for color in self.colors_linear.values():
             if len(color)!=3 or any(not math.isfinite(v) or not 0<=v<=1 for v in color):raise ValueError('Invalid linear colour')
         if not self.lights:raise ValueError('Add at least one light')

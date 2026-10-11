@@ -7,6 +7,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parent))
 from mathutils import Vector
 from alice_renderer.object_selection import annotate_matching,selected_tracks,selected_clusters,enabled_detectors,highlighted,event_counts
 from alice_renderer.model import color_value
+from alice_renderer.geometry_selection import is_schematic
 BOUND_CACHE={}
 
 def probe(path):
@@ -209,7 +210,8 @@ def envelope(name,settings):
         faces += [(i,i+1,n+i+1,n+i),(2*n+i,3*n+i,3*n+i+1,2*n+i+1),(i,2*n+i,2*n+i+1,i+1),(n+i,n+i+1,3*n+i+1,3*n+i)]
     for i in (0,segments):faces.append((i,n+i,3*n+i,2*n+i))
     mesh=bpy.data.meshes.new(name+' schematic');mesh.from_pydata(vertices,[],faces);mesh.update()
-    obj=bpy.data.objects.new(name+' — schematic envelope',mesh);collection(name).objects.link(obj)
+    coll=collection(name);coll['alice_schematic']=True;coll['alice_display']=settings.get('geometry_display',{}).get(name,'surfaces');coll['alice_geometry_lod']=settings.get('geometry_lods',{}).get(name,settings.get('geometry_lod','full'))
+    obj=bpy.data.objects.new(name+' — schematic envelope',mesh);coll.objects.link(obj)
     key='magnet' if name=='L3' else name
     style=settings.get('geometry_display',{}).get(name,'surfaces')
     if style!='surfaces':
@@ -219,9 +221,10 @@ def envelope(name,settings):
 
 def imported_geometry(name,path,settings,bounds_only=False):
     path=Path(path);before=set(bpy.data.objects)
+    collection_name=name+' — clipping bounds' if bounds_only else name
     if path.suffix=='.blend':
         with bpy.data.libraries.load(str(path),link=False) as (source,target):target.objects=source.objects
-        coll=collection(name)
+        coll=collection(collection_name)
         for obj in target.objects:
             if obj:coll.objects.link(obj)
         objects=[o for o in target.objects if o]
@@ -230,7 +233,7 @@ def imported_geometry(name,path,settings,bounds_only=False):
         elif path.suffix=='.obj':bpy.ops.wm.obj_import(filepath=str(path))
         else:raise ValueError('Unsupported geometry asset')
         objects=list(set(bpy.data.objects)-before)
-        coll=collection(name)
+        coll=collection(collection_name)
         for obj in objects:
             for old in list(obj.users_collection):old.objects.unlink(obj)
             coll.objects.link(obj)
@@ -259,7 +262,7 @@ def imported_geometry(name,path,settings,bounds_only=False):
     lod={}
     detail=settings.get('geometry_lods',{}).get(name,settings.get('geometry_lod','full'))
     style=settings.get('geometry_display',{}).get(name,'surfaces')
-    coll['alice_display']=style;coll['alice_geometry_lod']=detail
+    coll['alice_display']=style;coll['alice_geometry_lod']=detail;coll['alice_schematic']=False
     if style=='outline' and settings['cutaway'] and name not in settings.get('geometry_openings',{}):
         settings=dict(settings,geometry_openings={**settings.get('geometry_openings',{}),name:180})
     if detail=='simplified' or style!='surfaces':
@@ -324,9 +327,15 @@ def imported_geometry(name,path,settings,bounds_only=False):
             from mathutils import Matrix
             mesh=obj.data.copy();clip_mesh(mesh,obj.matrix_world)
             obj.data=mesh;obj.parent=None;obj.matrix_world=Matrix.Identity(4)
-    return {**lod,'track_region':track_region,'meshes':len(meshes),'cutaway_crossing_instances':crossing_count,
+    return {'lod':detail,'requested_detail':detail,'display':style,**lod,'track_region':track_region,'meshes':len(meshes),'cutaway_crossing_instances':crossing_count,
             'cutaway_discarded_instances':discarded_count,
             'cutaway_method':'ALICE global Y>=0 mesh clipping' if physical_cut else 'shader wedge' if name in settings.get('geometry_openings',{}) else 'none'}
+
+def schematic_region(name):
+    inner,outer,length=ENVELOPES[name];z=ZPOSITIONS.get(name,0.)
+    from track_bounds import DIRECTIONS
+    planes=[[*n,outer if i<64 else z+length/2 if i==64 else -z+length/2] for i,n in enumerate(DIRECTIONS.tolist())]
+    return {'planes':planes,'units':'cm','basis':'explicit schematic/demo outer envelope'}
 
 def render(job_path,interactive=False):
     job=json.loads(Path(job_path).read_text());settings=job['settings'];output=Path(job['output'])
@@ -364,7 +373,7 @@ def render(job_path,interactive=False):
     from alice_renderer.track_clipping import selected_track_detectors
     required={d for t in ts for d in selected_track_detectors(settings,t)} if settings.get('clip_tracks',True) and bool(enabled_detectors(settings,'tracks')) else set()
     for name in settings['geometry']+(['L3'] if settings['magnet'] else []):
-        if settings['schematic']:
+        if is_schematic(settings,name):
             envelope(name,settings);metadata['geometry'][name]={'type':'schematic'}
         else:
             info=imported_geometry(name,settings['geometry_assets'][name],settings)
@@ -373,13 +382,10 @@ def render(job_path,interactive=False):
             metadata['geometry'][name]={'type':'asset','path':settings['geometry_assets'][name],**info}
     for name in required-set(regions):
         asset=settings['geometry_assets'].get(name)
-        if asset and not settings['schematic']:regions[name]=imported_geometry(name,asset,settings,bounds_only=True)
-        elif settings['schematic'] or event['kind']=='synthetic':
+        if asset and not is_schematic(settings,name):regions[name]=imported_geometry(name,asset,settings,bounds_only=True)
+        elif is_schematic(settings,name) or event['kind']=='synthetic':
             # Explicitly approximate demo/envelope bounds; real data never falls back to them.
-            inner,outer,length=ENVELOPES[name];z=ZPOSITIONS.get(name,0.)
-            from track_bounds import DIRECTIONS
-            planes=[[*n,outer if i<64 else z+length/2 if i==64 else -z+length/2] for i,n in enumerate(DIRECTIONS.tolist())]
-            regions[name]={'planes':planes,'units':'cm','basis':'explicit schematic/demo outer envelope'}
+            regions[name]=schematic_region(name)
         else:raise ValueError(name+': aligned geometry is required to clip tracks to the selected detector')
     settings['_track_regions']=regions
     metadata['track_clipping']={'enabled':settings.get('clip_tracks',True),'regions':regions,'basis':'selected source detectors; outer extent mask, not active-volume selection'}
@@ -400,12 +406,14 @@ def render(job_path,interactive=False):
     camera.rotation_euler.rotate_axis('Z',math.radians(settings.get('roll',0.)))
     camera.data.lens=48;camera.data.clip_end=2000
     if settings['camera']=='orthographic':camera.data.type='ORTHO';camera.data.ortho_scale=distance*.65
-    if settings.get('camera_pose'):
-        pose=settings['camera_pose'];camera.matrix_world=Matrix(pose['matrix_world'])
-        camera.data.type='ORTHO' if settings['camera']=='orthographic' else 'PERSP'
-        camera.data.lens=pose['lens'];camera.data.ortho_scale=pose['ortho_scale']
     camera.data.sensor_fit='HORIZONTAL'
+    if settings.get('camera_pose'):
+        from camera_pose import restore
+        camera.data.type='ORTHO' if settings['camera']=='orthographic' else 'PERSP'
+        restore(camera,settings['camera_pose'])
     metadata['camera_up']=list(camera.rotation_euler.to_matrix() @ Vector((0,1,0)))
+    from camera_pose import snapshot
+    metadata['camera']=snapshot(camera)
     scene.camera=camera
     for i,light in enumerate(settings['lights']):
         bpy.ops.object.light_add(type='AREA',location=light['position_m']);lamp=bpy.context.object;lamp.name='ALICE light '+str(i+1)

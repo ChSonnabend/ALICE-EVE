@@ -51,7 +51,8 @@ def recipe(settings, event=None, *, default_input=None, default_event=None):
     from .object_selection import enabled_detectors
     clipping=[d for d in enabled_detectors(values,'tracks') if d in settings.geometry_assets and (not settings.geometry or d in settings.geometry)] if settings.clip_tracks else []
     for name in dict.fromkeys(required+clipping):
-        if settings.schematic:continue
+        from .geometry_selection import is_schematic
+        if is_schematic(values,name):continue
         value=settings.geometry_assets.get(name)
         if not value or not Path(value).is_file():raise ValueError(f'{name}: provide geometry before exporting a portable scene')
         refs[name]={'file':Path(value).name,'sha256':sha256(value)}
@@ -93,13 +94,20 @@ def resolve_settings(data,config_path,geometry_root=None,asset_overrides=None):
         if not path.is_file():raise ValueError(f'{name}: geometry {ref["file"]} missing. Copy the geometry bundle or supply --geometry-root.')
         if sha256(path)!=ref['sha256']:raise ValueError(f'{name}: geometry hash differs from exported scene; use the identical alignment/surfaces bundle')
         assets[name]=str(path.resolve())
+    # A schematic recipe has no required assets. Keep explicitly supplied local
+    # assets available when it is reopened and upgraded to aligned rendering.
+    from .model import detector
+    for name,value in overrides.items():
+        if name!='L3':detector(name)
+        if name not in assets:assets[name]=str(Path(value).resolve())
     scene=dict(data['scene'])
     # Older recipes used azimuth around Z. Keep their exact framing when loaded.
     if 'camera_orbit_axis' not in scene:
         scene['camera_orbit_axis']='Z';scene.setdefault('elevation',22.)
     cfg=RenderSettings(**scene,geometry_assets=assets)
     required=cfg.geometry+(['L3'] if cfg.magnet else [])
-    if not cfg.schematic and any(name not in assets for name in required):raise ValueError('Scene is missing selected geometry references')
+    from .geometry_selection import is_schematic
+    if any(name not in data.get('geometry',{}) and not is_schematic(cfg.to_dict(),name) for name in required):raise ValueError('Scene is missing selected geometry references')
     return cfg.validate()
 
 def choose_event(cat,selector):

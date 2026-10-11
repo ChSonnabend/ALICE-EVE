@@ -69,8 +69,13 @@ with tempfile.TemporaryDirectory(prefix='alice-controls-qa-') as tmp:
         ui.detectors[name].geometry_available=True;ui.detectors[name].visible=True
     operator=SimpleNamespace(geometry_details=bpy.context.scene.alice_render_detail_qa,quality='draft',backend='CPU',output=str(root/'render-output'),report=lambda *args:None)
     editor.initialize_render_geometry(operator,editor.current_settings())
-    assert {i.name:i.detail for i in operator.geometry_details}=={'TPC':'full','L3':'full'}
+    assert {i.name:i.detail for i in operator.geometry_details}=={'TPC':'current','L3':'current'}
     operator.geometry_details['TPC'].detail='simplified'
+    operator.geometry_details['L3'].detail='full'
+    # Config/launch contract fixtures; actual aligned assets are covered separately.
+    for name in ('TPC','L3'):
+        asset=root/(name+'.blend');asset.write_bytes(b'config-contract-only')
+        editor.JOB['settings']['geometry_assets'][name]=str(asset)
     editor.JOB['python']=sys.executable
     original=editor.current_settings().geometry_lods
     with patch.object(editor.subprocess,'Popen') as spawn:
@@ -79,6 +84,8 @@ with tempfile.TemporaryDirectory(prefix='alice-controls-qa-') as tmp:
         command=spawn.call_args.args[0]
         rendered=json.loads(Path(command[command.index('render-config')+1]).read_text())['scene']
     assert rendered['geometry_lods']=={'TPC':'simplified','L3':'full'}
+    assert rendered['geometry_schematics']=={'TPC':False,'L3':False}
+    assert rendered['geometry_display']['TPC']=='surfaces'
     assert editor.current_settings().geometry_lods==original
     del bpy.types.Scene.alice_render_detail_qa
     assert ui.detectors['ITS'].event_track_count==2
@@ -102,4 +109,32 @@ with tempfile.TemporaryDirectory(prefix='alice-controls-qa-') as tmp:
     matrix=camera.rotation_euler.to_matrix()
     assert (matrix @ Vector((0,0,-1))-direction).length<1.e-6
     assert abs((matrix @ Vector((1,0,0))).y)<1.e-6
+    # Wheel-style zoom in camera view must change the render camera, not frame inspection.
+    window_region=next(r for r in viewport.regions if r.type=='WINDOW')
+    viewport.spaces.active.lock_camera=True;view.view_perspective='CAMERA'
+    bpy.ops.ed.undo_push(message='Camera navigation QA baseline')
+    before=camera.matrix_world.copy();frame_zoom=view.view_camera_zoom
+    def span(matrix):
+        projection=camera.calc_matrix_camera(bpy.context.evaluated_depsgraph_get(),x=1920,y=1080) @ matrix.inverted()
+        points=[projection @ Vector((x,0,0,1)) for x in (-1,1)]
+        return ((points[0]/points[0].w)-(points[1]/points[1].w)).length
+    original_span=span(before)
+    with bpy.context.temp_override(area=viewport,region=window_region):
+        assert bpy.ops.view3d.zoom(delta=2)=={'FINISHED'}
+    bpy.context.view_layer.update()
+    assert camera.matrix_world!=before
+    assert span(camera.matrix_world)>original_span
+    assert view.view_camera_zoom==frame_zoom
+    assert editor.current_settings().camera_pose['matrix_world']==[list(row) for row in camera.matrix_world]
+    # Preserve all projection parameters across export and a fresh render camera.
+    from camera_pose import snapshot,restore
+    camera.data.lens=94;camera.data.sensor_width=43;camera.data.sensor_height=29;camera.data.sensor_fit='VERTICAL'
+    camera.data.shift_x=.12;camera.data.shift_y=-.09
+    clone=bpy.data.objects.new('Camera framing QA',bpy.data.cameras.new('Camera framing QA'))
+    for projection in ('PERSP','ORTHO'):
+        camera.data.type=projection;clone.data.type=projection;restore(clone,snapshot(camera))
+        a=camera.calc_matrix_camera(bpy.context.evaluated_depsgraph_get(),x=1920,y=1080)
+        b=clone.calc_matrix_camera(bpy.context.evaluated_depsgraph_get(),x=7680,y=4320)
+        assert max(abs(a[r][c]-b[r][c]) for r in range(4) for c in range(4))<1.e-6
+        assert clone.matrix_world==camera.matrix_world
 print('Blender per-detector objects, matching, emphasis, picking, roll and portable export QA passed')

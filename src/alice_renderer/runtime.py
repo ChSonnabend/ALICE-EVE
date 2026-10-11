@@ -27,6 +27,8 @@ def probe(blender: str) -> dict:
 
 def preflight(settings: RenderSettings, events, devices: dict, output: Path) -> list[str]:
     settings.validate()
+    from .geometry_selection import is_schematic,detail
+    values=settings.to_dict()
     errors=[]
     if tuple(devices.get('version',[0,0])[:2])<(4,5): errors.append('Blender 4.5 or newer is required')
     available=[d for d in devices.get('devices',[]) if d['type']==settings.backend]
@@ -38,9 +40,9 @@ def preflight(settings: RenderSettings, events, devices: dict, output: Path) -> 
     for event in events:
         count+=1
         tracks=selected_tracks(event,settings.to_dict());clusters=selected_clusters(event,settings.to_dict())
-        if settings.clip_tracks and bool(enabled_detectors(settings.to_dict(),'tracks')) and event['kind']!='synthetic' and not settings.schematic:
+        if settings.clip_tracks and bool(enabled_detectors(values,'tracks')) and event['kind']!='synthetic':
             from .track_clipping import selected_track_detectors
-            clip_assets.update(d for t in tracks for d in selected_track_detectors({'detectors':settings.detectors,'geometry':settings.geometry,'mode':settings.mode,'detector_modes':settings.detector_modes},t))
+            clip_assets.update(d for t in tracks for d in selected_track_detectors(values,t) if not is_schematic(values,d))
         peak_points=max(peak_points,sum(len(t['points']) for t in tracks));peak_clusters=max(peak_clusters,len(clusters))
         for name,mode,objects,active in [('tracks',settings.track_color_mode,tracks,bool(enabled_detectors(settings.to_dict(),'tracks'))),('clusters',settings.cluster_color_mode,clusters,bool(enabled_detectors(settings.to_dict(),'clusters')))]:
             if active and settings.detectors and mode not in capabilities(objects): errors.append(f'Event {event["id"]}: {mode} is unavailable for selected {name}')
@@ -52,8 +54,8 @@ def preflight(settings: RenderSettings, events, devices: dict, output: Path) -> 
     if not count:errors.append('Select at least one event')
     # Conservative scene-buffer estimate; geometry, Blender and driver allocations add overhead.
     estimated=peak_points*768+peak_clusters*1536+settings.width*settings.height*128
-    if not settings.schematic:
-        for name in settings.geometry+(['L3'] if settings.magnet else []):
+    for name in settings.geometry+(['L3'] if settings.magnet else []):
+        if not is_schematic(values,name):
             value=settings.geometry_assets.get(name,'')
             if not value:continue
             asset=Path(value)
@@ -61,15 +63,15 @@ def preflight(settings: RenderSettings, events, devices: dict, output: Path) -> 
             if qa.is_file():
                 try:
                     geometry=json.loads(qa.read_text())
-                    estimated+=int(geometry['instances'])*512+int(geometry['shapes'])*65536 if settings.geometry_lod=='full' else 256*65536
+                    estimated+=int(geometry['instances'])*512+int(geometry['shapes'])*65536 if detail(values,name)=='full' else 256*65536
                 except (OSError,ValueError,KeyError,TypeError):pass
     try:
         import psutil
         if estimated>psutil.virtual_memory().available*.8:
             errors.append(f'Estimated scene/image buffers need at least {estimated/1024**3:.1f} GiB, exceeding the safe available RAM budget. Reduce selected objects or resolution.')
     except ImportError:pass
-    if not settings.schematic:
-        for name in settings.geometry+(['L3'] if settings.magnet else []):
+    for name in settings.geometry+(['L3'] if settings.magnet else []):
+        if not is_schematic(values,name):
             asset=settings.geometry_assets.get(name,'')
             if not asset or not Path(asset).is_file(): errors.append(f'{name}: provide detector geometry (.glb, .gltf, .obj, .blend), or explicitly select schematic envelopes')
             elif Path(asset).suffix.lower() not in ('.glb','.gltf','.obj','.blend'): errors.append(f'{name}: unsupported geometry format')

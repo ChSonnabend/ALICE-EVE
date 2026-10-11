@@ -73,15 +73,16 @@ def test_render_dialog_chooses_detail_per_surface_and_magnet(window,monkeypatch)
     def accept(dialog):
         form=dialog.layout()
         choices={form.labelForField(c).text():c for c in dialog.findChildren(QComboBox) if form.labelForField(c)}
-        assert choices['ITS geometry detail'].currentData()=='simplified'
-        assert choices['TPC geometry detail'].currentData()=='full'
-        assert choices['L3 geometry detail'].currentData()=='simplified'
+        assert all(choices[name+' geometry detail'].currentData()=='current' for name in ('ITS','TPC','L3'))
+        assert 'simplified aligned' in choices['ITS geometry detail'].currentText()
+        assert 'full aligned' in choices['TPC geometry detail'].currentText()
         choices['TPC geometry detail'].setCurrentIndex(choices['TPC geometry detail'].findData('simplified'))
         choices['L3 geometry detail'].setCurrentIndex(choices['L3 geometry detail'].findData('full'))
         return QDialog.Accepted
     monkeypatch.setattr(QDialog,'exec',accept)
     chosen=w.render_quality_dialog(cfg,{'devices':[{'type':'CPU'}]})
-    assert chosen.geometry_lods=={'ITS':'simplified','TPC':'simplified','L3':'full'}
+    assert chosen.geometry_lods=={'TPC':'simplified','L3':'full'}
+    assert chosen.geometry_schematics=={'TPC':False,'L3':False}
     assert cfg.geometry_lods=={'TPC':'full'} # render-only choices do not mutate editor settings
 
 

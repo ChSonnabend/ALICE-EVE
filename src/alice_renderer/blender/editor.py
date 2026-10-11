@@ -6,6 +6,7 @@ from bpy.props import BoolProperty, CollectionProperty, EnumProperty, FloatPrope
 from alice_renderer.model import RenderSettings, COLOR_FIELDS, capabilities
 from alice_renderer.object_selection import parse_track_ids,selected_tracks,selected_clusters,enabled_detectors,event_counts
 from alice_renderer.palettes import names as palette_names
+from alice_renderer.geometry_selection import is_schematic,render_choices,description as geometry_description
 from alice_renderer.scene_config import recipe, save_config, recommended_quality
 
 JOB=None
@@ -24,7 +25,8 @@ def current_settings():
     cfg=copy.deepcopy(JOB['settings']);scene=bpy.context.scene;ui=scene.alice_eve
     camera=scene.camera
     cfg['camera']='orthographic' if camera.data.type=='ORTHO' else 'perspective'
-    cfg['camera_pose']={'matrix_world':[list(row) for row in camera.matrix_world], 'lens':camera.data.lens,'ortho_scale':camera.data.ortho_scale}
+    from camera_pose import snapshot
+    cfg['camera_pose']=snapshot(camera)
     cfg['frame_aspect']=scene.render.resolution_x/scene.render.resolution_y
     cfg['width']=scene.render.resolution_x;cfg['height']=scene.render.resolution_y
     cfg['geometry']=[];cfg['magnet']=False;cfg['detectors']=[]
@@ -47,6 +49,7 @@ def current_settings():
     cfg['highlight_track_ids']=parse_track_ids(ui.highlight_ids);cfg['highlight_track_radius_cm']=ui.highlight_width_cm/2;cfg['highlight_cluster_radius_cm']=ui.highlight_cluster_radius_cm;cfg['highlight_override_color']=ui.highlight_override;cfg['highlight_track_color']=hex_color(ui.highlight_track_color);cfg['highlight_cluster_color']=hex_color(ui.highlight_cluster_color)
     cfg['geometry_lod']=ui.geometry_lod
     cfg['geometry_lods']={i.name:i.detail for i in ui.detectors if i.detail!='inherit'}
+    cfg['geometry_schematics']={**cfg.get('geometry_schematics',{}),**{i.name:False for i in ui.detectors if i.detail!='inherit'}}
     cfg['world_strength']=ui.world_strength;cfg['roughness']=ui.roughness;cfg['metallic']=ui.metallic;cfg['shading']=ui.shading
     cfg['mode']=ui.mode;cfg['track_color_mode']=ui.track_mode;cfg['cluster_color_mode']=ui.cluster_mode;cfg['palette']=ui.palette;cfg['palette_lut']=PALETTES.get(ui.palette,JOB['settings'].get('palette_lut',[]))
     cfg['color_ranges']={'tracks':[ui.track_min,ui.track_max],'clusters':[ui.cluster_min,ui.cluster_max]}
@@ -180,7 +183,11 @@ class ApplyData(bpy.types.Operator):
             cfg=current_settings().to_dict();selected=set(cfg['detectors'])
             cfg['_track_regions']=JOB.get('track_regions',{})
             from alice_renderer.track_clipping import selected_track_detectors
-            missing={d for t in EVENT['tracks'] for d in selected_track_detectors(cfg,t) if d not in cfg['_track_regions']} if cfg['clip_tracks'] and bool(enabled_detectors(cfg,'tracks')) else set()
+            needed={d for t in EVENT['tracks'] for d in selected_track_detectors(cfg,t)} if cfg['clip_tracks'] and bool(enabled_detectors(cfg,'tracks')) else set()
+            from worker import schematic_region
+            for name in needed:
+                if is_schematic(cfg,name):cfg['_track_regions'][name]=schematic_region(name)
+            missing={d for d in needed if d not in cfg['_track_regions'] or not is_schematic(cfg,d) and cfg['_track_regions'][d].get('basis')=='explicit schematic/demo outer envelope'}
             if missing:
                 from worker import imported_geometry
                 for name in missing:
@@ -209,13 +216,20 @@ class ApplyGeometry(bpy.types.Operator):
         try:
             from worker import imported_geometry,envelope,remove_owned_collection
             cfg=current_settings().to_dict();cfg['_interactive']=True
+            changed_regions=False
             for item in context.scene.alice_eve.detectors:
                 if not item.geometry_available:continue
                 old=bpy.data.collections.get(item.name)
-                if old and old.get('alice_display')==item.display and old.get('alice_geometry_lod')==cfg['geometry_lods'].get(item.name,cfg['geometry_lod']):continue
+                if old and old.get('alice_display')==item.display and old.get('alice_geometry_lod')==cfg['geometry_lods'].get(item.name,cfg['geometry_lod']) and old.get('alice_schematic',False)==is_schematic(cfg,item.name):continue
+                changed_regions|=bool(old and old.get('alice_schematic',False)!=is_schematic(cfg,item.name))
                 if old:remove_owned_collection(old)
-                if cfg['schematic']:envelope(item.name,cfg)
-                else:imported_geometry(item.name,cfg['geometry_assets'][item.name],cfg)
+                if is_schematic(cfg,item.name):envelope(item.name,cfg)
+                else:
+                    asset=cfg['geometry_assets'].get(item.name)
+                    if not asset:raise ValueError(item.name+': provide aligned geometry before selecting full/simplified surfaces')
+                    info=imported_geometry(item.name,asset,cfg)
+                    if info.get('track_region'):JOB['track_regions'][item.name]=info['track_region']
+            if changed_regions and bpy.ops.alice_eve.apply_data()!={'FINISHED'}:return {'CANCELLED'}
             appearance_update(self,context)
             self.report({'INFO'},'Geometry appearance applied; shell/outline are approximate outer hulls')
             return {'FINISHED'}
@@ -237,7 +251,8 @@ class FullAlignedGeometry(bpy.types.Operator):
     bl_idname='alice_eve.full_geometry';bl_label='Full aligned surfaces'
     def execute(self,context):
         ui=context.scene.alice_eve;ui.geometry_lod='full'
-        for item in ui.detectors:item.display='surfaces';item.detail='inherit'
+        for item in ui.detectors:
+            if item.geometry_available:item.display='surfaces';item.detail='full'
         return bpy.ops.alice_eve.apply_geometry()
 
 class OpaqueGeometry(bpy.types.Operator):
@@ -263,6 +278,7 @@ class CameraFromView(bpy.types.Operator):
             if not bpy.ops.view3d.camera_to_view.poll():
                 self.report({'ERROR'},'This viewport cannot be captured as the camera');return {'CANCELLED'}
             bpy.ops.view3d.camera_to_view()
+        area.spaces.active.lock_camera=True
         return {'FINISHED'}
 
 class LevelCamera(bpy.types.Operator):
@@ -285,6 +301,9 @@ class ExportConfig(bpy.types.Operator):
     def execute(self,context):
         try:
             ui=context.scene.alice_eve;cfg=current_settings()
+            if context.area and context.area.type=='VIEW_3D' and context.area.spaces.active.region_3d.view_perspective!='CAMERA':
+                if bpy.ops.alice_eve.camera_from_view()!={'FINISHED'}:return {'CANCELLED'}
+                cfg=current_settings()
             selected=set(cfg.detectors)
             for kind,mode,active in [('tracks',cfg.track_color_mode,bool(enabled_detectors(cfg.to_dict(),'tracks'))),('clusters',cfg.cluster_color_mode,bool(enabled_detectors(cfg.to_dict(),'clusters')))]:
                 objects=selected_tracks(EVENT,cfg.to_dict()) if kind=='tracks' else selected_clusters(EVENT,cfg.to_dict())
@@ -297,21 +316,18 @@ class ExportConfig(bpy.types.Operator):
             self.report({'INFO'},'Portable scene exported');return {'FINISHED'}
         except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
 
-DETAIL_ITEMS=[('full','Full geometry','Keep the aligned detector surfaces'),('simplified','Simplified geometry','Approximate coarse spatial cells; less geometry to render')]
+DETAIL_ITEMS=[('current','Keep current scene','Preserve the current geometry type, detail and appearance'),('full','Full aligned surfaces','Load the actual aligned geometry; overrides schematic/outline/coarse-cell modes'),('simplified','Simplified aligned cells','Coarse cells derived from actual aligned geometry; requires its asset'),('schematic','Schematic envelope','Approximate detector envelope; does not load aligned geometry')]
 
 class RenderGeometryDetail(bpy.types.PropertyGroup):
-    detail: EnumProperty(name='Geometry detail',items=DETAIL_ITEMS,default='full')
+    detail: EnumProperty(name='Geometry detail',items=DETAIL_ITEMS,default='current')
 
 def initialize_render_geometry(operator,cfg):
     operator.geometry_details.clear()
     for name in cfg.geometry+(['L3'] if cfg.magnet else []):
-        item=operator.geometry_details.add();item.name=name;item.detail=cfg.geometry_lods.get(name,cfg.geometry_lod)
+        item=operator.geometry_details.add();item.name=name;item.detail='current'
 
 def render_geometry_settings(cfg,items):
-    from dataclasses import replace
-    selected=set(cfg.geometry+(['L3'] if cfg.magnet else []))
-    overrides={**cfg.geometry_lods,**{i.name:i.detail for i in items if i.name in selected}}
-    return replace(cfg,geometry_lods=overrides).validate()
+    return render_choices(cfg,{i.name:i.detail for i in items})
 
 class RenderFull(bpy.types.Operator):
     bl_idname='alice_eve.render_full';bl_label='Render full'
@@ -330,10 +346,11 @@ class RenderFull(bpy.types.Operator):
         layout=self.layout;layout.label(text=RECOMMENDATION['reason']);layout.prop(self,'quality');layout.prop(self,'backend')
         if self.quality=='custom':layout.prop(self,'width');layout.prop(self,'samples')
         box=layout.box();box.label(text='Geometry detail for this render')
-        for item in self.geometry_details:box.prop(item,'detail',text=item.name)
+        cfg=current_settings().to_dict()
+        for item in self.geometry_details:
+            box.prop(item,'detail',text=item.name);box.label(text='Current: '+geometry_description(cfg,item.name))
         if not self.geometry_details:box.label(text='No detector surfaces or magnet selected')
-        box.label(text='Full preserves surfaces; simplified uses coarse cells.')
-        box.label(text='Chosen shell/outline appearance is preserved.')
+        box.label(text='Full loads aligned surfaces, including from schematic previews.')
         layout.prop(self,'output')
     def execute(self,context):
         try:
@@ -351,6 +368,9 @@ class RenderFull(bpy.types.Operator):
             data=recipe(check)
             if ui.include_defaults:data['defaults']={'input':JOB['event'],'event':str(EVENT['id'])}
             save_config(path,data)
+            # Each subprocess gets an immutable snapshot even if another render
+            # starts before it has opened its config. Keep the usual last-config copy.
+            path=root/('full-render-config-'+str(time.time_ns())+'.json');save_config(path,data)
             asset_map=root/'render-assets.local.json';asset_map.write_text(json.dumps(JOB['settings']['geometry_assets']))
             command=[JOB['python'],'-m','alice_renderer.cli','render-config',str(path),'--input',JOB['event'],'--event',str(EVENT['id']),'--assets',str(asset_map),'--blender',bpy.app.binary_path,'--backend',backend,'--quality','balanced' if self.quality=='custom' else self.quality,'--output',bpy.path.abspath(self.output)]
             if self.quality=='custom':command+=['--width',str(self.width),'--samples',str(self.samples)]
@@ -440,6 +460,7 @@ class EVEPanel(bpy.types.Panel):
         layout.label(text='Outer shell / outline are approximate hulls.')
         layout.label(text='Orbit/pan/zoom, then use view as camera.')
         layout.operator('alice_eve.camera_from_view');layout.operator('alice_eve.level_camera');layout.prop(context.scene.camera,'rotation_euler')
+        layout.prop(context.space_data,'lock_camera',text='Navigate render camera')
         row=layout.row();row.operator('alice_eve.roll_camera',text='Roll −15°').angle=-15;row.operator('alice_eve.roll_camera',text='Roll +15°').angle=15
         layout.label(text='Trackball navigation permits arbitrary orientation.')
         if EVENT.get('contributors') is not None:layout.label(text='Primary vertex contributors: '+str(EVENT['contributors']))
@@ -459,6 +480,8 @@ class EVEPanel(bpy.types.Panel):
             row=box.row();row.enabled=item.data_available;row.prop(item,'data');row.prop(item,'mode')
             row=box.row();row.enabled=item.geometry_available;row.prop(item,'visible')
             if item.geometry_available:
+                kind='aligned' if item.detail!='inherit' else 'schematic' if is_schematic(JOB['settings'],item.name) else 'aligned'
+                box.label(text='Geometry source: '+kind)
                 box.prop(item,'detail');box.prop(item,'display');box.prop(item,'opening');box.prop(item,'color');box.prop(item,'opacity')
         layout.prop(ui,'background');layout.prop(ui,'world_strength');layout.prop(ui,'roughness');layout.prop(ui,'metallic');layout.prop(ui,'shading')
         for lamp in (o for o in context.scene.objects if o.type=='LIGHT'):
@@ -494,7 +517,7 @@ def start_editor(job,event,metadata):
     for name in (*DETECTORS,'L3'):
         item=ui.detectors.add();item.name=name;item.data_available=name in available;item.data=name in settings['detectors'];item.mode=settings.get('detector_modes',{}).get(name,settings['mode']);item.geometry_available=name in settings['geometry'] or name=='L3' and settings['magnet'];item.visible=item.geometry_available
         item.display=settings.get('geometry_display',{}).get(name,'surfaces')
-        item.detail=settings.get('geometry_lods',{}).get(name,'inherit')
+        item.detail='inherit' if is_schematic(settings,name) else settings.get('geometry_lods',{}).get(name,'inherit')
         item.event_track_count=track_counts.get(name,0);item.event_cluster_count=cluster_counts.get(name,0)
         item.opening=settings['geometry_openings'].get(name,180 if settings['cutaway'] else 0);item.opacity=settings['geometry_opacities'].get(name,settings['geometry_opacity']);item.color=settings.get('colors_linear',{}).get('magnet' if name=='L3' else name,rgb(settings['colors'].get('magnet' if name=='L3' else name,'#243a82')))
     settings['palette_lut']=PALETTES[settings['palette']]
@@ -507,7 +530,7 @@ def start_editor(job,event,metadata):
     for screen in bpy.data.screens:
         for area in screen.areas:
             if area.type=='VIEW_3D':
-                area.spaces.active.show_region_ui=True;area.spaces.active.shading.type='RENDERED';area.spaces.active.region_3d.view_perspective='CAMERA'
+                area.spaces.active.show_region_ui=True;area.spaces.active.shading.type='RENDERED';area.spaces.active.region_3d.view_perspective='CAMERA';area.spaces.active.lock_camera=True
     bpy.context.view_layer.objects.active=scene.camera
     for obj in scene.objects:obj.select_set(False)
     scene.camera.select_set(True)

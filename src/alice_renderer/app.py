@@ -73,7 +73,7 @@ class Window(QMainWindow):
                 saved=json.loads(self.settings_file.read_text());self.base=RenderSettings(**upgrade_local_camera(saved.get('render',{})));self.saved=saved
             except Exception:self.saved={}
         else:self.saved={}
-        self.scene_overrides={key:getattr(self.base,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_display','geometry_openings','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
+        self.scene_overrides={key:getattr(self.base,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
         central=QWidget();self.setCentralWidget(central);layout=QVBoxLayout(central)
         title=QLabel('ALICE  /  EVENT RENDERER');title.setObjectName('title');layout.addWidget(title)
         self.summary=QLabel('Choose an input, select events and detectors, then preview or render.');layout.addWidget(self.summary)
@@ -362,7 +362,7 @@ class Window(QMainWindow):
         except Exception as exc:self.failure(str(exc))
     def apply_scene(self,cfg):
         if self.palette.findText(cfg.palette)<0:self.palette.addItem(cfg.palette)
-        self.scene_overrides={key:getattr(cfg,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_display','geometry_openings','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
+        self.scene_overrides={key:getattr(cfg,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
         for name,box in self.data_checks.items():box.setChecked(name in cfg.detectors)
         for name,combo in self.detector_modes.items():combo.setCurrentText(cfg.detector_modes.get(name,cfg.mode))
         for name,box in self.geometry_checks.items():box.setChecked(name in cfg.geometry)
@@ -397,9 +397,10 @@ class Window(QMainWindow):
         width=number(cfg.width,64,16384);height=number(cfg.height,64,16384);samples=number(cfg.samples,1,8192);form.addRow('Custom width',width);form.addRow('Custom height',height);form.addRow('Custom samples',samples)
         geometry_details={}
         for name in cfg.geometry+(['L3'] if cfg.magnet else []):
-            combo=QComboBox();combo.addItem('Full geometry','full');combo.addItem('Simplified geometry (coarse cells)','simplified');combo.setCurrentIndex(combo.findData(cfg.geometry_lods.get(name,cfg.geometry_lod)));geometry_details[name]=combo;form.addRow(name+' geometry detail',combo)
+            from .geometry_selection import description
+            combo=QComboBox();combo.addItem('Keep current: '+description(cfg.to_dict(),name),'current');combo.addItem('Full aligned surfaces','full');combo.addItem('Simplified aligned cells','simplified');combo.addItem('Schematic envelope','schematic');geometry_details[name]=combo;form.addRow(name+' geometry detail',combo)
         if geometry_details:
-            note=QLabel('Geometry detail applies to this render. Chosen shell/outline appearance is preserved.');note.setWordWrap(True);form.addRow(note)
+            note=QLabel('Explicit geometry choices override the preview type and appearance. Full and simplified aligned geometry require their assets.');note.setWordWrap(True);form.addRow(note)
         def toggle():
             for field in (width,height,samples):field.setEnabled(quality.currentText()=='custom')
         quality.currentTextChanged.connect(toggle);toggle()
@@ -407,8 +408,8 @@ class Window(QMainWindow):
         if dialog.exec()!=QDialog.Accepted:return None
         custom=quality.currentText()=='custom'
         chosen=quality_settings(cfg,'balanced' if custom else quality.currentText(),backend=backend.currentText(),width=width.value() if custom else None,height=height.value() if custom else None,samples=samples.value() if custom else None)
-        chosen.geometry_lods={**cfg.geometry_lods,**{name:combo.currentData() for name,combo in geometry_details.items()}}
-        return chosen.validate()
+        from .geometry_selection import render_choices
+        return render_choices(chosen,{name:combo.currentData() for name,combo in geometry_details.items()})
     def start_render(self,preview):
         if not self.catalogue:return
         try:cfg=self.settings();self.save_settings(cfg)
