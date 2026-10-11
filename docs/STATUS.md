@@ -89,3 +89,13 @@ record their updated world transform, avoiding stale identity rotation in render
 history. A separate exterior CPU render confirms coherent, illuminated blue TPC
 surfaces against a black background; this is visual validation, not a physics
 check.
+
+The same corrected raw vertex at index 5 rendered with the user's original
+camera, this reduced TPC selection and twelve area lights (two existing plus
+the surround rig). The 640 × 360, 64-sample CPU result is
+`renders/qa/tpc-sectors-surround/render-20261011-204313-6961c3/event-00000/render.png`;
+the tested portable settings are in
+`configs/event-5-tpc-sectors-inner-wall-surround.json`. Camera matrix, component
+choices and lights match the render metadata exactly. The interior is brighter
+but still translucent; other selected detector surfaces retain layered patterns.
+This is not a claim of an exact match to the commissioning reference.
