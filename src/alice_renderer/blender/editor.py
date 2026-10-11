@@ -26,6 +26,7 @@ def current_settings():
     cfg=copy.deepcopy(JOB['settings']);scene=bpy.context.scene;ui=scene.alice_eve
     camera=scene.camera
     cfg['camera']='orthographic' if camera.data.type=='ORTHO' else 'perspective'
+    cfg['camera_lens_mm']=camera.data.lens
     from camera_pose import snapshot
     cfg['camera_pose']=snapshot(camera)
     cfg['frame_aspect']=scene.render.resolution_x/scene.render.resolution_y
@@ -53,6 +54,7 @@ def current_settings():
     cfg['geometry_lods']={i.name:i.detail for i in ui.detectors if i.detail!='inherit'}
     cfg['geometry_schematics']={**cfg.get('geometry_schematics',{}),**{i.name:False for i in ui.detectors if i.detail!='inherit'}}
     cfg['world_strength']=ui.world_strength;cfg['roughness']=ui.roughness;cfg['metallic']=ui.metallic;cfg['shading']=ui.shading
+    cfg['view_transform']=ui.view_transform;cfg['exposure']=ui.exposure;cfg['track_emission']=ui.track_emission;cfg['cluster_emission']=ui.cluster_emission
     cfg['mode']=ui.mode;cfg['track_color_mode']=ui.track_mode;cfg['cluster_color_mode']=ui.cluster_mode;cfg['palette']=ui.palette;cfg['palette_lut']=PALETTES.get(ui.palette,JOB['settings'].get('palette_lut',[]))
     cfg['color_ranges']={'tracks':[ui.track_min,ui.track_max],'clusters':[ui.cluster_min,ui.cluster_max]}
     cfg['scale_min']=None;cfg['scale_max']=None
@@ -123,6 +125,7 @@ def appearance_update(self,context):
         for obj in coll.objects:
             if obj.type=='CURVE':obj.data.bevel_depth=(ui.highlight_width_cm if obj.get('alice_highlighted') else ui.track_width_cm)*.005
     world=context.scene.world.node_tree.nodes['Background'];world.inputs[0].default_value=(*ui.background,1);world.inputs[1].default_value=ui.world_strength
+    context.scene.view_settings.view_transform=ui.view_transform;context.scene.view_settings.look='None';context.scene.view_settings.exposure=ui.exposure
     for mat in bpy.data.materials:
         if not mat.use_nodes:continue
         bsdf=mat.node_tree.nodes.get('Principled BSDF')
@@ -155,7 +158,6 @@ def appearance_update(self,context):
             base=ui.track_color if kind=='Tracks' else ui.cluster_color
             special=ui.highlight_track_color if kind=='Tracks' else ui.highlight_cluster_color
             mode=ui.track_mode if kind=='Tracks' else ui.cluster_mode
-            if not (emphasis and ui.highlight_override) and mode!='solid':continue
             mats=list(obj.data.materials)
             for modifier in obj.modifiers:
                 if modifier.type=='NODES':
@@ -164,7 +166,10 @@ def appearance_update(self,context):
             color=special if emphasis and ui.highlight_override else base
             for mat in mats:
                 bsdf=mat.node_tree.nodes.get('Principled BSDF')
-                if bsdf:bsdf.inputs['Base Color'].default_value=(*color,1);bsdf.inputs['Emission Color'].default_value=(*color,1)
+                if bsdf:
+                    bsdf.inputs['Emission Strength'].default_value=ui.track_emission if kind=='Tracks' else ui.cluster_emission
+                    if emphasis and ui.highlight_override or mode=='solid':
+                        bsdf.inputs['Base Color'].default_value=(*color,1);bsdf.inputs['Emission Color'].default_value=(*color,1)
 
 class DetectorSettings(bpy.types.PropertyGroup):
     data_available: BoolProperty(default=False)
@@ -205,6 +210,10 @@ class SceneSettings(bpy.types.PropertyGroup):
     cluster_color: FloatVectorProperty(name='Clusters',subtype='COLOR',size=3,min=0,max=1,update=appearance_update)
     background: FloatVectorProperty(name='Background',subtype='COLOR',size=3,min=0,max=1,update=appearance_update)
     world_strength: FloatProperty(name='Background light',min=0,max=20,default=.45,update=appearance_update)
+    view_transform: EnumProperty(name='Display colours',items=[('AgX','AgX','Highlight compression'),('Standard','Standard','Keep saturated colours')],default='AgX',update=appearance_update)
+    exposure: FloatProperty(name='Exposure (stops)',min=-20,max=20,default=0,update=appearance_update)
+    track_emission: FloatProperty(name='Track glow',min=0,max=100,default=.7,update=appearance_update)
+    cluster_emission: FloatProperty(name='Cluster glow',min=0,max=100,default=1.,update=appearance_update)
     roughness: FloatProperty(name='Roughness',min=0,max=1,default=.38,update=appearance_update)
     metallic: FloatProperty(name='Metallic',min=0,max=1,default=.15,update=appearance_update)
     shading: EnumProperty(name='Shading',items=[('smooth','Smooth',''),('flat','Flat','')],update=appearance_update)
@@ -535,7 +544,7 @@ class EVEPanel(bpy.types.Panel):
                 kind='aligned' if item.detail!='inherit' else 'schematic' if is_schematic(JOB['settings'],item.name) else 'aligned'
                 box.label(text='Geometry source: '+kind)
                 box.prop(item,'detail');box.prop(item,'display');box.prop(item,'opening');box.prop(item,'color');box.prop(item,'opacity')
-        layout.prop(ui,'background');layout.prop(ui,'world_strength');layout.prop(ui,'roughness');layout.prop(ui,'metallic');layout.prop(ui,'shading')
+        layout.prop(ui,'background');layout.prop(ui,'world_strength');layout.prop(ui,'view_transform');layout.prop(ui,'exposure');layout.prop(ui,'track_emission');layout.prop(ui,'cluster_emission');layout.prop(ui,'roughness');layout.prop(ui,'metallic');layout.prop(ui,'shading')
         for lamp in (o for o in context.scene.objects if o.type=='LIGHT'):
             box=layout.box();box.label(text=lamp.name);box.prop(lamp,'location');box.prop(lamp,'rotation_euler');box.prop(lamp.data,'energy');box.prop(lamp.data,'size');box.prop(lamp.data,'color')
         layout.prop(ui,'export_path');layout.prop(ui,'include_defaults')
@@ -563,6 +572,7 @@ def start_editor(job,event,metadata):
     ui.mode=settings['mode'];ui.track_mode=settings['track_color_mode'];ui.cluster_mode=settings['cluster_color_mode'];ui.palette=settings['palette']
     ui.background=settings.get('colors_linear',{}).get('background',rgb(settings['colors']['background']));ui.track_color=settings.get('colors_linear',{}).get('tracks',rgb(settings['colors']['tracks']));ui.cluster_color=settings.get('colors_linear',{}).get('clusters',rgb(settings['colors']['clusters']))
     ui.world_strength=settings['world_strength'];ui.roughness=settings['roughness'];ui.metallic=settings['metallic'];ui.shading=settings['shading']
+    ui.view_transform=settings.get('view_transform','AgX');ui.exposure=settings.get('exposure',0.);ui.track_emission=settings.get('track_emission',.7);ui.cluster_emission=settings.get('cluster_emission',1.)
     available=set(event.get('data_detectors',[]))|{d for t in event['tracks'] for d in t['detectors']}|{c['detector'] for c in event['clusters']}
     counts=event_counts(event);track_counts=counts['tracks_by_detector'];cluster_counts=counts['clusters_by_detector']
     from alice_renderer.model import DETECTORS

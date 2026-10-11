@@ -88,12 +88,29 @@ def test_render_dialog_chooses_detail_per_surface_and_magnet(window,monkeypatch)
 
 def test_camera_orbit_axis_preserved_in_desktop_controls(window):
     w,application,root=window
-    assert w.settings().camera_orbit_axis=='Y' and w.settings().elevation==0
+    from alice_renderer.defaults import startup_settings
+    assert w.settings().camera_orbit_axis=='Y'
+    assert w.settings().elevation==pytest.approx(startup_settings().elevation,abs=.051)
     cfg=RenderSettings(camera_orbit_axis='Z',elevation=22)
     w.apply_scene(cfg)
     assert w.settings().camera_orbit_axis=='Z' and w.settings().elevation==22
     w.camera_orbit_axis.setCurrentText('Y')
     assert w.settings().camera_orbit_axis=='Y'
+
+
+def test_commissioning_defaults_clone_style_keep_input_events_assets_and_hardware(window):
+    w,application,root=window;generate(root/'events.jsonl');w.load_input(root/'events.jsonl');settle(w,application)
+    w.model.select_all(False);w.model.selected={1};w.update_availability()
+    source=w.source.text();w.backend.setCurrentText('CPU');w.samples.setValue(17)
+    w.asset_fields['ITS'].setText('/local/aligned/ITS.blend');w.geometry_units.setCurrentText('cm')
+    w.roll.setValue(0);w.view_transform.setCurrentText('AgX');w.use_commissioning_defaults()
+    cfg=w.settings()
+    assert w.source.text()==source and w.model.selected=={1}
+    assert cfg.geometry_assets['ITS']=='/local/aligned/ITS.blend' and cfg.geometry_units=='cm'
+    assert cfg.backend=='CPU' and cfg.samples==17 and cfg.view_transform=='Standard'
+    assert cfg.camera_pose and cfg.geometry_openings=={'ITS':180.,'TPC':180.}
+    saved=json.loads(w.settings_file.read_text())['render']
+    assert saved['detectors']==['ITS','TPC']
 
 
 def test_recent_clone_retains_new_input_and_event_and_favourites_picker(window):
@@ -169,3 +186,18 @@ def test_original_scene_alignment_retained_but_new_input_can_supply_new_alignmen
     assert w.asset_fields['TPC'].text()==str(old) and w.geometry_units.currentText()=='cm'
     w.load_input(folder);settle(w,application)
     assert w.asset_fields['TPC'].text()==str(new) and w.geometry_units.currentText()=='m'
+
+
+def test_display_glow_and_lens_controls_roundtrip_preserve_camera_pose(window):
+    w,application,root=window
+    pose={'matrix_world':[[1,0,0,4],[0,1,0,5],[0,0,1,6],[0,0,0,1]],'lens':36,'ortho_scale':4}
+    cfg=RenderSettings(camera_pose=pose,view_transform='Standard',exposure=-.5,track_emission=.25,cluster_emission=.8)
+    w.apply_scene(cfg);actual=w.settings()
+    assert actual.view_transform=='Standard' and actual.exposure==-.5
+    assert actual.track_emission==.25 and actual.cluster_emission==.8
+    assert actual.camera_pose==pose and actual.camera_lens_mm==36
+    w.camera_lens.setValue(42);actual=w.settings()
+    assert actual.camera_pose['lens']==42 and actual.camera_pose['matrix_world']==pose['matrix_world']
+    assert pose['lens']==36
+    w.azimuth.setValue(5)
+    assert w.settings().camera_pose=={} and w.settings().camera_lens_mm==42

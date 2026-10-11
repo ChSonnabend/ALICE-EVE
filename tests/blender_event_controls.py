@@ -59,6 +59,19 @@ with tempfile.TemporaryDirectory(prefix='alice-controls-qa-') as tmp:
     assert library.entries()[0]['event']=='SYNTHETIC-CONTROLS-QA'
     assert library.settings(library.entries()[0]).camera_pose['matrix_world']==saved['camera_pose']['matrix_world']
     assert saved['color_ranges']['tracks']==[0.,1.]
+    ui.view_transform='Standard';ui.exposure=-.5;ui.track_emission=.2;ui.cluster_emission=.8
+    assert bpy.context.scene.view_settings.view_transform=='Standard'
+    assert bpy.context.scene.view_settings.exposure==-.5
+    for name,expected in (('Tracks',.2),('Clusters',.8)):
+        for obj in bpy.data.collections[name].objects:
+            materials=list(obj.data.materials)
+            for modifier in obj.modifiers:
+                if modifier.type=='NODES':materials.extend(n.inputs['Material'].default_value for n in modifier.node_group.nodes if n.bl_idname=='GeometryNodeSetMaterial')
+            assert materials
+            assert all(abs(m.node_tree.nodes['Principled BSDF'].inputs['Emission Strength'].default_value-expected)<1.e-6 for m in materials)
+    assert editor.current_settings().view_transform=='Standard'
+    ui.view_transform='AgX';ui.exposure=0
+
     assert bpy.context.preferences.inputs.view_rotate_method=='TRACKBALL'
     assert 'stop' in bpy.ops.alice_eve.pick_tracks.get_rna_type().description.lower()
     ui.picking_active=True

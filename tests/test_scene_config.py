@@ -69,3 +69,11 @@ def test_interactive_launch_keeps_full_aligned_geometry(tmp_path,monkeypatch):
     folder,pid=runtime.launch_editor('blender',event,RenderSettings(geometry_lod='full'),tmp_path/'outputs')
     assert pid==42
     assert json.loads((folder/'job.json').read_text())['settings']['geometry_lod']=='full'
+
+
+def test_portable_display_colours_glow_and_lens(tmp_path):
+    cfg=RenderSettings(view_transform='Standard',exposure=-.5,track_emission=.2,cluster_emission=.8,camera_lens_mm=36)
+    path=tmp_path/'scene.json';save_config(path,recipe(cfg));restored=resolve_settings(load_config(path),path)
+    assert (restored.view_transform,restored.exposure,restored.track_emission,restored.cluster_emission,restored.camera_lens_mm)==('Standard',-.5,.2,.8,36)
+    for kwargs in ({'view_transform':'bad'},{'exposure':float('nan')},{'cluster_emission':-1},{'track_emission':float('inf')},{'camera_lens_mm':0}):
+        with pytest.raises(ValueError):RenderSettings(**kwargs).validate()

@@ -152,7 +152,7 @@ def tracks(objects,settings):
         curve=bpy.data.curves.new('Tracks '+key,'CURVE');curve.dimensions='3D'
         radius=settings['highlight_track_radius_cm'] if group['highlighted'] else settings['track_radius_cm']
         curve.bevel_depth=radius*.01;curve.bevel_resolution=2;curve.resolution_u=2
-        curve.materials.append(materials('Track '+key,group['color'],emission=.7,settings=settings))
+        curve.materials.append(materials('Track '+key,group['color'],emission=settings.get('track_emission',.7),settings=settings))
         ids=[]
         for track in group['items']:
             if settings.get('clip_tracks',True):
@@ -178,7 +178,7 @@ def clusters(objects,settings):
         mesh=bpy.data.meshes.new('Cluster positions '+key)
         mesh.from_pydata([tuple(v*.01 for v in c['position']) for c in group['items']],[],[]);mesh.update()
         obj=bpy.data.objects.new('Clusters '+key,mesh);coll.objects.link(obj);obj['alice_highlighted']=group['highlighted']
-        mat=materials('Cluster '+key,group['color'],emission=1.,settings=settings)
+        mat=materials('Cluster '+key,group['color'],emission=settings.get('cluster_emission',1.),settings=settings)
         # Instanced spheres keep even large cluster clouds compact in memory.
         nodes=bpy.data.node_groups.new('Cluster spheres '+key,'GeometryNodeTree')
         nodes.interface.new_socket(name='Geometry',in_out='INPUT',socket_type='NodeSocketGeometry')
@@ -404,7 +404,7 @@ def render(job_path,interactive=False):
     right=direction.cross(vertical).normalized();up=right.cross(direction)
     camera.rotation_euler=Matrix(((right.x,up.x,-direction.x),(right.y,up.y,-direction.y),(right.z,up.z,-direction.z))).to_euler()
     camera.rotation_euler.rotate_axis('Z',math.radians(settings.get('roll',0.)))
-    camera.data.lens=48;camera.data.clip_end=2000
+    camera.data.lens=settings.get('camera_lens_mm',48.);camera.data.clip_end=2000
     if settings['camera']=='orthographic':camera.data.type='ORTHO';camera.data.ortho_scale=distance*.65
     camera.data.sensor_fit='HORIZONTAL'
     if settings.get('camera_pose'):
@@ -419,7 +419,8 @@ def render(job_path,interactive=False):
         bpy.ops.object.light_add(type='AREA',location=light['position_m']);lamp=bpy.context.object;lamp.name='ALICE light '+str(i+1)
         lamp.data.energy=light['energy'];lamp.data.shape='DISK';lamp.data.size=light['size_m'];lamp.data.color=light.get('color_linear',rgb(light['color']))
         lamp.rotation_euler=light.get('rotation') or (target-lamp.location).to_track_quat('-Z','Y').to_euler()
-    scene.view_settings.view_transform='AgX'
+    scene.view_settings.view_transform=settings.get('view_transform','AgX')
+    scene.view_settings.look='None';scene.view_settings.exposure=settings.get('exposure',0.);scene.view_settings.gamma=1.
     metadata['highlighting']={'track_ids':settings.get('highlight_track_ids',[]),'missing_ids':sorted(set(settings.get('highlight_track_ids',[]))-{str(t['id']) for t in event['tracks']})}
     metadata['settings']={k:v for k,v in settings.items() if not k.startswith('_')};metadata['source']=job['event'];metadata['blender_version']=bpy.app.version_string
     (output/'metadata.json').write_text(json.dumps(metadata,indent=2))

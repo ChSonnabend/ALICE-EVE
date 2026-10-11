@@ -20,7 +20,7 @@ alice-render = "alice_renderer.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-alice_renderer = ["blender/*.py", "palette_names.json"]
+alice_renderer = ["blender/*.py", "palette_names.json", "presets/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

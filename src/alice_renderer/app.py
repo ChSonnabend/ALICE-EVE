@@ -17,6 +17,7 @@ from .object_selection import parse_track_ids
 from .palettes import names as palette_names
 from .scene_library import SceneLibrary
 from .resolution import PRESET_PERCENT, minimum_percent, percentage_size
+from .defaults import startup_settings
 
 ROOT=Path(__file__).resolve().parents[2]
 
@@ -66,7 +67,7 @@ def number(value,minimum,maximum,decimals=0):
 class Window(QMainWindow):
     def __init__(self):
         super().__init__();self.setWindowTitle('ALICE · Event Renderer');self.resize(1440,980)
-        self.catalogue=None;self.loaded_input=None;self.task=None;self.device_info=None;self.base=RenderSettings();self.images=[];self.close_pending=False
+        self.catalogue=None;self.loaded_input=None;self.task=None;self.device_info=None;self.base=startup_settings();self.images=[];self.close_pending=False
         self.scene_overrides={};self.timeframe_source=None;self.collision_source=None;self.showing_timeframes=False;self.collision_mode='tracks'
         self.library=SceneLibrary(ROOT/'scene-library.local.sqlite');self.library_signature=None;self.scene_detector_selection=None;self.requested_modes=None
         self.settings_file=ROOT/'settings.local.json'
@@ -76,6 +77,7 @@ class Window(QMainWindow):
                 saved=json.loads(self.settings_file.read_text());self.base=RenderSettings(**upgrade_local_camera(saved.get('render',{})));self.saved=saved
             except Exception:self.saved={}
         else:self.saved={}
+        self.scene_detector_selection=set(self.base.detectors)
         self.scene_overrides={key:getattr(self.base,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
         central=QWidget();self.setCentralWidget(central);layout=QVBoxLayout(central)
         title=QLabel('ALICE  /  EVENT RENDERER');title.setObjectName('title');layout.addWidget(title)
@@ -143,6 +145,8 @@ class Window(QMainWindow):
         self.magnet=QCheckBox('L3 magnet');self.magnet.setChecked(self.base.magnet);layout.addWidget(self.magnet)
         self.schematic=QCheckBox('Use approximate schematic envelopes');self.schematic.setChecked(self.base.schematic);self.schematic.setToolTip('Approximate dimensions, not calibrated detector geometry. This choice is recorded in render metadata.');layout.addWidget(self.schematic)
         self.cutaway=QCheckBox('Half cutaway (global Y plane)');self.cutaway.setChecked(self.base.cutaway);self.cutaway.toggled.connect(self.change_cutaway);layout.addWidget(self.cutaway)
+        opening_note=QLabel('Openings remove a wedge centred on −Y. A 180° opening removes the −Y half; view it from negative Y. Show complete detectors resets all openings.');opening_note.setWordWrap(True);layout.addWidget(opening_note)
+        self.geometry_opening_label=QLabel();self.geometry_opening_label.setWordWrap(True);layout.addWidget(self.geometry_opening_label);self.refresh_opening_summary()
         self.geometry_lod=QComboBox();self.geometry_lod.addItems(['full','simplified']);self.geometry_lod.setCurrentText(self.base.geometry_lod);layout.addWidget(QLabel('Geometry detail'));layout.addWidget(self.geometry_lod)
         self.opacity=number(self.base.geometry_opacity,0,1,2);form=QFormLayout();form.addRow('Geometry opacity',self.opacity);layout.addLayout(form);layout.addStretch()
     def set_all_detector_modes(self,mode):
@@ -156,8 +160,14 @@ class Window(QMainWindow):
         self.scene_detector_selection={name for name,box in self.data_checks.items() if box.isChecked()}
     def change_cutaway(self,on):
         self.scene_overrides['geometry_openings']={name:180 if on else 0 for name in (*DETECTORS,'L3')}
+        self.refresh_opening_summary()
     def show_complete_detectors(self):
         self.cutaway.setChecked(False);self.scene_overrides['geometry_openings']={name:0 for name in (*DETECTORS,'L3')}
+        self.refresh_opening_summary()
+    def refresh_opening_summary(self):
+        values=self.scene_overrides.get('geometry_openings',{})
+        text=', '.join(f'{name}: {angle:g}°' for name,angle in values.items() if angle)
+        self.geometry_opening_label.setText('Configured openings: '+(text or 'complete surfaces'))
     def color_button(self,key):
         button=QPushButton(self.base.colors.get(key,'#243a82'));button.clicked.connect(lambda:self.pick_color(key));self.color_buttons[key]=button;return button
     def pick_color(self,key):
@@ -167,6 +177,7 @@ class Window(QMainWindow):
             self.color_buttons[key].setText(color.name());self.scene_overrides.get('colors_linear',{}).pop(key,None)
     def build_appearance(self):
         widget=self.tab('Appearance');layout=QFormLayout(widget)
+        self.defaults_button=QPushButton('Use commissioning defaults');self.defaults_button.clicked.connect(self.use_commissioning_defaults);layout.addRow(self.defaults_button)
         self.track_mode=QComboBox();self.cluster_mode=QComboBox()
         for combo in (self.track_mode,self.cluster_mode):
             combo.addItems(COLOR_FIELDS);combo.setItemData(combo.findText('matching'),'0 = standalone fitted source; 1 = composite matched source (e.g. ITS-TPC); grey = unknown',Qt.ToolTipRole)
@@ -180,6 +191,9 @@ class Window(QMainWindow):
         self.auto_range=QCheckBox('Automatic scale range per event');self.auto_range.setChecked(self.base.scale_min is None);layout.addRow(self.auto_range)
         self.minimum=number(self.base.scale_min or 0,-1000000,1000000,3);self.maximum=number(self.base.scale_max or 10,-1000000,1000000,3);layout.addRow('Minimum',self.minimum);layout.addRow('Maximum',self.maximum)
         self.track_radius=number(self.base.track_radius_cm*2,.002,20,3);self.cluster_radius=number(self.base.cluster_radius_cm,.001,20,3);layout.addRow('Track linewidth (cm)',self.track_radius);self.clip_tracks=QCheckBox('Clip tracks to selected detectors');self.clip_tracks.setChecked(self.base.clip_tracks);layout.addRow(self.clip_tracks);layout.addRow('Cluster radius (cm)',self.cluster_radius)
+        self.view_transform=QComboBox();self.view_transform.addItems(['AgX','Standard']);self.view_transform.setCurrentText(self.base.view_transform);layout.addRow('Display colours',self.view_transform)
+        self.exposure=number(self.base.exposure,-20,20,2);layout.addRow('Exposure (stops)',self.exposure)
+        self.track_emission=number(self.base.track_emission,0,100,2);self.cluster_emission=number(self.base.cluster_emission,0,100,2);layout.addRow('Track glow',self.track_emission);layout.addRow('Cluster glow',self.cluster_emission)
         self.highlight_ids=QLineEdit(', '.join(self.base.highlight_track_ids));self.highlight_ids.setPlaceholderText('Track IDs: 11730, 50331650, …');layout.addRow('Special track IDs',self.highlight_ids)
         self.highlight_width=number(self.base.highlight_track_radius_cm*2,.002,20,3);layout.addRow('Special track linewidth (cm)',self.highlight_width)
         self.highlight_clusters=number(self.base.highlight_cluster_radius_cm,.001,20,3);layout.addRow('Linked cluster radius (cm)',self.highlight_clusters)
@@ -203,6 +217,7 @@ class Window(QMainWindow):
         self.device_label=QLabel('Device availability is verified before rendering.');self.device_label.setWordWrap(True);layout.addRow(self.device_label)
         self.threads=number(self.base.threads,0,256);layout.addRow('CPU threads (0 = automatic)',self.threads)
         self.camera=QComboBox();self.camera.addItems(['perspective','orthographic']);self.camera.setCurrentText(self.base.camera);layout.addRow('Camera',self.camera)
+        self.camera_lens=number(self.base.camera_pose.get('lens',self.base.camera_lens_mm),.1,5000,2);layout.addRow('Focal length (mm)',self.camera_lens)
         self.camera_orbit_axis=QComboBox();self.camera_orbit_axis.addItems(['Y','Z']);self.camera_orbit_axis.setCurrentText(self.base.camera_orbit_axis);self.camera_orbit_axis.setToolTip('Y keeps ALICE XZ as the horizontal plane; Z reproduces the legacy orbit');layout.addRow('Vertical orbit axis',self.camera_orbit_axis);self.camera_orbit_axis.currentTextChanged.connect(lambda *_:self.scene_overrides.pop('camera_pose',None))
         self.azimuth=number(self.base.azimuth,-180,180,1);self.elevation=number(self.base.elevation,-90,90,1);self.distance=number(self.base.distance_cm,1,100000,1)
         self.roll=number(self.base.roll,-360,360,1);layout.addRow('Camera roll (°)',self.roll)
@@ -298,6 +313,9 @@ class Window(QMainWindow):
         cfg.clip_tracks=self.clip_tracks.isChecked()
         cfg.camera_orbit_axis=self.camera_orbit_axis.currentText()
         cfg.geometry_lod=self.geometry_lod.currentText()
+        cfg.view_transform=self.view_transform.currentText();cfg.exposure=self.exposure.value();cfg.track_emission=self.track_emission.value();cfg.cluster_emission=self.cluster_emission.value()
+        cfg.camera_lens_mm=self.camera_lens.value()
+        if cfg.camera_pose:cfg.camera_pose={**cfg.camera_pose,'lens':cfg.camera_lens_mm}
         cfg.frame_aspect=cfg.width/cfg.height
         return cfg.validate()
     def save_settings(self,cfg):
@@ -465,9 +483,17 @@ class Window(QMainWindow):
         w,h=percentage_size(25,cfg.frame_aspect);self.width.setValue(w);self.height.setValue(h)
         for name,combo in self.detector_modes.items():combo.setCurrentText(cfg.detector_modes.get(name,cfg.mode))
         self.roll.setValue(cfg.roll);self.highlight_ids.setText(', '.join(cfg.highlight_track_ids));self.highlight_width.setValue(cfg.highlight_track_radius_cm*2);self.highlight_clusters.setValue(cfg.highlight_cluster_radius_cm);self.highlight_override.setChecked(cfg.highlight_override_color);self.highlight_track_color.setText(cfg.highlight_track_color);self.highlight_cluster_color.setText(cfg.highlight_cluster_color)
+        self.view_transform.setCurrentText(cfg.view_transform);self.exposure.setValue(cfg.exposure);self.track_emission.setValue(cfg.track_emission);self.cluster_emission.setValue(cfg.cluster_emission)
+        self.camera_lens.setValue(cfg.camera_pose.get('lens',cfg.camera_lens_mm))
         self.scene_overrides['palette_lut']=cfg.palette_lut
         self.scene_overrides['camera_pose']=cfg.camera_pose
         self.scene_overrides['geometry_openings']=cfg.geometry_openings
+        self.refresh_opening_summary()
+    def use_commissioning_defaults(self):
+        cfg=startup_settings({k:v.text() for k,v in self.asset_fields.items() if v.text()},self.geometry_units.currentText())
+        self.apply_scene(cfg);self.update_availability()
+        saved=self.settings();saved.detectors=cfg.detectors;self.save_settings(saved)
+        self.message('Commissioning interior defaults applied. Input, selected events and local geometry assets retained.')
     def open_editor(self):
         if not self.catalogue or not self.model.selected:return
         if self.source.text()!=self.loaded_input:self.failure('The input path has changed. Press Enter or Load input, then select its event before opening the editor.');return

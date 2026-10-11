@@ -135,6 +135,7 @@ class RenderSettings:
     highlight_cluster_color: str = '#ff6633'
     cluster_radius_cm: float = 0.35
     camera: str = 'perspective'
+    camera_lens_mm: float = 48.
     camera_orbit_axis: str = 'Y'
     azimuth: float = -55.0
     elevation: float = 0.0
@@ -157,6 +158,10 @@ class RenderSettings:
     metallic: float = .15
     shading: str = 'smooth'
     world_strength: float = .45
+    view_transform: str = 'AgX'
+    exposure: float = 0.
+    track_emission: float = .7
+    cluster_emission: float = 1.
     lights: list = field(default_factory=lambda:[
         {'position_m':[5.,-5.,10.], 'energy':1800., 'size_m':8., 'color':'#ffffff'},
         {'position_m':[-8.,3.,4.], 'energy':1200., 'size_m':10., 'color':'#ffffff'},
@@ -179,6 +184,7 @@ class RenderSettings:
         if self.scale_min is not None and self.scale_max is not None and self.scale_min>=self.scale_max: raise ValueError('Colour minimum must be less than maximum')
         if self.geometry_units not in ('cm','m'): raise ValueError('Geometry units must be cm or m')
         if self.camera not in ('perspective','orthographic'):raise ValueError('Invalid camera type')
+        if not math.isfinite(self.camera_lens_mm) or not .1<=self.camera_lens_mm<=5000:raise ValueError('Invalid camera focal length')
         if self.camera_orbit_axis not in ('Y','Z'):raise ValueError('Invalid camera orbit axis')
         if self.palette_lut:
             if len(self.palette_lut)<2 or any(len(c)!=3 or any(not math.isfinite(v) or not 0<=v<=1 for v in c) for c in self.palette_lut):raise ValueError('Invalid colormap RGB table')
@@ -210,6 +216,10 @@ class RenderSettings:
             if not math.isfinite(getattr(self,key)) or not 0<=getattr(self,key)<=1:raise ValueError('Invalid '+key)
         if not math.isfinite(self.frame_aspect) or not .05<=self.frame_aspect<=20:raise ValueError('Invalid frame aspect ratio')
         if not math.isfinite(self.world_strength) or self.world_strength<0:raise ValueError('Invalid background strength')
+        if self.view_transform not in ('AgX','Standard'):raise ValueError('Invalid display colour transform')
+        if not math.isfinite(self.exposure) or not -20<=self.exposure<=20:raise ValueError('Exposure must be between -20 and 20 stops')
+        for name in ('track_emission','cluster_emission'):
+            if not math.isfinite(getattr(self,name)) or not 0<=getattr(self,name)<=100:raise ValueError('Invalid '+name)
         for name,style in self.geometry_display.items():
             if name!='L3':detector(name)
             if style not in ('surfaces','shell','outline'):raise ValueError('Invalid detector display style')
