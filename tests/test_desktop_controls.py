@@ -115,7 +115,8 @@ def test_commissioning_defaults_clone_style_keep_input_events_assets_and_hardwar
     assert len(saved['lights'])==12
 
 
-def test_import_config_preserves_disabled_tpc_parts_and_surround_lights(window,monkeypatch):
+@pytest.mark.parametrize('configured_match',[True,False])
+def test_import_config_preserves_disabled_tpc_parts_and_surround_lights(window,monkeypatch,configured_match):
     import gzip
     from alice_renderer.scene_config import recipe,save_config,sha256
     from alice_renderer.scene_presets import surround_lights
@@ -131,10 +132,22 @@ def test_import_config_preserves_disabled_tpc_parts_and_surround_lights(window,m
     choices={'parts/TPC_INPLL':False,'parts/TPC_IROCB':True}
     cfg=RenderSettings(detectors=['TPC'],geometry=['TPC'],geometry_assets={'TPC':str(asset)},
                        geometry_components={'TPC':choices},lights=surround_lights())
-    path=root/'scene.json';save_config(path,recipe(cfg))
+    path=root/'configs'/'scene.json';save_config(path,recipe(cfg))
+    if configured_match:w.asset_fields['TPC'].setText(str(asset))
+    else:
+        wrong=root/'wrong-TPC.blend';wrong.write_bytes(b'different-alignment')
+        w.asset_fields['TPC'].setText(str(wrong))
+    directory_requests=[]
+    def choose_bundle(*args):
+        directory_requests.append(True)
+        assert not configured_match,'Matching Setup geometry should load without prompting'
+        return str(root)
     monkeypatch.setattr(app_module.QFileDialog,'getOpenFileName',lambda *args:(str(path),''))
+    monkeypatch.setattr(app_module.QFileDialog,'getExistingDirectory',choose_bundle)
     w.import_scene();actual=w.settings()
     assert actual.geometry_components['TPC']==choices and actual.lights==cfg.lights
+    assert bool(directory_requests)==(not configured_match)
+    assert actual.geometry_assets['TPC']==str(asset)
     assert w.model.selected=={1} and w.source.text()==str(root/'events.jsonl')
 
 

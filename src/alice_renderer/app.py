@@ -515,11 +515,19 @@ class Window(QMainWindow):
         if not path:return
         try:
             data=load_config(path);root=Path(path).parent
-            if any(not (root/ref['file']).is_file() for ref in data['geometry'].values()):
+            from .scene_config import sha256
+            # A portable recipe names geometry files, not this machine's paths.
+            # Reuse already configured assets only when their saved hashes match.
+            available={}
+            for name,field in self.asset_fields.items():
+                asset=Path(field.text()).expanduser()
+                ref=data['geometry'].get(name)
+                if asset.is_file() and (ref is None or sha256(asset)==ref['sha256']):available[name]=str(asset.resolve())
+            if any(name not in available and not (root/ref['file']).is_file() for name,ref in data['geometry'].items()):
                 chosen=QFileDialog.getExistingDirectory(self,'Choose the matching geometry bundle')
                 if not chosen:return
                 root=Path(chosen)
-            cfg=resolve_settings(data,path,root)
+            cfg=resolve_settings(data,path,root,asset_overrides=available)
             self.apply_scene(cfg);self.register_scene(path,'config',cfg);self.message('Scene loaded. Choose the local input and event, then preview or render.')
         except Exception as exc:self.failure(str(exc))
     def apply_scene(self,cfg):
