@@ -69,7 +69,7 @@ class Window(QMainWindow):
                 saved=json.loads(self.settings_file.read_text());self.base=RenderSettings(**saved.get('render',{}));self.saved=saved
             except Exception:self.saved={}
         else:self.saved={}
-        self.scene_overrides={key:getattr(self.base,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_openings','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear')}
+        self.scene_overrides={key:getattr(self.base,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_display','geometry_openings','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear')}
         central=QWidget();self.setCentralWidget(central);layout=QVBoxLayout(central)
         title=QLabel('ALICE  /  EVENT RENDERER');title.setObjectName('title');layout.addWidget(title)
         self.summary=QLabel('Choose an input, select events and detectors, then preview or render.');layout.addWidget(self.summary)
@@ -305,7 +305,7 @@ class Window(QMainWindow):
             self.apply_scene(cfg);self.message('Scene loaded. Choose the local input and event, then preview or render.')
         except Exception as exc:self.failure(str(exc))
     def apply_scene(self,cfg):
-        self.scene_overrides={key:getattr(cfg,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_openings','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear')}
+        self.scene_overrides={key:getattr(cfg,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_display','geometry_openings','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear')}
         for name,box in self.data_checks.items():box.setChecked(name in cfg.detectors)
         for name,box in self.geometry_checks.items():box.setChecked(name in cfg.geometry)
         for name,field in self.asset_fields.items():field.setText(cfg.geometry_assets.get(name,''))

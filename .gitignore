@@ -21,3 +21,4 @@ profiles/run-560067-raw.json
 *.tf
 *.ctf
 .DS_Store
+configs/

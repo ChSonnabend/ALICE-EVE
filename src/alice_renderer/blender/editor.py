@@ -24,12 +24,13 @@ def current_settings():
     cfg['frame_aspect']=scene.render.resolution_x/scene.render.resolution_y
     cfg['width']=scene.render.resolution_x;cfg['height']=scene.render.resolution_y
     cfg['geometry']=[];cfg['magnet']=False;cfg['detectors']=[]
-    cfg['geometry_openings']={};cfg['geometry_opacities']={};cfg['colors_linear']={}
+    cfg['geometry_display']={};cfg['geometry_openings']={};cfg['geometry_opacities']={};cfg['colors_linear']={}
     for item in ui.detectors:
         if item.data and item.data_available:cfg['detectors'].append(item.name)
         if item.visible and item.geometry_available:
             if item.name=='L3':cfg['magnet']=True
             else:cfg['geometry'].append(item.name)
+        cfg['geometry_display'][item.name]=item.display
         cfg['geometry_openings'][item.name]=item.opening
         cfg['geometry_opacities'][item.name]=item.opacity
         cfg['colors']['magnet' if item.name=='L3' else item.name]=hex_color(item.color)
@@ -37,6 +38,7 @@ def current_settings():
     cfg['colors']['background']=hex_color(ui.background)
     cfg['colors']['tracks']=hex_color(ui.track_color);cfg['colors']['clusters']=hex_color(ui.cluster_color)
     cfg['colors_linear'].update(background=list(ui.background),tracks=list(ui.track_color),clusters=list(ui.cluster_color))
+    cfg['geometry_lod']=ui.geometry_lod
     cfg['world_strength']=ui.world_strength;cfg['roughness']=ui.roughness;cfg['metallic']=ui.metallic;cfg['shading']=ui.shading
     cfg['mode']=ui.mode;cfg['track_color_mode']=ui.track_mode;cfg['cluster_color_mode']=ui.cluster_mode;cfg['palette']=ui.palette
     cfg['color_ranges']={'tracks':[ui.track_min,ui.track_max],'clusters':[ui.cluster_min,ui.cluster_max]}
@@ -59,7 +61,7 @@ def appearance_update(self,context):
         coll=bpy.data.collections.get(item.name)
         if coll:
             coll.hide_render=not item.visible;coll.hide_viewport=not item.visible
-        mats={m for obj in coll.all_objects if obj.type=='MESH' for m in obj.data.materials if m} if coll else set()
+        mats={m for obj in coll.all_objects if obj.type in ('MESH','CURVE') for m in obj.data.materials if m} if coll else set()
         for mat in mats:
             if not mat.use_nodes:continue
             bsdf=mat.node_tree.nodes.get('Principled BSDF')
@@ -87,11 +89,13 @@ class DetectorSettings(bpy.types.PropertyGroup):
     visible: BoolProperty(name='Surface',default=True,update=appearance_update)
     opening: FloatProperty(name='Opening (degrees)',min=0,max=360,default=180,update=appearance_update)
     opacity: FloatProperty(name='Opacity',min=0,max=1,default=.18,update=appearance_update)
+    display: EnumProperty(name='Appearance',items=[('surfaces','Existing surfaces','Keep the current aligned surfaces or simplified cells'),('shell','Outer shell','Approximate outer hull; removes internal structures and openings'),('outline','Outline','Edges of the approximate outer hull')])
     color: FloatVectorProperty(name='Colour',subtype='COLOR',size=3,min=0,max=1,default=(.02,.04,.2),update=appearance_update)
 
 COLOR_ITEMS=[(name,name,'') for name in COLOR_FIELDS]
 class SceneSettings(bpy.types.PropertyGroup):
     detectors: CollectionProperty(type=DetectorSettings)
+    geometry_lod: EnumProperty(name='Geometry detail',items=[('full','Full aligned surfaces','Preserve the actual detector geometry'),('simplified','Coarse cells','Reduce complexity; approximate bounding cells')])
     mode: EnumProperty(name='Objects',items=[(v,v,'') for v in ('tracks','clusters','both')],update=appearance_update)
     track_mode: EnumProperty(name='Track coding',items=COLOR_ITEMS)
     cluster_mode: EnumProperty(name='Cluster coding',items=COLOR_ITEMS)
@@ -127,6 +131,40 @@ class ApplyData(bpy.types.Operator):
             return {'FINISHED'}
         except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
 
+class ApplyGeometry(bpy.types.Operator):
+    bl_idname='alice_eve.apply_geometry';bl_label='Apply geometry appearance'
+    def execute(self,context):
+        try:
+            from worker import imported_geometry,envelope
+            cfg=current_settings().to_dict();cfg['_interactive']=True
+            for item in context.scene.alice_eve.detectors:
+                if not item.geometry_available:continue
+                old=bpy.data.collections.get(item.name)
+                if old and old.get('alice_display')==item.display and old.get('alice_geometry_lod')==cfg['geometry_lod']:continue
+                if old:
+                    for obj in list(old.objects):bpy.data.objects.remove(obj,do_unlink=True)
+                    bpy.data.collections.remove(old)
+                if cfg['schematic']:envelope(item.name,cfg)
+                else:imported_geometry(item.name,cfg['geometry_assets'][item.name],cfg)
+            appearance_update(self,context)
+            self.report({'INFO'},'Geometry appearance applied; shell/outline are approximate outer hulls')
+            return {'FINISHED'}
+        except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
+
+class FullAlignedGeometry(bpy.types.Operator):
+    bl_idname='alice_eve.full_geometry';bl_label='Full aligned surfaces'
+    def execute(self,context):
+        ui=context.scene.alice_eve;ui.geometry_lod='full'
+        for item in ui.detectors:item.display='surfaces'
+        return bpy.ops.alice_eve.apply_geometry()
+
+class OpaqueGeometry(bpy.types.Operator):
+    bl_idname='alice_eve.opaque_geometry';bl_label='Make geometry opaque'
+    def execute(self,context):
+        for item in context.scene.alice_eve.detectors:
+            if item.geometry_available:item.opacity=1.
+        return {'FINISHED'}
+
 class CameraFromView(bpy.types.Operator):
     bl_idname='alice_eve.camera_from_view';bl_label='Use current view as camera'
     def execute(self,context):
@@ -141,6 +179,7 @@ class ExportConfig(bpy.types.Operator):
             for kind,mode,active in [('tracks',cfg.track_color_mode,cfg.mode!='clusters'),('clusters',cfg.cluster_color_mode,cfg.mode!='tracks')]:
                 objects=[o for o in EVENT[kind] if selected.intersection(o['detectors'])] if kind=='tracks' else [o for o in EVENT[kind] if o['detector'] in selected]
                 if active and mode not in capabilities(objects):raise ValueError(f'{mode} is unavailable for selected {kind}')
+            if bpy.ops.alice_eve.apply_geometry()!={'FINISHED'}:return {'CANCELLED'}
             data=recipe(cfg)
             if ui.include_defaults:data['defaults']={'input':JOB['event'],'event':str(EVENT['id'])}
             save_config(bpy.path.abspath(ui.export_path),data)
@@ -183,9 +222,12 @@ class EVEPanel(bpy.types.Panel):
     bl_label='ALICE-EVE scene';bl_idname='ALICE_PT_scene';bl_space_type='VIEW_3D';bl_region_type='UI';bl_category='ALICE EVE'
     def draw(self,context):
         layout=self.layout;ui=context.scene.alice_eve
-        layout.label(text='Simplified aligned surfaces (approximation)')
+        layout.label(text='Aligned detector geometry')
+        layout.prop(ui,'geometry_lod');layout.operator('alice_eve.full_geometry')
+        layout.label(text='Outer shell / outline are approximate hulls.')
         layout.label(text='Orbit/pan/zoom, then use view as camera.')
         layout.operator('alice_eve.camera_from_view');layout.prop(context.scene.camera.data,'type');layout.prop(context.scene.camera.data,'lens');layout.prop(context.scene.camera.data,'ortho_scale')
+        layout.operator('alice_eve.opaque_geometry');layout.operator('alice_eve.apply_geometry')
         layout.prop(ui,'mode');layout.prop(ui,'track_color');layout.prop(ui,'cluster_color')
         for kind in ('track','cluster'):
             box=layout.box();box.prop(ui,kind+'_mode');row=box.row();row.prop(ui,kind+'_min');row.prop(ui,kind+'_max')
@@ -195,14 +237,14 @@ class EVEPanel(bpy.types.Panel):
             row=box.row();row.enabled=item.data_available;row.prop(item,'data')
             row=box.row();row.enabled=item.geometry_available;row.prop(item,'visible')
             if item.geometry_available:
-                box.prop(item,'opening');box.prop(item,'color');box.prop(item,'opacity')
+                box.prop(item,'display');box.prop(item,'opening');box.prop(item,'color');box.prop(item,'opacity')
         layout.prop(ui,'background');layout.prop(ui,'world_strength');layout.prop(ui,'roughness');layout.prop(ui,'metallic');layout.prop(ui,'shading')
         for lamp in (o for o in context.scene.objects if o.type=='LIGHT'):
             box=layout.box();box.label(text=lamp.name);box.prop(lamp,'location');box.prop(lamp,'rotation_euler');box.prop(lamp.data,'energy');box.prop(lamp.data,'size');box.prop(lamp.data,'color')
         layout.prop(ui,'export_path');layout.prop(ui,'include_defaults')
         row=layout.row();row.operator('alice_eve.export');row.operator('alice_eve.render_full')
 
-CLASSES=(DetectorSettings,SceneSettings,ApplyData,CameraFromView,ExportConfig,RenderFull,EVEPanel)
+CLASSES=(DetectorSettings,SceneSettings,ApplyData,ApplyGeometry,FullAlignedGeometry,OpaqueGeometry,CameraFromView,ExportConfig,RenderFull,EVEPanel)
 
 def start_editor(job,event,metadata):
     global JOB,EVENT,DEVICES,RECOMMENDATION
@@ -212,6 +254,7 @@ def start_editor(job,event,metadata):
     scene=bpy.context.scene;ui=scene.alice_eve;settings=job['settings']
     # Suppress updates during property initialization.
     from worker import rgb
+    ui.geometry_lod=settings.get('geometry_lod','full')
     ui.mode=settings['mode'];ui.track_mode=settings['track_color_mode'];ui.cluster_mode=settings['cluster_color_mode'];ui.palette=settings['palette']
     ui.background=settings.get('colors_linear',{}).get('background',rgb(settings['colors']['background']));ui.track_color=settings.get('colors_linear',{}).get('tracks',rgb(settings['colors']['tracks']));ui.cluster_color=settings.get('colors_linear',{}).get('clusters',rgb(settings['colors']['clusters']))
     ui.world_strength=settings['world_strength'];ui.roughness=settings['roughness'];ui.metallic=settings['metallic'];ui.shading=settings['shading']
@@ -219,6 +262,7 @@ def start_editor(job,event,metadata):
     from alice_renderer.model import DETECTORS
     for name in (*DETECTORS,'L3'):
         item=ui.detectors.add();item.name=name;item.data_available=name in available;item.data=name in settings['detectors'];item.geometry_available=name in settings['geometry'] or name=='L3' and settings['magnet'];item.visible=item.geometry_available
+        item.display=settings.get('geometry_display',{}).get(name,'surfaces')
         item.opening=settings['geometry_openings'].get(name,180 if settings['cutaway'] else 0);item.opacity=settings['geometry_opacities'].get(name,settings['geometry_opacity']);item.color=settings.get('colors_linear',{}).get('magnet' if name=='L3' else name,rgb(settings['colors'].get('magnet' if name=='L3' else name,'#243a82')))
     locked=recipe(RenderSettings(**settings),event)['scene']['color_ranges']
     ui.track_min,ui.track_max=locked['tracks'];ui.cluster_min,ui.cluster_max=locked['clusters']

@@ -48,3 +48,24 @@ def test_quality_backend_recommendations_and_fixed_ranges():
     cfg=RenderSettings(color_ranges={'tracks':[2,2]})
     assert recipe(cfg)['scene']['color_ranges']['tracks']==[2,2]
     assert quality_settings(cfg,'draft').width==640
+
+
+def test_detector_display_styles_are_portable():
+    cfg=RenderSettings(geometry_display={'TPC':'shell','ITS':'outline'})
+    data=recipe(cfg)
+    assert data['scene']['geometry_display']==cfg.geometry_display
+    assert resolve_settings(data,Path('scene.json')).geometry_display==cfg.geometry_display
+    with pytest.raises(ValueError,match='display style'):RenderSettings(geometry_display={'TPC':'dots'}).validate()
+
+
+def test_interactive_launch_keeps_full_aligned_geometry(tmp_path,monkeypatch):
+    from alice_renderer import runtime
+    class Process:pid=42
+    monkeypatch.setattr(runtime,'probe',lambda _: {'version':[5,0,0],'devices':[{'type':'CPU'}]})
+    monkeypatch.setattr(runtime,'preflight',lambda *args: [])
+    monkeypatch.setattr(runtime.subprocess,'Popen',lambda *args,**kwargs:Process())
+    event=tmp_path/'event.json';event.write_text(json.dumps({'id':'fixture','tracks':[],'clusters':[]}))
+    (tmp_path/'outputs').mkdir()
+    folder,pid=runtime.launch_editor('blender',event,RenderSettings(geometry_lod='full'),tmp_path/'outputs')
+    assert pid==42
+    assert json.loads((folder/'job.json').read_text())['settings']['geometry_lod']=='full'

@@ -131,6 +131,7 @@ class RenderSettings:
     color_ranges: dict = field(default_factory=dict)
     colors_linear: dict = field(default_factory=dict)
     geometry_lod: str = 'full'
+    geometry_display: dict = field(default_factory=dict)
     geometry_openings: dict = field(default_factory=dict)
     geometry_opacities: dict = field(default_factory=dict)
     roughness: float = .38
@@ -169,6 +170,9 @@ class RenderSettings:
             if not math.isfinite(getattr(self,key)) or not 0<=getattr(self,key)<=1:raise ValueError('Invalid '+key)
         if not math.isfinite(self.frame_aspect) or not .05<=self.frame_aspect<=20:raise ValueError('Invalid frame aspect ratio')
         if not math.isfinite(self.world_strength) or self.world_strength<0:raise ValueError('Invalid background strength')
+        for name,style in self.geometry_display.items():
+            if name!='L3':detector(name)
+            if style not in ('surfaces','shell','outline'):raise ValueError('Invalid detector display style')
         for name,angle in self.geometry_openings.items():
             if name!='L3':detector(name)
             if not math.isfinite(angle) or not 0<=angle<=360:raise ValueError('Opening must be 0–360 degrees')

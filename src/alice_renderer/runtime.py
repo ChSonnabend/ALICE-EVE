@@ -119,7 +119,6 @@ def launch_editor(blender, event_path, settings, output):
     """Launch native Blender editing; quality is chosen only by Render full."""
     import copy
     cfg=copy.deepcopy(settings)
-    cfg.geometry_lod='simplified'
     for name in cfg.geometry+(['L3'] if cfg.magnet else []):
         cfg.geometry_openings.setdefault(name,180. if cfg.cutaway else 0.)
     cfg.cutaway=False

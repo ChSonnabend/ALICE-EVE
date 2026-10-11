@@ -77,7 +77,7 @@ def materials(name,color,opacity=1.,emission=0.,cutaway=False,settings=None):
     if settings and name in settings.get('geometry_openings',{}):
         angular_cut(mat,settings['geometry_openings'][name])
     mat.diffuse_color=(*color,opacity)
-    if hasattr(mat,'surface_render_method'):mat.surface_render_method='DITHERED'
+    if hasattr(mat,'surface_render_method'):mat.surface_render_method='BLENDED' if (settings or {}).get('_interactive') else 'DITHERED'
     return mat
 
 def angular_cut(mat,opening):
@@ -177,7 +177,11 @@ def envelope(name,settings):
     mesh=bpy.data.meshes.new(name+' schematic');mesh.from_pydata(vertices,[],faces);mesh.update()
     obj=bpy.data.objects.new(name+' — schematic envelope',mesh);collection(name).objects.link(obj)
     key='magnet' if name=='L3' else name
-    mesh.materials.append(materials(name, settings.get('colors_linear',{}).get(key,rgb(settings['colors'][key])),settings.get('geometry_opacities',{}).get(name,settings['geometry_opacity']),settings=settings))
+    style=settings.get('geometry_display',{}).get(name,'surfaces')
+    if style!='surfaces':
+        from geometry_display import display_geometry
+        objects,_=display_geometry([obj],obj.users_collection[0],name,style);obj=objects[0]
+    obj.data.materials.append(materials(name, settings.get('colors_linear',{}).get(key,rgb(settings['colors'][key])),settings.get('geometry_opacities',{}).get(name,settings['geometry_opacity']),settings=settings))
 
 def imported_geometry(name,path,settings):
     path=Path(path);before=set(bpy.data.objects)
@@ -204,14 +208,32 @@ def imported_geometry(name,path,settings):
     roots=[o for o in objects if o.parent not in objects]
     for obj in roots:obj.location*=factor;obj.scale*=factor
     bpy.context.view_layer.update()
+    # hide_set is local to a view layer and is lost when library objects are
+    # linked into this scene. Keep Geometry Nodes helpers hidden in the viewport
+    # while retaining their data for the visible instancer.
+    for obj in objects:
+        if obj.hide_render:obj.hide_set(True)
     lod={}
-    if settings.get('geometry_lod')=='simplified':
+    style=settings.get('geometry_display',{}).get(name,'surfaces')
+    coll['alice_display']=style;coll['alice_geometry_lod']=settings.get('geometry_lod','full')
+    if style=='outline' and settings['cutaway'] and name not in settings.get('geometry_openings',{}):
+        settings=dict(settings,geometry_openings={**settings.get('geometry_openings',{}),name:180})
+    if settings.get('geometry_lod')=='simplified' or style!='surfaces':
         from simplified import simplify
         objects,lod=simplify(objects,coll,name);meshes=objects
+    if style!='surfaces':
+        from geometry_display import display_geometry
+        objects,display_info=display_geometry(objects,coll,name,style);lod.update(display_info);meshes=objects
     mat=materials(name,settings.get('colors_linear',{}).get('magnet' if name=='L3' else name,rgb(settings['colors']['magnet' if name=='L3' else name])),settings.get('geometry_opacities',{}).get(name,settings['geometry_opacity']),settings=settings)
     physical_cut=settings['cutaway'] and name not in settings.get('geometry_openings',{})
+    # A 180-degree opening has an exact plane cut. Final Cycles renders use
+    # that physical cut for full surfaces, as in the reference images, avoiding
+    # long chains of invisible negative-Y geometry. Editing retains the shader
+    # wedge so opening angles can change without losing the other half.
+    if not settings.get('_interactive') and style=='surfaces' and settings.get('geometry_lod','full')=='full' and settings.get('geometry_openings',{}).get(name)==180:
+        physical_cut=True
     for obj in meshes:
-        for poly in obj.data.polygons:poly.use_smooth=settings.get('shading','smooth')=='smooth' and not lod
+        for poly in getattr(obj.data,'polygons',[]):poly.use_smooth=settings.get('shading','smooth')=='smooth' and not lod
     crossing_count=0;discarded_count=0
     def clip_mesh(mesh,matrix):
         import bmesh
@@ -264,6 +286,7 @@ def imported_geometry(name,path,settings):
 
 def render(job_path,interactive=False):
     job=json.loads(Path(job_path).read_text());settings=job['settings'];output=Path(job['output'])
+    if interactive:settings['_interactive']=True
     path=Path(job['event'])
     with (gzip.open(path,'rt') if path.suffix=='.gz' else path.open()) as stream:event=json.load(stream)
     bpy.ops.object.select_all(action='SELECT');bpy.ops.object.delete(use_global=False)
@@ -326,6 +349,7 @@ def render(job_path,interactive=False):
     (output/'metadata.json').write_text(json.dumps(metadata,indent=2))
     if interactive:
         from editor import start_editor
+        settings.pop('_interactive',None)
         start_editor(job,event,metadata)
         return
     if settings['save_blend']:bpy.ops.wm.save_as_mainfile(filepath=str(output/'scene.blend'))
