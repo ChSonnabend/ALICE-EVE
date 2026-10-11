@@ -49,6 +49,12 @@ def scale_color(value,low,high,palette,lut=None):
 
 def value(obj,mode):return color_value(obj,mode)
 
+def configure_surface_material(mat,opacity,interactive=False):
+    # BLENDED sorts whole objects; it cannot reliably order the nested faces
+    # of opaque instancers. Binary opening masks need opaque depth writes.
+    if hasattr(mat,'surface_render_method'):mat.surface_render_method='BLENDED' if interactive and opacity<1. else 'DITHERED'
+    if hasattr(mat,'use_transparency_overlap'):mat.use_transparency_overlap=not interactive
+
 def materials(name,color,opacity=1.,emission=0.,cutaway=False,settings=None):
     mat=bpy.data.materials.new(name);mat.use_nodes=True
     bsdf=mat.node_tree.nodes.get('Principled BSDF')
@@ -77,7 +83,7 @@ def materials(name,color,opacity=1.,emission=0.,cutaway=False,settings=None):
     if settings and name in settings.get('geometry_openings',{}):
         angular_cut(mat,settings['geometry_openings'][name],settings.get('geometry_opening_directions',{}).get(name,-90.))
     mat.diffuse_color=(*color,opacity)
-    if hasattr(mat,'surface_render_method'):mat.surface_render_method='BLENDED' if (settings or {}).get('_interactive') else 'DITHERED'
+    configure_surface_material(mat,opacity,(settings or {}).get('_interactive',False))
     return mat
 
 def angular_cut(mat,opening,direction=-90.):

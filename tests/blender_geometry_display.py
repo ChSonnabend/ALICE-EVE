@@ -15,7 +15,7 @@ a=p.parse_args(sys.argv[sys.argv.index('--')+1:])
 with tempfile.TemporaryDirectory(prefix='alice-geometry-qa-') as tmp:
     root=Path(tmp);event=root/'event.json'
     event.write_text(json.dumps({'id':'SYNTHETIC-QA','kind':'synthetic','tracks':[{'id':'1','detectors':['TPC'],'points':[[0,0,0],[20,20,30]],'kinematics':{}}],'clusters':[]}))
-    cfg=RenderSettings(detectors=['TPC'],geometry=[],geometry_assets={'TPC':str(a.asset.resolve())},geometry_units='m',geometry_lod='full',geometry_openings={'TPC':180},cutaway=False)
+    cfg=RenderSettings(detectors=['TPC'],geometry=[],geometry_assets={'TPC':str(a.asset.resolve())},geometry_units='m',geometry_opacity=1.,geometry_lod='full',geometry_openings={'TPC':180},cutaway=False)
     job=root/'job.json';job.write_text(json.dumps({'event':str(event),'output':str(root),'settings':cfg.to_dict(),'blender':{'version':list(bpy.app.version),'devices':[{'type':'CPU'}]}}))
     worker.render(job,True);ui=bpy.context.scene.alice_eve;item=ui.detectors.get('TPC')
     assert item.geometry_available and not item.visible
@@ -26,7 +26,13 @@ with tempfile.TemporaryDirectory(prefix='alice-geometry-qa-') as tmp:
     assert ui.geometry_lod=='full'
     assert any('num_instances' in o for o in bpy.data.collections['TPC'].objects)
     assert all(o.hide_get() for o in bpy.data.collections['TPC'].objects if o.hide_render)
-    assert all(m.surface_render_method=='BLENDED' for o in bpy.data.collections['TPC'].objects if o.type=='MESH' for m in o.data.materials)
+    assert all(m.surface_render_method=='DITHERED' for o in bpy.data.collections['TPC'].objects if o.type=='MESH' for m in o.data.materials)
+    item.opacity=.25
+    assert all(m.surface_render_method=='BLENDED' and not m.use_transparency_overlap for o in bpy.data.collections['TPC'].objects if o.type=='MESH' for m in o.data.materials)
+    assert bpy.ops.alice_eve.solid_surfaces()=={'FINISHED'} and item.opacity==1
+    assert all(m.surface_render_method=='DITHERED' for o in bpy.data.collections['TPC'].objects if o.type=='MESH' for m in o.data.materials)
+    ui.viewport_renderer='CYCLES';assert bpy.context.scene.render.engine=='CYCLES'
+    ui.viewport_renderer='BLENDER_EEVEE';assert bpy.context.scene.render.engine=='BLENDER_EEVEE'
     ui.track_width_cm=.5
     assert all(abs(o.data.bevel_depth-.0025)<1.e-8 for o in bpy.data.collections['Tracks'].objects)
     assert bpy.ops.alice_eve.apply_data()=={'FINISHED'}

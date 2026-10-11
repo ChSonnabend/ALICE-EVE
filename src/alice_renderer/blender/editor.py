@@ -158,6 +158,8 @@ def appearance_update(self,context):
             for node in mat.node_tree.nodes:
                 if node.bl_idname=='ShaderNodeMixShader' and not node.inputs[0].is_linked:node.inputs[0].default_value=item.opacity
             mat.diffuse_color=(*item.color,item.opacity)
+            from worker import configure_surface_material
+            configure_surface_material(mat,item.opacity,True)
     for kind in ('Tracks','Clusters'):
         coll=bpy.data.collections.get(kind)
         if not coll:continue
@@ -245,7 +247,16 @@ class DetectorSettings(bpy.types.PropertyGroup):
     color: FloatVectorProperty(name='Colour',subtype='COLOR',size=3,min=0,max=1,default=(.02,.04,.2),update=appearance_update)
 
 COLOR_ITEMS=[(name,name,'0 = standalone fitted source; 1 = composite matched source (e.g. ITS-TPC); grey = unknown' if name=='matching' else '') for name in COLOR_FIELDS]
+def viewport_renderer_update(self,context):
+    if not JOB:return
+    scene=context.scene;scene.render.engine=self.viewport_renderer
+    # Progressive Cycles uses the same materials and geometry as the full
+    # render; Eevee remains the fast choice. This is an editor-only preference.
+    scene.cycles.preview_samples=32;scene.cycles.use_preview_denoising=True
+    scene.eevee.taa_samples=64;scene.eevee.use_shadow_jitter_viewport=False
+
 class SceneSettings(bpy.types.PropertyGroup):
+    viewport_renderer: EnumProperty(name='Viewport renderer',items=[('BLENDER_EEVEE','Fast (Eevee)','Responsive preview; transparency and lighting are approximate'),('CYCLES','Accurate (Cycles)','Progressive preview using the final renderer; slower on CPU')],default='BLENDER_EEVEE',update=viewport_renderer_update)
     detectors: CollectionProperty(type=DetectorSettings)
     geometry_lod: EnumProperty(name='Geometry detail',items=[('full','Full aligned surfaces','Preserve the actual detector geometry'),('simplified','Coarse cells','Reduce complexity; approximate bounding cells')])
     mode: EnumProperty(name='Set all object modes',items=[(v,v,'') for v in ('tracks','clusters','both')],update=set_all_modes)
@@ -360,6 +371,7 @@ class CompleteGeometry(bpy.types.Operator):
 
 class FullAlignedGeometry(bpy.types.Operator):
     bl_idname='alice_eve.full_geometry';bl_label='Full aligned surfaces'
+    bl_description='Load original aligned detector meshes, overriding schematic envelopes, coarse cells and outlines'
     def execute(self,context):
         ui=context.scene.alice_eve;ui.geometry_lod='full'
         for item in ui.detectors:
@@ -371,6 +383,20 @@ class OpaqueGeometry(bpy.types.Operator):
     def execute(self,context):
         for item in context.scene.alice_eve.detectors:
             if item.geometry_available:item.opacity=1.
+        return {'FINISHED'}
+
+class SolidDetectorSurfaces(bpy.types.Operator):
+    bl_idname='alice_eve.solid_surfaces';bl_label='Use real solid detector surfaces'
+    bl_description='Load full aligned meshes and set selected detector surfaces opaque; preserve colours, openings, camera and data selection'
+    def execute(self,context):
+        if not any(i.visible and i.geometry_available for i in context.scene.alice_eve.detectors):
+            self.report({'ERROR'},'Select a detector Surface first');return {'CANCELLED'}
+        result=bpy.ops.alice_eve.full_geometry()
+        if result!={'FINISHED'}:return result
+        for item in context.scene.alice_eve.detectors:
+            if item.visible and item.geometry_available:item.opacity=1.
+        appearance_update(self,context)
+        self.report({'INFO'},'Full aligned opaque surfaces loaded; event clusters remain separate data')
         return {'FINISHED'}
 
 class CameraFromView(bpy.types.Operator):
@@ -577,7 +603,9 @@ class EVEPanel(bpy.types.Panel):
     bl_label='ALICE-EVE scene';bl_idname='ALICE_PT_scene';bl_space_type='VIEW_3D';bl_region_type='UI';bl_category='ALICE EVE'
     def draw(self,context):
         layout=self.layout;ui=context.scene.alice_eve
-        layout.label(text='Aligned detector geometry')
+        cfg=current_settings().to_dict()
+        layout.label(text='Detector surfaces')
+        layout.operator('alice_eve.solid_surfaces');layout.prop(ui,'viewport_renderer')
         layout.prop(ui,'geometry_lod');layout.operator('alice_eve.full_geometry')
         layout.operator('alice_eve.select_no_detectors');layout.operator('alice_eve.complete_geometry')
         layout.label(text='Outer shell / outline are approximate hulls.')
@@ -605,7 +633,7 @@ class EVEPanel(bpy.types.Panel):
             box.prop(item,'asset_path')
             if not item.geometry_available:box.label(text='Choose an aligned asset to add this surface')
             if item.geometry_available:
-                kind='aligned' if item.detail!='inherit' else 'schematic' if is_schematic(JOB['settings'],item.name) else 'aligned'
+                kind=geometry_description(cfg,item.name)
                 box.label(text='Geometry source: '+kind)
                 box.prop(item,'detail');box.prop(item,'display');box.prop(item,'opening');box.prop(item,'opening_direction');box.prop(item,'exclusions');box.prop(item,'color');box.prop(item,'opacity')
                 box.prop(item,'show_components')
@@ -628,7 +656,7 @@ class EVEPanel(bpy.types.Panel):
         layout.prop(ui,'export_path');layout.prop(ui,'include_defaults')
         row=layout.row();row.operator('alice_eve.export');row.operator('alice_eve.render_full')
 
-CLASSES=(GeometryComponent,ToggleComponent,RefreshComponents,DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,ExportConfig,RenderFull,EVEPanel)
+CLASSES=(GeometryComponent,ToggleComponent,RefreshComponents,DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,SolidDetectorSurfaces,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,ExportConfig,RenderFull,EVEPanel)
 
 def start_editor(job,event,metadata):
     global JOB,EVENT,DEVICES,RECOMMENDATION,PALETTES
@@ -674,7 +702,7 @@ def start_editor(job,event,metadata):
     ui.export_path=str(Path(job['output'])/'scene-config.json')
     JOB=job;JOB['applied_track_signature']=track_signature(ui);appearance_update(ui,bpy.context)
     bpy.context.preferences.inputs.view_rotate_method='TRACKBALL'
-    scene.render.engine='BLENDER_EEVEE';scene.render.resolution_percentage=100
+    viewport_renderer_update(ui,bpy.context);scene.render.resolution_percentage=100
     for screen in bpy.data.screens:
         for area in screen.areas:
             if area.type=='VIEW_3D':
