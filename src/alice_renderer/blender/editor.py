@@ -4,7 +4,7 @@ from pathlib import Path
 import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, StringProperty
 from alice_renderer.model import RenderSettings, COLOR_FIELDS, capabilities
-from alice_renderer.object_selection import parse_track_ids,selected_tracks,selected_clusters,enabled_detectors
+from alice_renderer.object_selection import parse_track_ids,selected_tracks,selected_clusters,enabled_detectors,event_counts
 from alice_renderer.palettes import names as palette_names
 from alice_renderer.scene_config import recipe, save_config, recommended_quality
 
@@ -131,6 +131,8 @@ def appearance_update(self,context):
 class DetectorSettings(bpy.types.PropertyGroup):
     data_available: BoolProperty(default=False)
     geometry_available: BoolProperty(default=False)
+    event_track_count: IntProperty(default=0)
+    event_cluster_count: IntProperty(default=0)
     data: BoolProperty(name='Event data',default=True,update=selection_update)
     mode: EnumProperty(name='Objects',items=[(v,v,'') for v in ('tracks','clusters','both')],update=selection_update)
     visible: BoolProperty(name='Surface',default=True,update=appearance_update)
@@ -247,8 +249,36 @@ class OpaqueGeometry(bpy.types.Operator):
 
 class CameraFromView(bpy.types.Operator):
     bl_idname='alice_eve.camera_from_view';bl_label='Use current view as camera'
+    bl_description='Capture this viewport as the render camera; an existing camera view is already captured'
     def execute(self,context):
-        bpy.ops.view3d.camera_to_view();return {'FINISHED'}
+        area=context.area
+        if not area or area.type!='VIEW_3D':
+            self.report({'ERROR'},'Use this button in a 3D viewport');return {'CANCELLED'}
+        region=next((r for r in area.regions if r.type=='WINDOW'),None)
+        if region is None or not context.scene.camera:
+            self.report({'ERROR'},'A 3D viewport and a scene camera are required');return {'CANCELLED'}
+        if area.spaces.active.region_3d.view_perspective=='CAMERA':
+            self.report({'INFO'},'Already viewing the render camera');return {'FINISHED'}
+        with context.temp_override(area=area,region=region):
+            if not bpy.ops.view3d.camera_to_view.poll():
+                self.report({'ERROR'},'This viewport cannot be captured as the camera');return {'CANCELLED'}
+            bpy.ops.view3d.camera_to_view()
+        return {'FINISHED'}
+
+class LevelCamera(bpy.types.Operator):
+    bl_idname='alice_eve.level_camera';bl_label='Level camera (Y up)'
+    bl_description='Remove camera roll using ALICE Y as vertical and XZ as the horizontal plane; retain camera position and viewing direction'
+    def execute(self,context):
+        from mathutils import Vector,Matrix
+        camera=context.scene.camera
+        if not camera:return {'CANCELLED'}
+        direction=camera.rotation_euler.to_matrix() @ Vector((0,0,-1))
+        vertical=Vector((0,1,0))
+        if abs(direction.dot(vertical))>.999:vertical=Vector((0,0,1))
+        right=direction.cross(vertical).normalized();up=right.cross(direction)
+        camera.rotation_euler=Matrix(((right.x,up.x,-direction.x),(right.y,up.y,-direction.y),(right.z,up.z,-direction.z))).to_euler()
+        if context.area:context.area.tag_redraw()
+        return {'FINISHED'}
 
 class ExportConfig(bpy.types.Operator):
     bl_idname='alice_eve.export';bl_label='Export config'
@@ -409,9 +439,11 @@ class EVEPanel(bpy.types.Panel):
         layout.operator('alice_eve.select_no_detectors');layout.operator('alice_eve.complete_geometry')
         layout.label(text='Outer shell / outline are approximate hulls.')
         layout.label(text='Orbit/pan/zoom, then use view as camera.')
-        layout.operator('alice_eve.camera_from_view');layout.prop(context.scene.camera,'rotation_euler')
+        layout.operator('alice_eve.camera_from_view');layout.operator('alice_eve.level_camera');layout.prop(context.scene.camera,'rotation_euler')
         row=layout.row();row.operator('alice_eve.roll_camera',text='Roll −15°').angle=-15;row.operator('alice_eve.roll_camera',text='Roll +15°').angle=15
         layout.label(text='Trackball navigation permits arbitrary orientation.')
+        if EVENT.get('contributors') is not None:layout.label(text='Primary vertex contributors: '+str(EVENT['contributors']))
+        layout.label(text='Detector counts refer to input fitted records.')
         layout.prop(context.scene.camera.data,'type');layout.prop(context.scene.camera.data,'lens');layout.prop(context.scene.camera.data,'ortho_scale')
         layout.operator('alice_eve.opaque_geometry');layout.operator('alice_eve.apply_geometry')
         layout.prop(ui,'mode');layout.prop(ui,'track_width_cm');layout.prop(ui,'cluster_radius_cm');layout.prop(ui,'clip_tracks');layout.prop(ui,'track_color');layout.prop(ui,'cluster_color')
@@ -423,7 +455,7 @@ class EVEPanel(bpy.types.Panel):
             box=layout.box();box.prop(ui,kind+'_mode');row=box.row();row.prop(ui,kind+'_min');row.prop(ui,kind+'_max')
         layout.prop(ui,'palette');layout.operator('alice_eve.apply_data')
         for item in ui.detectors:
-            box=layout.box();box.label(text=item.name)
+            box=layout.box();box.label(text=f'{item.name}: {item.event_track_count} tracks / {item.event_cluster_count} clusters' if item.data_available else item.name)
             row=box.row();row.enabled=item.data_available;row.prop(item,'data');row.prop(item,'mode')
             row=box.row();row.enabled=item.geometry_available;row.prop(item,'visible')
             if item.geometry_available:
@@ -434,7 +466,7 @@ class EVEPanel(bpy.types.Panel):
         layout.prop(ui,'export_path');layout.prop(ui,'include_defaults')
         row=layout.row();row.operator('alice_eve.export');row.operator('alice_eve.render_full')
 
-CLASSES=(DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,CameraFromView,RollCamera,PickTracks,StopPicking,ExportConfig,RenderFull,EVEPanel)
+CLASSES=(DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,ExportConfig,RenderFull,EVEPanel)
 
 def start_editor(job,event,metadata):
     global JOB,EVENT,DEVICES,RECOMMENDATION,PALETTES
@@ -457,11 +489,13 @@ def start_editor(job,event,metadata):
     ui.background=settings.get('colors_linear',{}).get('background',rgb(settings['colors']['background']));ui.track_color=settings.get('colors_linear',{}).get('tracks',rgb(settings['colors']['tracks']));ui.cluster_color=settings.get('colors_linear',{}).get('clusters',rgb(settings['colors']['clusters']))
     ui.world_strength=settings['world_strength'];ui.roughness=settings['roughness'];ui.metallic=settings['metallic'];ui.shading=settings['shading']
     available=set(event.get('data_detectors',[]))|{d for t in event['tracks'] for d in t['detectors']}|{c['detector'] for c in event['clusters']}
+    counts=event_counts(event);track_counts=counts['tracks_by_detector'];cluster_counts=counts['clusters_by_detector']
     from alice_renderer.model import DETECTORS
     for name in (*DETECTORS,'L3'):
         item=ui.detectors.add();item.name=name;item.data_available=name in available;item.data=name in settings['detectors'];item.mode=settings.get('detector_modes',{}).get(name,settings['mode']);item.geometry_available=name in settings['geometry'] or name=='L3' and settings['magnet'];item.visible=item.geometry_available
         item.display=settings.get('geometry_display',{}).get(name,'surfaces')
         item.detail=settings.get('geometry_lods',{}).get(name,'inherit')
+        item.event_track_count=track_counts.get(name,0);item.event_cluster_count=cluster_counts.get(name,0)
         item.opening=settings['geometry_openings'].get(name,180 if settings['cutaway'] else 0);item.opacity=settings['geometry_opacities'].get(name,settings['geometry_opacity']);item.color=settings.get('colors_linear',{}).get('magnet' if name=='L3' else name,rgb(settings['colors'].get('magnet' if name=='L3' else name,'#243a82')))
     settings['palette_lut']=PALETTES[settings['palette']]
     locked=recipe(RenderSettings(**settings),event)['scene']['color_ranges']

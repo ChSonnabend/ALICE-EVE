@@ -28,7 +28,7 @@ class Task(QThread):
 
 class EventsModel(QAbstractTableModel):
     changed=Signal()
-    columns=('Render','Event','Grouping','Run','TF','Tracks','Clusters','Detectors')
+    columns=('Render','Event','Grouping','Run','TF','Tracks','Clusters','Detectors','PV contributors')
     def __init__(self):super().__init__();self.rows=[];self.selected=set()
     def rowCount(self,parent=QModelIndex()):return 0 if parent.isValid() else len(self.rows)
     def columnCount(self,parent=QModelIndex()):return len(self.columns)
@@ -39,8 +39,9 @@ class EventsModel(QAbstractTableModel):
         row=self.rows[index.row()];col=index.column()
         if col==0 and role==Qt.CheckStateRole:return Qt.Checked if row['ordinal'] in self.selected else Qt.Unchecked
         if role==Qt.DisplayRole:
-            return ('',row['event_id'],row['kind'],row['run'],row['timeframe'],row['ntracks'],row['nclusters'],', '.join(json.loads(row['detectors'])))[col]
+            return ('',row['event_id'],row['kind'],row['run'],row['timeframe'],row['ntracks'],row['nclusters'],', '.join(json.loads(row['detectors'])),row.get('contributors') if row.get('contributors') is not None else '—')[col]
         if role==Qt.ToolTipRole and col==2:return 'Only collision records refer to primary vertices. Timeframes and ROFs are explicitly labelled.'
+        if role==Qt.ToolTipRole and col==8:return 'Tracks contributing to the reconstructed primary vertex; total exported tracks also include other O2 vertex-associated fitted sources.'
     def flags(self,index):return Qt.ItemIsEnabled|Qt.ItemIsSelectable|(Qt.ItemIsUserCheckable if index.column()==0 else Qt.NoItemFlags)
     def setData(self,index,value,role=Qt.EditRole):
         if index.column()!=0 or role!=Qt.CheckStateRole:return False
@@ -68,7 +69,8 @@ class Window(QMainWindow):
         self.settings_file=ROOT/'settings.local.json'
         if self.settings_file.exists():
             try:
-                saved=json.loads(self.settings_file.read_text());self.base=RenderSettings(**saved.get('render',{}));self.saved=saved
+                from .camera import upgrade_local_camera
+                saved=json.loads(self.settings_file.read_text());self.base=RenderSettings(**upgrade_local_camera(saved.get('render',{})));self.saved=saved
             except Exception:self.saved={}
         else:self.saved={}
         self.scene_overrides={key:getattr(self.base,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_display','geometry_openings','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
@@ -186,6 +188,7 @@ class Window(QMainWindow):
         self.device_label=QLabel('Device availability is verified before rendering.');self.device_label.setWordWrap(True);layout.addRow(self.device_label)
         self.threads=number(self.base.threads,0,256);layout.addRow('CPU threads (0 = automatic)',self.threads)
         self.camera=QComboBox();self.camera.addItems(['perspective','orthographic']);self.camera.setCurrentText(self.base.camera);layout.addRow('Camera',self.camera)
+        self.camera_orbit_axis=QComboBox();self.camera_orbit_axis.addItems(['Y','Z']);self.camera_orbit_axis.setCurrentText(self.base.camera_orbit_axis);self.camera_orbit_axis.setToolTip('Y keeps ALICE XZ as the horizontal plane; Z reproduces the legacy orbit');layout.addRow('Vertical orbit axis',self.camera_orbit_axis);self.camera_orbit_axis.currentTextChanged.connect(lambda *_:self.scene_overrides.pop('camera_pose',None))
         self.azimuth=number(self.base.azimuth,-180,180,1);self.elevation=number(self.base.elevation,-90,90,1);self.distance=number(self.base.distance_cm,1,100000,1)
         self.roll=number(self.base.roll,-360,360,1);layout.addRow('Camera roll (°)',self.roll)
         layout.addRow('Azimuth (°)',self.azimuth);layout.addRow('Elevation (°)',self.elevation);layout.addRow('Distance (cm)',self.distance)
@@ -218,6 +221,7 @@ class Window(QMainWindow):
         cfg.detector_modes={name:combo.currentText() for name,combo in self.detector_modes.items()}
         cfg.highlight_track_ids=parse_track_ids(self.highlight_ids.text());cfg.highlight_track_radius_cm=self.highlight_width.value()/2;cfg.highlight_cluster_radius_cm=self.highlight_clusters.value();cfg.highlight_override_color=self.highlight_override.isChecked();cfg.highlight_track_color=self.highlight_track_color.text();cfg.highlight_cluster_color=self.highlight_cluster_color.text();cfg.roll=self.roll.value()
         cfg.clip_tracks=self.clip_tracks.isChecked()
+        cfg.camera_orbit_axis=self.camera_orbit_axis.currentText()
         cfg.geometry_lod=self.geometry_lod.currentText()
         cfg.frame_aspect=cfg.width/cfg.height
         return cfg.validate()
@@ -365,7 +369,7 @@ class Window(QMainWindow):
         for name,field in self.asset_fields.items():field.setText(cfg.geometry_assets.get(name,''))
         for name,button in self.color_buttons.items():
             button.setText(cfg.colors[name]);button.setStyleSheet('background:'+cfg.colors[name])
-        for name,value in [('mode',cfg.mode),('track_mode',cfg.track_color_mode),('cluster_mode',cfg.cluster_color_mode),('palette',cfg.palette),('camera',cfg.camera),('geometry_units',cfg.geometry_units)]:getattr(self,name).setCurrentText(value)
+        for name,value in [('mode',cfg.mode),('track_mode',cfg.track_color_mode),('cluster_mode',cfg.cluster_color_mode),('palette',cfg.palette),('camera',cfg.camera),('camera_orbit_axis',cfg.camera_orbit_axis),('geometry_units',cfg.geometry_units)]:getattr(self,name).setCurrentText(value)
         for name,value in [('opacity',cfg.geometry_opacity),('track_radius',cfg.track_radius_cm*2),('cluster_radius',cfg.cluster_radius_cm),('azimuth',cfg.azimuth),('elevation',cfg.elevation),('distance',cfg.distance_cm)]:getattr(self,name).setValue(value)
         for spin,value in zip(self.target,cfg.target_cm):spin.setValue(value)
         self.geometry_lod.setCurrentText(cfg.geometry_lod)

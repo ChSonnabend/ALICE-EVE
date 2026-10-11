@@ -93,7 +93,11 @@ def resolve_settings(data,config_path,geometry_root=None,asset_overrides=None):
         if not path.is_file():raise ValueError(f'{name}: geometry {ref["file"]} missing. Copy the geometry bundle or supply --geometry-root.')
         if sha256(path)!=ref['sha256']:raise ValueError(f'{name}: geometry hash differs from exported scene; use the identical alignment/surfaces bundle')
         assets[name]=str(path.resolve())
-    cfg=RenderSettings(**data['scene'],geometry_assets=assets)
+    scene=dict(data['scene'])
+    # Older recipes used azimuth around Z. Keep their exact framing when loaded.
+    if 'camera_orbit_axis' not in scene:
+        scene['camera_orbit_axis']='Z';scene.setdefault('elevation',22.)
+    cfg=RenderSettings(**scene,geometry_assets=assets)
     required=cfg.geometry+(['L3'] if cfg.magnet else [])
     if not cfg.schematic and any(name not in assets for name in required):raise ValueError('Scene is missing selected geometry references')
     return cfg.validate()

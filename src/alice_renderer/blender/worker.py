@@ -5,7 +5,7 @@ import bpy
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from mathutils import Vector
-from alice_renderer.object_selection import annotate_matching,selected_tracks,selected_clusters,enabled_detectors,highlighted
+from alice_renderer.object_selection import annotate_matching,selected_tracks,selected_clusters,enabled_detectors,highlighted,event_counts
 from alice_renderer.model import color_value
 BOUND_CACHE={}
 
@@ -330,6 +330,7 @@ def imported_geometry(name,path,settings,bounds_only=False):
 
 def render(job_path,interactive=False):
     job=json.loads(Path(job_path).read_text());settings=job['settings'];output=Path(job['output'])
+    settings.setdefault('camera_orbit_axis','Z') # Jobs predating the explicit axis retain their camera.
     if interactive:settings['_interactive']=True
     path=Path(job['event'])
     with (gzip.open(path,'rt') if path.suffix=='.gz' else path.open()) as stream:event=annotate_matching(json.load(stream))
@@ -358,6 +359,7 @@ def render(job_path,interactive=False):
     selected=set(settings['detectors'])
     ts=selected_tracks(event,settings);cs=selected_clusters(event,settings)
     metadata={'event_id':event['id'],'kind':event['kind'],'source_warnings':event.get('warnings',[]),'rendered_tracks':0,'rendered_clusters':0,'geometry':{},'coordinates':'ALICE global XYZ, converted from centimetres to metres'}
+    metadata['input_counts']=event_counts(event)
     regions={}
     from alice_renderer.track_clipping import selected_track_detectors
     required={d for t in ts for d in selected_track_detectors(settings,t)} if settings.get('clip_tracks',True) and bool(enabled_detectors(settings,'tracks')) else set()
@@ -384,9 +386,9 @@ def render(job_path,interactive=False):
     if bool(enabled_detectors(settings,'tracks')):
         metadata['track_legend']=tracks(ts,settings);metadata['rendered_tracks']=metadata['track_legend']['visible_tracks']
     if interactive or bool(enabled_detectors(settings,'clusters')):metadata['cluster_legend']=clusters(cs,settings);metadata['rendered_clusters']=len(cs)
-    az,el=map(math.radians,(settings['azimuth'],settings['elevation']))
+    from alice_renderer.camera import orbit_position
     target=Vector([v*.01 for v in settings['target_cm']]);distance=settings['distance_cm']*.01
-    position=target+Vector((distance*math.cos(el)*math.cos(az),distance*math.cos(el)*math.sin(az),distance*math.sin(el)))
+    position=Vector(orbit_position(settings['azimuth'],settings['elevation'],distance,target,settings.get('camera_orbit_axis','Z')))
     bpy.ops.object.camera_add(location=position);camera=bpy.context.object;camera.name='Event camera'
     # ALICE's vertical axis is Y and its beam axis is Z. Use global Y as
     # camera up so detector/event views have the expected physical orientation.

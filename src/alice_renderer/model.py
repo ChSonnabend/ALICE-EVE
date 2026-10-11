@@ -135,8 +135,9 @@ class RenderSettings:
     highlight_cluster_color: str = '#ff6633'
     cluster_radius_cm: float = 0.35
     camera: str = 'perspective'
+    camera_orbit_axis: str = 'Y'
     azimuth: float = -55.0
-    elevation: float = 22.0
+    elevation: float = 0.0
     roll: float = 0.
     distance_cm: float = 1600.0
     target_cm: list[float] = field(default_factory=lambda:[0.,0.,0.])
@@ -177,6 +178,7 @@ class RenderSettings:
         if self.scale_min is not None and self.scale_max is not None and self.scale_min>=self.scale_max: raise ValueError('Colour minimum must be less than maximum')
         if self.geometry_units not in ('cm','m'): raise ValueError('Geometry units must be cm or m')
         if self.camera not in ('perspective','orthographic'):raise ValueError('Invalid camera type')
+        if self.camera_orbit_axis not in ('Y','Z'):raise ValueError('Invalid camera orbit axis')
         if self.palette_lut:
             if len(self.palette_lut)<2 or any(len(c)!=3 or any(not math.isfinite(v) or not 0<=v<=1 for v in c) for c in self.palette_lut):raise ValueError('Invalid colormap RGB table')
         else:

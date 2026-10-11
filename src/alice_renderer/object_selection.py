@@ -1,5 +1,13 @@
 """Shared per-detector visibility and event-local emphasis, independent of Blender."""
 
+def event_counts(event):
+    from collections import Counter
+    return {'tracks_by_detector':dict(Counter(d for t in event['tracks'] for d in t['detectors'])),
+            'clusters_by_detector':dict(Counter(c['detector'] for c in event['clusters'])),
+            'tracks_by_source':dict(Counter(t.get('source','unknown') for t in event['tracks'])),
+            'primary_vertex_contributors':event.get('contributors'),
+            'unsampled_tracks':len(event.get('unrendered_tracks',[]))}
+
 def detector_mode(settings,name):return settings.get('detector_modes',{}).get(name,settings.get('mode','tracks'))
 
 def enabled_detectors(settings,kind):

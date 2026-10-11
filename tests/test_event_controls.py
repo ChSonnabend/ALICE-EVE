@@ -90,3 +90,25 @@ def test_per_detector_and_magnet_geometry_detail_roundtrip(tmp_path):
     assert restored.geometry_lod=='simplified'
     with pytest.raises(ValueError):RenderSettings(geometry_lods={'TPC':'unknown'}).validate()
     with pytest.raises(ValueError):RenderSettings(geometry_lods={'NOPE':'full'}).validate()
+
+
+def test_detector_counts_are_recorded_memberships_not_extrapolated_tracks():
+    from alice_renderer.object_selection import event_counts
+    data=event();data['contributors']=2
+    counts=event_counts(data)
+    assert counts['tracks_by_detector']=={'ITS':2,'TPC':2}
+    assert counts['tracks_by_source']=={'ITS':1,'TPC':1,'ITS-TPC':1}
+    assert counts['clusters_by_detector']=={'ITS':1,'TPC':1}
+    assert counts['primary_vertex_contributors']==2
+
+
+def test_contributors_survive_catalogue_and_old_native_cache_header(tmp_path):
+    import json,sqlite3
+    from alice_renderer.catalogue import Catalogue
+    source=tmp_path/'event.json';source.write_text(json.dumps({'contributors':3,**event()}))
+    cat=Catalogue.build(source,tmp_path/'cache')
+    assert cat.rows()[0]['contributors']==3
+    with sqlite3.connect(cat.db) as db:db.execute('ALTER TABLE events DROP COLUMN contributors')
+    before=cat.db.stat().st_mtime_ns
+    assert cat.rows()[0]['contributors']==3
+    assert cat.db.stat().st_mtime_ns==before

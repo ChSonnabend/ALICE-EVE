@@ -71,7 +71,7 @@ class Catalogue:
         connection=None
         try:
             connection = sqlite3.connect(staging/'catalogue.sqlite')
-            connection.execute('CREATE TABLE events (ordinal INTEGER PRIMARY KEY, event_id TEXT, kind TEXT, run TEXT, timeframe TEXT, ntracks INTEGER, nclusters INTEGER, detectors TEXT, track_fields TEXT, cluster_fields TEXT, filename TEXT)')
+            connection.execute('CREATE TABLE events (ordinal INTEGER PRIMARY KEY, event_id TEXT, kind TEXT, run TEXT, timeframe TEXT, ntracks INTEGER, nclusters INTEGER, detectors TEXT, track_fields TEXT, cluster_fields TEXT, filename TEXT, contributors INTEGER)')
             connection.execute('CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT)')
             count=0
             for raw in iter_json(source):
@@ -80,7 +80,7 @@ class Catalogue:
                 filename=f'event-{count:08d}.json.gz'
                 with gzip.open(staging/filename,'wt',compresslevel=3) as file:
                     file.write(json.dumps(event,allow_nan=False,separators=(',',':')))
-                connection.execute('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?,?,?)',(count,str(event['id']),event['kind'],str(event.get('run','')),str(event.get('timeframe','')),len(event['tracks']),len(event['clusters']),json.dumps(event['available_detectors']),json.dumps(capabilities(event['tracks'])),json.dumps(capabilities(event['clusters'])),filename))
+                connection.execute('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',(count,str(event['id']),event['kind'],str(event.get('run','')),str(event.get('timeframe','')),len(event['tracks']),len(event['clusters']),json.dumps(event['available_detectors']),json.dumps(capabilities(event['tracks'])),json.dumps(capabilities(event['clusters'])),filename,event.get('contributors')))
                 count+=1
                 if count%10==0: progress(f'Indexed {count} events')
                 # Release the previous large record before parsing the next one.
@@ -108,8 +108,16 @@ class Catalogue:
         from .object_selection import matching_value
         import ijson
         for row in rows:
-            if 'matching' in json.loads(row['track_fields']) or not row['ntracks']:continue
             path=self.folder/row['filename']
+            if 'contributors' not in row:
+                # Native records put the PV header before tracks. Read only that
+                # prefix for old caches; never scan millions of clusters for it.
+                row['contributors']=None
+                with (gzip.open(path,'rb') if path.suffix=='.gz' else path.open('rb')) as stream:
+                    for prefix,kind,value in ijson.parse(stream):
+                        if prefix=='contributors' and kind=='number':row['contributors']=int(value);break
+                        if prefix in ('tracks','clusters') and kind=='start_array':break
+            if 'matching' in json.loads(row['track_fields']) or not row['ntracks']:continue
             with (gzip.open(path,'rb') if path.suffix=='.gz' else path.open('rb')) as stream:
                 for count,track in enumerate(ijson.items(stream,'tracks.item',use_float=True)):
                     if matching_value(track) is not None:

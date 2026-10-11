@@ -81,4 +81,25 @@ with tempfile.TemporaryDirectory(prefix='alice-controls-qa-') as tmp:
     assert rendered['geometry_lods']=={'TPC':'simplified','L3':'full'}
     assert editor.current_settings().geometry_lods==original
     del bpy.types.Scene.alice_render_detail_qa
+    assert ui.detectors['ITS'].event_track_count==2
+    assert ui.detectors['TPC'].event_cluster_count==1
+    # Sidebar is a UI region; capture must override to the WINDOW region.
+    viewport=next(a for a in bpy.context.screen.areas if a.type=='VIEW_3D')
+    sidebar=next(r for r in viewport.regions if r.type=='UI');view=viewport.spaces.active.region_3d
+    view.view_perspective='CAMERA';before=camera.matrix_world.copy()
+    with bpy.context.temp_override(area=viewport,region=sidebar):
+        assert bpy.ops.alice_eve.camera_from_view()=={'FINISHED'}
+    assert camera.matrix_world==before
+    from mathutils import Euler,Vector
+    view.view_perspective='PERSP';view.view_rotation=Euler((.3,.4,.5)).to_quaternion();view.view_distance=12
+    with bpy.context.temp_override(area=viewport,region=sidebar):
+        assert bpy.ops.alice_eve.camera_from_view()=={'FINISHED'}
+    bpy.context.view_layer.update()
+    assert abs(camera.matrix_world.to_quaternion().dot(view.view_rotation))>1-1.e-6
+    direction=camera.rotation_euler.to_matrix() @ Vector((0,0,-1));position=camera.location.copy()
+    assert bpy.ops.alice_eve.level_camera()=={'FINISHED'}
+    assert camera.location==position
+    matrix=camera.rotation_euler.to_matrix()
+    assert (matrix @ Vector((0,0,-1))-direction).length<1.e-6
+    assert abs((matrix @ Vector((1,0,0))).y)<1.e-6
 print('Blender per-detector objects, matching, emphasis, picking, roll and portable export QA passed')

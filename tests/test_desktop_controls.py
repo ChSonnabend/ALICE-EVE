@@ -83,3 +83,13 @@ def test_render_dialog_chooses_detail_per_surface_and_magnet(window,monkeypatch)
     chosen=w.render_quality_dialog(cfg,{'devices':[{'type':'CPU'}]})
     assert chosen.geometry_lods=={'ITS':'simplified','TPC':'simplified','L3':'full'}
     assert cfg.geometry_lods=={'TPC':'full'} # render-only choices do not mutate editor settings
+
+
+def test_camera_orbit_axis_preserved_in_desktop_controls(window):
+    w,application,root=window
+    assert w.settings().camera_orbit_axis=='Y' and w.settings().elevation==0
+    cfg=RenderSettings(camera_orbit_axis='Z',elevation=22)
+    w.apply_scene(cfg)
+    assert w.settings().camera_orbit_axis=='Z' and w.settings().elevation==22
+    w.camera_orbit_axis.setCurrentText('Y')
+    assert w.settings().camera_orbit_axis=='Y'
