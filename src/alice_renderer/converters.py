@@ -55,7 +55,7 @@ def o2_display(raw):
         if len(set(map(len,axes)))!=1:raise ValueError('O2 polyline coordinate arrays have different lengths')
         points=[list(p) for p in zip(*axes)]
         kin={k:t[k] for k in ('eta','phi') if k in t and math.isfinite(t[k])}
-        if len(points)>=2 and names:event['tracks'].append({'id':str(t['bgid']),'detectors':names,'points':points,'kinematics':kin})
+        if len(points)>=2 and names:event['tracks'].append({'id':str(t['bgid']),'source':'-'.join(names),'source_basis':'O2 GlobalTrackID source enum','detectors':names,'points':points,'kinematics':kin})
         for c in t.get('mClusters',[]):add_cluster(c,gid_detectors(c['bgid']) if 'bgid' in c else names)
     for c in raw.get('mClusters',[]):
         if 'bgid' in c:add_cluster(c,gid_detectors(c['bgid']))

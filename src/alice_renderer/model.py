@@ -6,7 +6,7 @@ from typing import Any
 
 DETECTORS = ("ITS", "TPC", "TRD", "TOF", "HMP", "EMC", "PHS", "CPV", "MCH", "MFT", "MID", "FT0", "FV0", "FDD", "ZDC")
 ALIASES = {"HMPID":"HMP", "EMCAL":"EMC", "PHOS":"PHS", "V0":"FV0"}
-COLOR_FIELDS = ("solid", "eta", "tan_lambda", "phi", "p", "pt", "x", "y", "z", "dca", "primaries", "secondaries")
+COLOR_FIELDS = ("solid", "eta", "tan_lambda", "phi", "p", "pt", "x", "y", "z", "dca", "primaries", "secondaries", "matching")
 
 def detector(value: str) -> str:
     value = ALIASES.get(str(value).upper(), str(value).upper())
@@ -23,7 +23,7 @@ def xyz(value: Any) -> list[float]:
 def kinematics(data: dict) -> dict[str,float]:
     result = {}
     for key,val in data.items():
-        if key not in COLOR_FIELDS or key in ("solid","primaries","secondaries"): continue
+        if key not in COLOR_FIELDS or key in ("solid","primaries","secondaries","matching"): continue
         if val is not None and math.isfinite(float(val)): result[key] = float(val)
     # Only derive quantities from momentum, never from sampled track geometry.
     if all(key in result for key in ("pt","p")) and result['p'] < result['pt']:
@@ -53,6 +53,7 @@ def validate_event(raw: dict) -> dict:
         if not track['detectors']: raise ValueError("Track detector/source association is required")
         track['points'] = [xyz(p) for p in track['points']]
         if len(track['points'])<2: raise ValueError("A track needs at least two sampled points")
+        if 'matching' in track and (not isinstance(track['matching'],bool) or not track.get('matching_basis')):raise ValueError('Matching status requires a boolean and matching_basis')
         track['kinematics'] = kinematics(track.get('kinematics',{}))
         if 'classification' in track and track['classification'] not in ('primary','secondary','unknown'):
             raise ValueError("Unsupported track classification")
@@ -66,6 +67,7 @@ def validate_event(raw: dict) -> dict:
         cluster['id'] = str(cluster.get('id',index))
         cluster['detector'] = detector(cluster['detector'])
         cluster['position'] = xyz(cluster['position'])
+        if 'matching' in cluster and (not isinstance(cluster['matching'],bool) or not cluster.get('matching_basis')):raise ValueError('Cluster matching requires a boolean and matching_basis')
         cluster['kinematics'] = kinematics(cluster.get('kinematics',{}))
         if any(k in cluster['kinematics'] for k in ('eta','tan_lambda','phi','p','pt','dca')) and not cluster.get('kinematics_basis'):
             raise ValueError('Cluster kinematics require an explicit measurement or track-association basis')
@@ -75,9 +77,13 @@ def validate_event(raw: dict) -> dict:
     event['available_detectors'] = sorted({detector(d) for d in raw.get('data_detectors',[])} |
                                         {d for t in event['tracks'] for d in t['detectors']} |
                                         {c['detector'] for c in event['clusters']})
-    return event
+    from .object_selection import annotate_matching
+    return annotate_matching(event)
 
 def color_value(obj: dict, mode: str, position: list[float] | None = None) -> float | None:
+    if mode == 'matching':
+        from .object_selection import matching_value
+        return matching_value(obj)
     if mode == 'solid': return None
     if mode in ('x','y','z'):
         p = position or obj.get('position')
@@ -98,12 +104,14 @@ class RenderSettings:
     geometry: list[str] = field(default_factory=list)
     magnet: bool = False
     mode: str = 'tracks'
+    detector_modes: dict = field(default_factory=dict)
     track_color_mode: str = 'solid'
     cluster_color_mode: str = 'solid'
     colors: dict = field(default_factory=lambda: {'tracks':'#ee8ff5','clusters':'#94e5ff','background':'#070b20','magnet':'#315285', **{d:'#243a82' for d in DETECTORS}})
     scale_min: float | None = None
     scale_max: float | None = None
     palette: str = 'viridis'
+    palette_lut: list = field(default_factory=list)
     missing_color: str = '#808080'
     geometry_assets: dict[str,str] = field(default_factory=dict)
     geometry_units: str = 'cm'
@@ -119,10 +127,17 @@ class RenderSettings:
     threads: int = 0
     track_radius_cm: float = 0.12
     clip_tracks: bool = True
+    highlight_track_ids: list = field(default_factory=list)
+    highlight_track_radius_cm: float = .35
+    highlight_cluster_radius_cm: float = 1.
+    highlight_override_color: bool = True
+    highlight_track_color: str = '#ffcc33'
+    highlight_cluster_color: str = '#ff6633'
     cluster_radius_cm: float = 0.35
     camera: str = 'perspective'
     azimuth: float = -55.0
     elevation: float = 22.0
+    roll: float = 0.
     distance_cm: float = 1600.0
     target_cm: list[float] = field(default_factory=lambda:[0.,0.,0.])
     save_blend: bool = True
@@ -147,6 +162,11 @@ class RenderSettings:
     def validate(self):
         if not isinstance(self.clip_tracks,bool):raise ValueError('Track clipping must be a boolean')
         if self.mode not in ('tracks','clusters','both'): raise ValueError('Invalid rendering mode')
+        for name,mode in self.detector_modes.items():
+            detector(name)
+            if mode not in ('tracks','clusters','both'):raise ValueError('Invalid per-detector object mode')
+        from .object_selection import parse_track_ids
+        self.highlight_track_ids=parse_track_ids(self.highlight_track_ids)
         for v in self.detectors+self.geometry: detector(v)
         if self.backend not in ('CPU','METAL','HIP','CUDA','OPTIX'): raise ValueError('Invalid Cycles backend')
         if not 64<=self.width<=16384 or not 64<=self.height<=16384: raise ValueError('Resolution must be 64–16384 pixels')
@@ -156,16 +176,24 @@ class RenderSettings:
         if self.scale_min is not None and self.scale_max is not None and self.scale_min>=self.scale_max: raise ValueError('Colour minimum must be less than maximum')
         if self.geometry_units not in ('cm','m'): raise ValueError('Geometry units must be cm or m')
         if self.camera not in ('perspective','orthographic'):raise ValueError('Invalid camera type')
-        if self.palette not in ('viridis','coolwarm','hsv'):raise ValueError('Invalid colour scale')
+        if self.palette_lut:
+            if len(self.palette_lut)<2 or any(len(c)!=3 or any(not math.isfinite(v) or not 0<=v<=1 for v in c) for c in self.palette_lut):raise ValueError('Invalid colormap RGB table')
+        else:
+            from .palettes import names
+            if self.palette not in names():raise ValueError('Invalid colour scale')
         if self.output_format!='PNG':raise ValueError('This version renders 16-bit PNG')
         for key in ('tracks','clusters','background','magnet',*self.geometry):
             if not re.fullmatch(r'#[0-9a-fA-F]{6}',self.colors.get(key,'')):raise ValueError(f'{key}: expected a colour in #rrggbb format')
         if not re.fullmatch(r'#[0-9a-fA-F]{6}',self.missing_color):raise ValueError('Invalid missing-value colour')
         if self.threads<0:raise ValueError('CPU thread count must be nonnegative')
         xyz(self.target_cm)
-        for name in ('azimuth','elevation','distance_cm','track_radius_cm','cluster_radius_cm'):
+        for name in ('azimuth','elevation','roll','distance_cm','track_radius_cm','cluster_radius_cm','highlight_track_radius_cm','highlight_cluster_radius_cm'):
             if not math.isfinite(getattr(self,name)):raise ValueError(f'{name} must be finite')
         if self.track_radius_cm<=0 or self.cluster_radius_cm<=0 or self.distance_cm<=0: raise ValueError('Radii and camera distance must be positive')
+        if self.highlight_track_radius_cm<=0 or self.highlight_cluster_radius_cm<=0:raise ValueError('Highlight sizes must be positive')
+        for color in (self.highlight_track_color,self.highlight_cluster_color):
+            if not re.fullmatch(r'#[0-9a-fA-F]{6}',color):raise ValueError('Invalid highlight colour')
+        if not isinstance(self.highlight_override_color,bool):raise ValueError('Highlight colour override must be boolean')
         if self.geometry_lod not in ('full','simplified'):raise ValueError('Invalid geometry detail')
         if self.shading not in ('smooth','flat'):raise ValueError('Invalid shading')
         for key in ('roughness','metallic'):

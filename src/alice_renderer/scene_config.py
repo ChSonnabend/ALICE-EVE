@@ -31,22 +31,25 @@ def quality_settings(settings, quality='balanced', *, backend='CPU', device='', 
     return replace(settings,width=w,height=h,samples=samples or default_samples,backend=backend,device=device).validate()
 
 def recipe(settings, event=None, *, default_input=None, default_event=None):
-    settings.validate();values=settings.to_dict()
+    from .palettes import materialize
+    settings=materialize(copy.deepcopy(settings));settings.validate();values=settings.to_dict()
     scene={k:copy.deepcopy(values[k]) for k in SCENE_FIELDS}
     scene['frame_aspect']=settings.width/settings.height
     # Lock scalar ranges from the chosen event so another event/machine keeps the same legend.
     if event is not None:
         for kind in ('tracks','clusters'):
             mode=values[kind[:-1]+'_color_mode']
-            objects=[o for o in event[kind] if (set(o['detectors'])&set(settings.detectors) if kind=='tracks' else o['detector'] in settings.detectors)]
+            from .object_selection import selected_tracks,selected_clusters
+            objects=selected_tracks(event,values) if kind=='tracks' else selected_clusters(event,values)
             finite=[v for o in objects if (v:=color_value(o,mode)) is not None and math.isfinite(v)] if mode!='solid' else []
-            lo,hi=(0.,1.) if mode in ('primaries','secondaries') else (-math.pi,math.pi) if mode=='phi' else (min(finite),max(finite)) if finite else (0.,1.)
+            lo,hi=(0.,1.) if mode in ('primaries','secondaries','matching') else (-math.pi,math.pi) if mode=='phi' else (min(finite),max(finite)) if finite else (0.,1.)
             if settings.scale_min is not None:lo=settings.scale_min
             if settings.scale_max is not None:hi=settings.scale_max
             scene['color_ranges'][kind]=[lo,hi]
     refs={}
     required=settings.geometry+(['L3'] if settings.magnet else [])
-    clipping=[d for d in settings.detectors if d in settings.geometry_assets and (not settings.geometry or d in settings.geometry)] if settings.clip_tracks and settings.mode!='clusters' else []
+    from .object_selection import enabled_detectors
+    clipping=[d for d in enabled_detectors(values,'tracks') if d in settings.geometry_assets and (not settings.geometry or d in settings.geometry)] if settings.clip_tracks else []
     for name in dict.fromkeys(required+clipping):
         if settings.schematic:continue
         value=settings.geometry_assets.get(name)

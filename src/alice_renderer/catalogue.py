@@ -102,7 +102,22 @@ class Catalogue:
     def rows(self) -> list[dict]:
         with sqlite3.connect(self.db) as db:
             db.row_factory=sqlite3.Row
-            return [dict(row) for row in db.execute('SELECT * FROM events ORDER BY ordinal')]
+            rows=[dict(row) for row in db.execute('SELECT * FROM events ORDER BY ordinal')]
+        # Older catalogues lack the new matching capability. Inspect only a small
+        # track prefix, preserving the already validated payloads and index.
+        from .object_selection import matching_value
+        import ijson
+        for row in rows:
+            if 'matching' in json.loads(row['track_fields']) or not row['ntracks']:continue
+            path=self.folder/row['filename']
+            with (gzip.open(path,'rb') if path.suffix=='.gz' else path.open('rb')) as stream:
+                for count,track in enumerate(ijson.items(stream,'tracks.item',use_float=True)):
+                    if matching_value(track) is not None:
+                        row['track_fields']=json.dumps(json.loads(row['track_fields'])+['matching'])
+                        if row['nclusters'] and any(k in json.loads(row['cluster_fields']) for k in ('pt','p')):row['cluster_fields']=json.dumps(json.loads(row['cluster_fields'])+['matching'])
+                        break
+                    if count>=7:break
+        return rows
 
     def event_path(self, ordinal: int) -> Path:
         with sqlite3.connect(self.db) as db:
@@ -115,4 +130,6 @@ class Catalogue:
 
 def load_event(path):
     path=Path(path)
-    with (gzip.open(path,'rt') if path.suffix=='.gz' else path.open()) as stream:return json.load(stream)
+    with (gzip.open(path,'rt') if path.suffix=='.gz' else path.open()) as stream:event=json.load(stream)
+    from .object_selection import annotate_matching
+    return annotate_matching(event)

@@ -5,6 +5,8 @@ import bpy
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from mathutils import Vector
+from alice_renderer.object_selection import annotate_matching,selected_tracks,selected_clusters,enabled_detectors,highlighted
+from alice_renderer.model import color_value
 BOUND_CACHE={}
 
 def probe(path):
@@ -33,22 +35,18 @@ def rgb(value):
 
 VIRIDIS=[(0.267,0.005,0.329),(0.254,0.265,0.530),(0.164,0.471,0.558),(0.135,0.659,0.518),(0.478,0.821,0.318),(0.993,0.906,0.144)]
 
-def scale_color(value,low,high,palette):
+def scale_color(value,low,high,palette,lut=None):
     t=max(0.,min(1.,(value-low)/(high-low))) if high>low else .5
+    if lut:
+        from alice_renderer.palettes import interpolate
+        return interpolate(lut,t)
     if palette=='hsv': return colorsys.hsv_to_rgb((1-t)*.7,.85,1)
     if palette=='coolwarm':
         return ((.2+.8*t,.35+.5*(1-abs(2*t-1)),1-.8*t))
     pos=t*(len(VIRIDIS)-1);i=min(len(VIRIDIS)-2,int(pos));fraction=pos-i
     return tuple(VIRIDIS[i][j]*(1-fraction)+VIRIDIS[i+1][j]*fraction for j in range(3))
 
-def value(obj,mode):
-    if mode in ('x','y','z'):
-        pos=obj.get('position',obj.get('points',[[0,0,0]])[0])
-        return pos[('x','y','z').index(mode)]
-    if mode in ('primaries','secondaries'):
-        if obj.get('classification') not in ('primary','secondary'):return None
-        return float(obj['classification']==('primary' if mode=='primaries' else 'secondary'))
-    return obj.get('kinematics',{}).get(mode)
+def value(obj,mode):return color_value(obj,mode)
 
 def materials(name,color,opacity=1.,emission=0.,cutaway=False,settings=None):
     mat=bpy.data.materials.new(name);mat.use_nodes=True
@@ -119,7 +117,7 @@ def remove_owned_collection(coll):
 def buckets(objects,mode,base,settings,kind):
     values=[value(o,mode) for o in objects] if mode!='solid' else []
     usable=[v for v in values if v is not None and math.isfinite(v)]
-    if mode in ('primaries','secondaries'):low,high=0.,1.
+    if mode in ('primaries','secondaries','matching'):low,high=0.,1.
     elif mode=='phi':low,high=-math.pi,math.pi
     else:low,high=(min(usable),max(usable)) if usable else (0.,1.)
     if settings.get('scale_min') is not None:low=settings['scale_min']
@@ -133,9 +131,13 @@ def buckets(objects,mode,base,settings,kind):
         elif val is None or not math.isfinite(val):color=rgb(settings['missing_color']);key='missing';missing+=1
         else:
             bucket=round(max(0.,min(1.,(val-low)/(high-low) if high>low else .5))*63)
-            key=str(bucket);srgb=scale_color(low+(high-low)*bucket/63,low,high,settings['palette'])
+            key=str(bucket);srgb=scale_color(low+(high-low)*bucket/63,low,high,settings['palette'],settings.get('palette_lut'))
             color=tuple(c/12.92 if c<=.04045 else ((c+.055)/1.055)**2.4 for c in srgb)
-        if key not in groups:groups[key]={'color':color,'items':[]}
+        emphasis=highlighted(obj,settings,kind)
+        if emphasis:
+            key+=' highlighted'
+            if settings.get('highlight_override_color',True):color=rgb(settings['highlight_track_color' if kind=='tracks' else 'highlight_cluster_color'])
+        if key not in groups:groups[key]={'color':color,'items':[],'highlighted':emphasis}
         groups[key]['items'].append(obj)
     return groups,{'mode':mode,'min':low,'max':high,'missing':missing,'palette':settings['palette']}
 
@@ -147,20 +149,23 @@ def tracks(objects,settings):
     clipped=0;splines=0
     for key,group in groups.items():
         curve=bpy.data.curves.new('Tracks '+key,'CURVE');curve.dimensions='3D'
-        curve.bevel_depth=settings['track_radius_cm']*.01;curve.bevel_resolution=2;curve.resolution_u=2
+        radius=settings['highlight_track_radius_cm'] if group['highlighted'] else settings['track_radius_cm']
+        curve.bevel_depth=radius*.01;curve.bevel_resolution=2;curve.resolution_u=2
         curve.materials.append(materials('Track '+key,group['color'],emission=.7,settings=settings))
+        ids=[]
         for track in group['items']:
             if settings.get('clip_tracks',True):
                 names=selected_track_detectors(settings,track)
-                pieces=clip_polyline(track['points'],[regions[d] for d in names if d in regions],margin_cm=settings['track_radius_cm'])
+                pieces=clip_polyline(track['points'],[regions[d] for d in names if d in regions],margin_cm=radius)
             else:pieces=[track['points']]
             if not pieces:clipped+=1
             for points in pieces:
                 spline=curve.splines.new('POLY');spline.points.add(len(points)-1)
                 coordinates=[c for p in points for c in (p[0]*.01,p[1]*.01,p[2]*.01,1.)]
-                spline.points.foreach_set('co',coordinates);splines+=1
+                spline.points.foreach_set('co',coordinates);splines+=1;ids.append(str(track['id']))
         if curve.splines:
             obj=bpy.data.objects.new('Tracks '+key,curve);coll.objects.link(obj)
+            obj['alice_track_ids_json']=json.dumps(ids);obj['alice_highlighted']=group['highlighted']
         else:bpy.data.curves.remove(curve)
     legend.update(clipped_away_tracks=clipped,visible_tracks=len(objects)-clipped,trajectory_pieces=splines)
     return legend
@@ -171,7 +176,7 @@ def clusters(objects,settings):
     for key,group in groups.items():
         mesh=bpy.data.meshes.new('Cluster positions '+key)
         mesh.from_pydata([tuple(v*.01 for v in c['position']) for c in group['items']],[],[]);mesh.update()
-        obj=bpy.data.objects.new('Clusters '+key,mesh);coll.objects.link(obj)
+        obj=bpy.data.objects.new('Clusters '+key,mesh);coll.objects.link(obj);obj['alice_highlighted']=group['highlighted']
         mat=materials('Cluster '+key,group['color'],emission=1.,settings=settings)
         # Instanced spheres keep even large cluster clouds compact in memory.
         nodes=bpy.data.node_groups.new('Cluster spheres '+key,'GeometryNodeTree')
@@ -179,7 +184,7 @@ def clusters(objects,settings):
         nodes.interface.new_socket(name='Geometry',in_out='OUTPUT',socket_type='NodeSocketGeometry')
         n,l=nodes.nodes,nodes.links
         input_=n.new('NodeGroupInput');output=n.new('NodeGroupOutput')
-        ico=n.new('GeometryNodeMeshIcoSphere');ico.inputs['Radius'].default_value=settings['cluster_radius_cm']*.01;ico.inputs['Subdivisions'].default_value=1
+        ico=n.new('GeometryNodeMeshIcoSphere');ico.inputs['Radius'].default_value=(settings['highlight_cluster_radius_cm'] if group['highlighted'] else settings['cluster_radius_cm'])*.01;ico.inputs['Subdivisions'].default_value=1
         material=n.new('GeometryNodeSetMaterial');material.inputs['Material'].default_value=mat
         instance=n.new('GeometryNodeInstanceOnPoints')
         l.new(input_.outputs['Geometry'],instance.inputs['Points']);l.new(ico.outputs['Mesh'],material.inputs['Geometry'])
@@ -326,7 +331,7 @@ def render(job_path,interactive=False):
     job=json.loads(Path(job_path).read_text());settings=job['settings'];output=Path(job['output'])
     if interactive:settings['_interactive']=True
     path=Path(job['event'])
-    with (gzip.open(path,'rt') if path.suffix=='.gz' else path.open()) as stream:event=json.load(stream)
+    with (gzip.open(path,'rt') if path.suffix=='.gz' else path.open()) as stream:event=annotate_matching(json.load(stream))
     bpy.ops.object.select_all(action='SELECT');bpy.ops.object.delete(use_global=False)
     scene=bpy.context.scene;scene.render.engine='CYCLES'
     scene.cycles.samples=settings['samples'];scene.cycles.use_denoising=settings['denoise']
@@ -350,12 +355,11 @@ def render(job_path,interactive=False):
     scene.world.node_tree.nodes['Background'].inputs[0].default_value=(*settings.get('colors_linear',{}).get('background',rgb(settings['colors']['background'])),1)
     scene.world.node_tree.nodes['Background'].inputs[1].default_value=settings.get('world_strength',.45)
     selected=set(settings['detectors'])
-    ts=[t for t in event['tracks'] if selected.intersection(t['detectors'])]
-    cs=[c for c in event['clusters'] if c['detector'] in selected]
+    ts=selected_tracks(event,settings);cs=selected_clusters(event,settings)
     metadata={'event_id':event['id'],'kind':event['kind'],'source_warnings':event.get('warnings',[]),'rendered_tracks':0,'rendered_clusters':0,'geometry':{},'coordinates':'ALICE global XYZ, converted from centimetres to metres'}
     regions={}
     from alice_renderer.track_clipping import selected_track_detectors
-    required={d for t in ts for d in selected_track_detectors(settings,t)} if settings.get('clip_tracks',True) and settings['mode']!='clusters' else set()
+    required={d for t in ts for d in selected_track_detectors(settings,t)} if settings.get('clip_tracks',True) and bool(enabled_detectors(settings,'tracks')) else set()
     for name in settings['geometry']+(['L3'] if settings['magnet'] else []):
         if settings['schematic']:
             envelope(name,settings);metadata['geometry'][name]={'type':'schematic'}
@@ -376,9 +380,9 @@ def render(job_path,interactive=False):
         else:raise ValueError(name+': aligned geometry is required to clip tracks to the selected detector')
     settings['_track_regions']=regions
     metadata['track_clipping']={'enabled':settings.get('clip_tracks',True),'regions':regions,'basis':'selected source detectors; outer extent mask, not active-volume selection'}
-    if settings['mode']!='clusters':
+    if bool(enabled_detectors(settings,'tracks')):
         metadata['track_legend']=tracks(ts,settings);metadata['rendered_tracks']=metadata['track_legend']['visible_tracks']
-    if interactive or settings['mode']!='tracks':metadata['cluster_legend']=clusters(cs,settings);metadata['rendered_clusters']=len(cs)
+    if interactive or bool(enabled_detectors(settings,'clusters')):metadata['cluster_legend']=clusters(cs,settings);metadata['rendered_clusters']=len(cs)
     az,el=map(math.radians,(settings['azimuth'],settings['elevation']))
     target=Vector([v*.01 for v in settings['target_cm']]);distance=settings['distance_cm']*.01
     position=target+Vector((distance*math.cos(el)*math.cos(az),distance*math.cos(el)*math.sin(az),distance*math.sin(el)))
@@ -390,20 +394,22 @@ def render(job_path,interactive=False):
     if abs(direction.dot(vertical))>.999:vertical=Vector((0,0,1))
     right=direction.cross(vertical).normalized();up=right.cross(direction)
     camera.rotation_euler=Matrix(((right.x,up.x,-direction.x),(right.y,up.y,-direction.y),(right.z,up.z,-direction.z))).to_euler()
+    camera.rotation_euler.rotate_axis('Z',math.radians(settings.get('roll',0.)))
     camera.data.lens=48;camera.data.clip_end=2000
-    metadata['camera_up']='ALICE global +Y'
     if settings['camera']=='orthographic':camera.data.type='ORTHO';camera.data.ortho_scale=distance*.65
     if settings.get('camera_pose'):
         pose=settings['camera_pose'];camera.matrix_world=Matrix(pose['matrix_world'])
         camera.data.type='ORTHO' if settings['camera']=='orthographic' else 'PERSP'
         camera.data.lens=pose['lens'];camera.data.ortho_scale=pose['ortho_scale']
     camera.data.sensor_fit='HORIZONTAL'
+    metadata['camera_up']=list(camera.rotation_euler.to_matrix() @ Vector((0,1,0)))
     scene.camera=camera
     for i,light in enumerate(settings['lights']):
         bpy.ops.object.light_add(type='AREA',location=light['position_m']);lamp=bpy.context.object;lamp.name='ALICE light '+str(i+1)
         lamp.data.energy=light['energy'];lamp.data.shape='DISK';lamp.data.size=light['size_m'];lamp.data.color=light.get('color_linear',rgb(light['color']))
         lamp.rotation_euler=light.get('rotation') or (target-lamp.location).to_track_quat('-Z','Y').to_euler()
     scene.view_settings.view_transform='AgX'
+    metadata['highlighting']={'track_ids':settings.get('highlight_track_ids',[]),'missing_ids':sorted(set(settings.get('highlight_track_ids',[]))-{str(t['id']) for t in event['tracks']})}
     metadata['settings']={k:v for k,v in settings.items() if not k.startswith('_')};metadata['source']=job['event'];metadata['blender_version']=bpy.app.version_string
     (output/'metadata.json').write_text(json.dumps(metadata,indent=2))
     if interactive:

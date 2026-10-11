@@ -77,3 +77,9 @@ Clusters carry `coordinate_basis` and `association_basis`. Shared clusters can h
 The manifest can carry `geometry_assets`, `geometry_units`, `geometry_reconstruction_sha256`, `aligned_geometry` and `unassigned_objects`. These refer to the captured run-aligned manager and detector-specific assets; the GUI loads asset paths and units automatically. The application uses centimetres for event positions and converts them to metres for Blender. Geometry and data selection are independent.
 
 Nonfinite converted positions are retained as diagnostics, never accepted as drawable coordinates. Native collision records use `unrendered_clusters`; sidecar spatial records retain nullable position components and `coordinate_status`. The per-TF invalid count is copied into collision metadata and warnings. This distinguishes a failed coordinate conversion from a detector being absent.
+
+## Matching and event-local emphasis
+
+Known O2 `source` labels establish matching for the fitted record: composite sources such as `ITS-TPC` are matched; standalone sources such as `TPC` are standalone. The loader adds boolean `matching` and `matching_basis`; explicitly linked clusters inherit these through `track_id`. Exporters may also supply these fields directly, with a boolean and a nonempty provenance basis. Unknown sources remain unknown, and detector sets alone never establish a match. Standalone classification does not exclude component membership in a different composite record.
+
+Scene `highlight_track_ids` must contain exact canonical track IDs (without transient flags for native O2 exports). The associated cluster emphasis requires an explicit `track_id`; spatial proximity is insufficient. IDs absent from a new event are reported in render metadata. `detector_modes` overrides the global `mode` per detector; older configurations without overrides keep their global mode.

@@ -4,7 +4,7 @@ import json, threading, sqlite3
 from pathlib import Path
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QThread, Signal
 from PySide6.QtGui import QColor, QPixmap
-from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QFormLayout,QLabel,QPushButton,QLineEdit,QCheckBox,QComboBox,QSpinBox,QDoubleSpinBox,QTabWidget,QScrollArea,QSplitter,QTableView,QFileDialog,QMessageBox,QPlainTextEdit,QHeaderView,QDialog,QDialogButtonBox)
+from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QFormLayout,QLabel,QPushButton,QLineEdit,QCheckBox,QComboBox,QSpinBox,QDoubleSpinBox,QTabWidget,QScrollArea,QSplitter,QTableView,QFileDialog,QMessageBox,QPlainTextEdit,QHeaderView,QDialog,QDialogButtonBox,QSizePolicy,QInputDialog)
 from .catalogue import Catalogue
 from .converters import convert
 from .demo import generate
@@ -13,6 +13,8 @@ from .model import DETECTORS,COLOR_FIELDS,RenderSettings
 from .runtime import find_blender,probe,render_events,launch_editor
 from .scene_config import recipe,save_config,load_config,resolve_settings,recommended_quality,quality_settings
 from .catalogue import load_event
+from .object_selection import parse_track_ids
+from .palettes import names as palette_names
 
 ROOT=Path(__file__).resolve().parents[2]
 
@@ -69,19 +71,20 @@ class Window(QMainWindow):
                 saved=json.loads(self.settings_file.read_text());self.base=RenderSettings(**saved.get('render',{}));self.saved=saved
             except Exception:self.saved={}
         else:self.saved={}
-        self.scene_overrides={key:getattr(self.base,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_display','geometry_openings','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear')}
+        self.scene_overrides={key:getattr(self.base,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_display','geometry_openings','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
         central=QWidget();self.setCentralWidget(central);layout=QVBoxLayout(central)
         title=QLabel('ALICE  /  EVENT RENDERER');title.setObjectName('title');layout.addWidget(title)
         self.summary=QLabel('Choose an input, select events and detectors, then preview or render.');layout.addWidget(self.summary)
         top=QHBoxLayout();layout.addLayout(top)
-        self.source=QLineEdit();self.source.setPlaceholderText('Raw TF, CTF, or exported event JSON / JSONL');top.addWidget(self.source,1)
-        self.open_button=QPushButton('Open input…');self.open_button.clicked.connect(self.open_input);top.addWidget(self.open_button)
-        self.folder_button=QPushButton('Import event folder…');self.folder_button.clicked.connect(self.open_folder);top.addWidget(self.folder_button)
+        self.source=QLineEdit();self.source.setPlaceholderText('Paste a file or folder path, then press Enter or Load input');self.source.returnPressed.connect(self.load_typed_input);top.addWidget(self.source,1)
+        self.open_button=QPushButton('Load input');self.open_button.clicked.connect(self.load_typed_input);top.addWidget(self.open_button)
+        self.browse_button=QPushButton('Browse file…');self.browse_button.clicked.connect(self.open_input);top.addWidget(self.browse_button)
+        self.folder_button=QPushButton('Browse folder…');self.folder_button.clicked.connect(self.open_folder);top.addWidget(self.folder_button)
         self.timeframe_button=QPushButton('Whole-TF detector views');self.timeframe_button.setEnabled(False);self.timeframe_button.clicked.connect(self.toggle_timeframe_views);top.addWidget(self.timeframe_button)
         self.demo_button=QPushButton('Synthetic demonstration');self.demo_button.clicked.connect(self.open_demo);top.addWidget(self.demo_button)
         split=QSplitter();layout.addWidget(split,1)
         self.tabs=QTabWidget();split.addWidget(self.tabs)
-        self.data_checks={};self.geometry_checks={};self.asset_fields={};self.color_buttons={};self.detector_labels={}
+        self.detector_modes={};self.data_checks={};self.geometry_checks={};self.asset_fields={};self.color_buttons={};self.detector_labels={}
         self.build_detectors();self.build_appearance();self.build_render();self.build_runtime()
         right=QWidget();right_layout=QVBoxLayout(right);split.addWidget(right);split.setSizes([480,900])
         tools=QHBoxLayout();right_layout.addLayout(tools)
@@ -90,12 +93,12 @@ class Window(QMainWindow):
         self.model=EventsModel();self.model.changed.connect(self.update_availability)
         self.all_button.clicked.connect(lambda:self.model.select_all(True));self.none_button.clicked.connect(lambda:self.model.select_all(False))
         self.table=QTableView();self.table.setModel(self.model);self.table.setAlternatingRowColors(True);self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents);self.table.horizontalHeader().setStretchLastSection(True);self.table.setMaximumHeight(290);right_layout.addWidget(self.table)
-        self.image=QLabel('Preview will appear here');self.image.setAlignment(Qt.AlignCenter);self.image.setMinimumSize(400,260);self.image.setObjectName('preview')
+        self.image=QLabel('Preview will appear here');self.image.setAlignment(Qt.AlignCenter);self.image.setMinimumSize(400,260);self.image.setObjectName('preview');self.image.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Ignored)
         right_layout.addWidget(self.image,1)
         self.legend=QLabel('');self.legend.setWordWrap(True);right_layout.addWidget(self.legend)
         self.log=QPlainTextEdit();self.log.setReadOnly(True);self.log.setMaximumHeight(120);right_layout.addWidget(self.log)
         bottom=QHBoxLayout();layout.addLayout(bottom)
-        self.status=QLabel('Ready');bottom.addWidget(self.status,1)
+        self.status=QLabel('Ready');self.status.setMinimumWidth(0);self.status.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred);bottom.addWidget(self.status,1)
         self.cancel_button=QPushButton('Cancel');self.cancel_button.setEnabled(False);self.cancel_button.clicked.connect(self.cancel_task);bottom.addWidget(self.cancel_button)
         self.load_config_button=QPushButton('Load config…');self.load_config_button.clicked.connect(self.import_scene);bottom.addWidget(self.load_config_button)
         self.export_config_button=QPushButton('Export config…');self.export_config_button.clicked.connect(self.export_scene);bottom.addWidget(self.export_config_button)
@@ -109,24 +112,28 @@ class Window(QMainWindow):
         widget=QWidget();scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setWidget(widget);self.tabs.addTab(scroll,name);return widget
     def build_detectors(self):
         widget=self.tab('Detectors');layout=QVBoxLayout(widget)
-        self.mode=QComboBox();self.mode.addItems(['tracks','clusters','both']);self.mode.setCurrentText(self.base.mode);self.mode.currentTextChanged.connect(self.update_availability)
-        form=QFormLayout();form.addRow('Objects',self.mode);layout.addLayout(form)
+        self.mode=QComboBox();self.mode.addItems(['tracks','clusters','both']);self.mode.setCurrentText(self.base.mode);self.mode.currentTextChanged.connect(self.set_all_detector_modes)
+        form=QFormLayout();form.addRow('Set all object modes',self.mode);layout.addLayout(form)
         note=QLabel('Data controls are disabled when unavailable in the selected events. Tracks are trimmed to the selected source detectors when clipping is enabled.');note.setWordWrap(True);layout.addWidget(note)
         controls=QHBoxLayout();layout.addLayout(controls)
         none=QPushButton('Select no detectors');none.clicked.connect(self.select_no_detectors);controls.addWidget(none)
         complete=QPushButton('Show complete detectors');complete.clicked.connect(self.show_complete_detectors);controls.addWidget(complete)
         grid=QGridLayout();layout.addLayout(grid)
-        for c,name in enumerate(['Detector','Data','Geometry','Colour']):grid.addWidget(QLabel(name),0,c)
+        for c,name in enumerate(['Detector','Data','Objects','Geometry','Colour']):grid.addWidget(QLabel(name),0,c)
         for row,name in enumerate(DETECTORS,1):
             data=QCheckBox();geometry=QCheckBox();geometry.setChecked(name in self.base.geometry)
             self.data_checks[name]=data;self.geometry_checks[name]=geometry
+            mode=QComboBox();mode.addItems(['tracks','clusters','both']);mode.setCurrentText(self.base.detector_modes.get(name,self.base.mode));self.detector_modes[name]=mode
             label=QLabel(name);self.detector_labels[name]=label
-            grid.addWidget(label,row,0);grid.addWidget(data,row,1);grid.addWidget(geometry,row,2);grid.addWidget(self.color_button(name),row,3)
+            grid.addWidget(label,row,0);grid.addWidget(data,row,1);grid.addWidget(mode,row,2);grid.addWidget(geometry,row,3);grid.addWidget(self.color_button(name),row,4)
         self.magnet=QCheckBox('L3 magnet');self.magnet.setChecked(self.base.magnet);layout.addWidget(self.magnet)
         self.schematic=QCheckBox('Use approximate schematic envelopes');self.schematic.setChecked(self.base.schematic);self.schematic.setToolTip('Approximate dimensions, not calibrated detector geometry. This choice is recorded in render metadata.');layout.addWidget(self.schematic)
         self.cutaway=QCheckBox('Half cutaway (global Y plane)');self.cutaway.setChecked(self.base.cutaway);self.cutaway.toggled.connect(self.change_cutaway);layout.addWidget(self.cutaway)
         self.geometry_lod=QComboBox();self.geometry_lod.addItems(['full','simplified']);self.geometry_lod.setCurrentText(self.base.geometry_lod);layout.addWidget(QLabel('Geometry detail'));layout.addWidget(self.geometry_lod)
         self.opacity=number(self.base.geometry_opacity,0,1,2);form=QFormLayout();form.addRow('Geometry opacity',self.opacity);layout.addLayout(form);layout.addStretch()
+    def set_all_detector_modes(self,mode):
+        for combo in self.detector_modes.values():combo.setCurrentText(mode)
+        self.update_availability()
     def select_no_detectors(self):
         for box in (*self.data_checks.values(),*self.geometry_checks.values()):box.setChecked(False)
         self.magnet.setChecked(False)
@@ -144,15 +151,28 @@ class Window(QMainWindow):
     def build_appearance(self):
         widget=self.tab('Appearance');layout=QFormLayout(widget)
         self.track_mode=QComboBox();self.cluster_mode=QComboBox()
-        for combo in (self.track_mode,self.cluster_mode):combo.addItems(COLOR_FIELDS)
+        for combo in (self.track_mode,self.cluster_mode):
+            combo.addItems(COLOR_FIELDS);combo.setItemData(combo.findText('matching'),'0 = standalone fitted source; 1 = composite matched source (e.g. ITS-TPC); grey = unknown',Qt.ToolTipRole)
         self.track_mode.setCurrentText(self.base.track_color_mode);self.cluster_mode.setCurrentText(self.base.cluster_color_mode)
         layout.addRow('Track colouring',self.track_mode);layout.addRow('Cluster colouring',self.cluster_mode)
         note=QLabel('Unavailable quantities are disabled. XYZ colours refer to the first sampled point of a track or the cluster position. Unknown values use grey. p and pT are in GeV/c; angles in radians; coordinates and DCA in cm.');note.setWordWrap(True);layout.addRow(note)
         for key in ('tracks','clusters','background','magnet'):layout.addRow(key.capitalize(),self.color_button(key))
-        self.palette=QComboBox();self.palette.addItems(['viridis','coolwarm','hsv']);self.palette.setCurrentText(self.base.palette);layout.addRow('Colour scale',self.palette)
+        self.palette=QComboBox();self.palette.addItems(palette_names());
+        if self.palette.findText(self.base.palette)<0:self.palette.addItem(self.base.palette)
+        self.palette.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon);self.palette.setMinimumContentsLength(16);self.palette.setCurrentText(self.base.palette);layout.addRow('Colour scale',self.palette);self.palette.currentTextChanged.connect(lambda *_:self.scene_overrides.pop('palette_lut',None))
         self.auto_range=QCheckBox('Automatic scale range per event');self.auto_range.setChecked(self.base.scale_min is None);layout.addRow(self.auto_range)
         self.minimum=number(self.base.scale_min or 0,-1000000,1000000,3);self.maximum=number(self.base.scale_max or 10,-1000000,1000000,3);layout.addRow('Minimum',self.minimum);layout.addRow('Maximum',self.maximum)
         self.track_radius=number(self.base.track_radius_cm*2,.002,20,3);self.cluster_radius=number(self.base.cluster_radius_cm,.001,20,3);layout.addRow('Track linewidth (cm)',self.track_radius);self.clip_tracks=QCheckBox('Clip tracks to selected detectors');self.clip_tracks.setChecked(self.base.clip_tracks);layout.addRow(self.clip_tracks);layout.addRow('Cluster radius (cm)',self.cluster_radius)
+        self.highlight_ids=QLineEdit(', '.join(self.base.highlight_track_ids));self.highlight_ids.setPlaceholderText('Track IDs: 11730, 50331650, …');layout.addRow('Special track IDs',self.highlight_ids)
+        self.highlight_width=number(self.base.highlight_track_radius_cm*2,.002,20,3);layout.addRow('Special track linewidth (cm)',self.highlight_width)
+        self.highlight_clusters=number(self.base.highlight_cluster_radius_cm,.001,20,3);layout.addRow('Linked cluster radius (cm)',self.highlight_clusters)
+        self.highlight_override=QCheckBox('Use special colours');self.highlight_override.setChecked(self.base.highlight_override_color);layout.addRow(self.highlight_override)
+        for key,value in [('highlight_track_color',self.base.highlight_track_color),('highlight_cluster_color',self.base.highlight_cluster_color)]:
+            button=QPushButton(value);button.clicked.connect(lambda _,b=button:self.pick_special_color(b));setattr(self,key,button);layout.addRow(key.replace('_',' ').capitalize(),button)
+    def pick_special_color(self,button):
+        from PySide6.QtWidgets import QColorDialog
+        color=QColorDialog.getColor(QColor(button.text()),self,'Choose special colour')
+        if color.isValid():button.setText(color.name())
     def build_render(self):
         widget=self.tab('Render');layout=QFormLayout(widget)
         self.width=number(self.base.width,64,16384);self.height=number(self.base.height,64,16384);self.samples=number(self.base.samples,1,8192)
@@ -166,12 +186,13 @@ class Window(QMainWindow):
         self.device_label=QLabel('Device availability is verified before rendering.');self.device_label.setWordWrap(True);layout.addRow(self.device_label)
         self.threads=number(self.base.threads,0,256);layout.addRow('CPU threads (0 = automatic)',self.threads)
         self.camera=QComboBox();self.camera.addItems(['perspective','orthographic']);self.camera.setCurrentText(self.base.camera);layout.addRow('Camera',self.camera)
-        self.azimuth=number(self.base.azimuth,-180,180,1);self.elevation=number(self.base.elevation,-89,89,1);self.distance=number(self.base.distance_cm,1,100000,1)
+        self.azimuth=number(self.base.azimuth,-180,180,1);self.elevation=number(self.base.elevation,-90,90,1);self.distance=number(self.base.distance_cm,1,100000,1)
+        self.roll=number(self.base.roll,-360,360,1);layout.addRow('Camera roll (°)',self.roll)
         layout.addRow('Azimuth (°)',self.azimuth);layout.addRow('Elevation (°)',self.elevation);layout.addRow('Distance (cm)',self.distance)
         self.target=[]
         for axis,val in zip('XYZ',self.base.target_cm):
             spin=number(val,-100000,100000,1);self.target.append(spin);layout.addRow('Target '+axis+' (cm)',spin)
-        for field in [self.azimuth,self.elevation,self.distance,*self.target]:field.valueChanged.connect(lambda *_:self.scene_overrides.pop('camera_pose',None))
+        for field in [self.azimuth,self.elevation,self.roll,self.distance,*self.target]:field.valueChanged.connect(lambda *_:self.scene_overrides.pop('camera_pose',None))
         self.output=QLineEdit(self.saved.get('output',str(ROOT/'renders')));layout.addRow('Output directory',self.path_field(self.output,folder=True))
     def build_runtime(self):
         widget=self.tab('Setup');layout=QFormLayout(widget)
@@ -194,6 +215,8 @@ class Window(QMainWindow):
     def settings(self):
         cfg=RenderSettings(detectors=[d for d,c in self.data_checks.items() if c.isChecked() and c.isEnabled()],geometry=[d for d,c in self.geometry_checks.items() if c.isChecked()],magnet=self.magnet.isChecked(),mode=self.mode.currentText(),track_color_mode=self.track_mode.currentText(),cluster_color_mode=self.cluster_mode.currentText(),colors={k:b.text() for k,b in self.color_buttons.items()},scale_min=None if self.auto_range.isChecked() else self.minimum.value(),scale_max=None if self.auto_range.isChecked() else self.maximum.value(),palette=self.palette.currentText(),geometry_assets={k:v.text() for k,v in self.asset_fields.items() if v.text()},geometry_units=self.geometry_units.currentText(),geometry_opacity=self.opacity.value(),cutaway=self.cutaway.isChecked(),schematic=self.schematic.isChecked(),width=self.width.value(),height=self.height.value(),samples=self.samples.value(),denoise=self.denoise.isChecked(),backend=self.backend.currentText(),device=self.device.currentData() or '',threads=self.threads.value(),track_radius_cm=self.track_radius.value()/2,cluster_radius_cm=self.cluster_radius.value(),camera=self.camera.currentText(),azimuth=self.azimuth.value(),elevation=self.elevation.value(),distance_cm=self.distance.value(),target_cm=[s.value() for s in self.target],save_blend=self.save_blend.isChecked())
         for key,value in self.scene_overrides.items():setattr(cfg,key,value)
+        cfg.detector_modes={name:combo.currentText() for name,combo in self.detector_modes.items()}
+        cfg.highlight_track_ids=parse_track_ids(self.highlight_ids.text());cfg.highlight_track_radius_cm=self.highlight_width.value()/2;cfg.highlight_cluster_radius_cm=self.highlight_clusters.value();cfg.highlight_override_color=self.highlight_override.isChecked();cfg.highlight_track_color=self.highlight_track_color.text();cfg.highlight_cluster_color=self.highlight_cluster_color.text();cfg.roll=self.roll.value()
         cfg.clip_tracks=self.clip_tracks.isChecked()
         cfg.geometry_lod=self.geometry_lod.currentText()
         cfg.frame_aspect=cfg.width/cfg.height
@@ -202,7 +225,7 @@ class Window(QMainWindow):
         saved={'render':cfg.to_dict(),'blender':self.blender.text(),'profile':self.profile.text(),'output':self.output.text()}
         self.settings_file.write_text(json.dumps(saved,indent=2))
     def busy(self,on):
-        for w in (self.tabs,self.open_button,self.folder_button,self.demo_button,self.table,self.all_button,self.none_button,self.preview_button,self.render_button,self.editor_button,self.export_config_button,self.load_config_button):w.setEnabled(not on)
+        for w in (self.tabs,self.source,self.open_button,self.browse_button,self.folder_button,self.demo_button,self.table,self.all_button,self.none_button,self.preview_button,self.render_button,self.editor_button,self.export_config_button,self.load_config_button):w.setEnabled(not on)
         self.cancel_button.setEnabled(on)
         self.timeframe_button.setEnabled(not on and self.timeframe_source is not None)
         if not on:self.update_availability()
@@ -214,13 +237,22 @@ class Window(QMainWindow):
         self.busy(False)
         if self.close_pending:self.close()
     def message(self,text):
-        self.status.setText(text);self.log.appendPlainText(text)
+        self.status.setText(text);self.status.setToolTip(text);self.log.appendPlainText(text)
         if text.endswith('/render.png') and Path(text).exists():self.show_image(Path(text))
     def failure(self,text):
         self.status.setText('Action stopped — see prerequisites or details');self.log.appendPlainText(text)
         if not self.close_pending:QMessageBox.warning(self,'Unable to continue',text)
     def cancel_task(self):
         if self.task:self.task.cancel.set();self.status.setText('Cancelling…')
+    def load_typed_input(self):
+        if self.task and self.task.isRunning():return
+        text=self.source.text().strip()
+        if not text:self.open_input();return
+        if len(text)>1 and text[0]==text[-1] and text[0] in ("'",'"'):text=text[1:-1]
+        if text.startswith('file://'):
+            from PySide6.QtCore import QUrl
+            text=QUrl(text).toLocalFile()
+        self.load_input(Path(text).expanduser())
     def open_input(self):
         path=QFileDialog.getOpenFileName(self,'Open ALICE data',str(ROOT/'data'),'ALICE data (*.tf *.rawtf *.root *.ctf *.json *.jsonl *.json.gz *.jsonl.gz);;All files (*)')[0]
         if path:self.load_input(Path(path))
@@ -235,6 +267,14 @@ class Window(QMainWindow):
         elif self.timeframe_source:
             self.collision_mode=self.mode.currentText();self.mode.setCurrentText('clusters');self.load_input(self.timeframe_source)
     def load_input(self,path):
+        path=Path(path).expanduser()
+        if path.is_dir() and not any(path.glob('*.json*')):
+            candidates=sorted(p for p in path.iterdir() if p.is_file() and p.suffix.lower() in ('.tf','.rawtf','.root','.ctf'))
+            if len(candidates)==1:path=candidates[0]
+            elif candidates:
+                name,ok=QInputDialog.getItem(self,'Choose input in folder','TF / CTF file',[p.name for p in candidates],0,False)
+                if not ok:return
+                path=path/name
         self.source.setText(str(path));profile=self.profile.text()
         def work(progress,cancelled):
             info=inspect_input(path,cancelled=cancelled);progress(f'{info.format}: {info.timeframes if info.timeframes is not None else "exported"} timeframe entries; detectors {", ".join(info.detectors) or "not yet decoded"}')
@@ -276,6 +316,7 @@ class Window(QMainWindow):
         available={d for r in rows for d in json.loads(r['detectors'])}
         for name,box in self.data_checks.items():
             was=box.isEnabled();box.setEnabled(name in available);box.setToolTip('Available in selected records' if name in available else 'No exported data for this detector in selected records')
+            self.detector_modes[name].setEnabled(name in available)
             self.detector_labels[name].setStyleSheet('color:#e2e8f2' if name in available else 'color:#586276')
             if name not in available:box.setChecked(False)
             elif not was:box.setChecked(True)
@@ -316,8 +357,10 @@ class Window(QMainWindow):
             self.apply_scene(cfg);self.message('Scene loaded. Choose the local input and event, then preview or render.')
         except Exception as exc:self.failure(str(exc))
     def apply_scene(self,cfg):
-        self.scene_overrides={key:getattr(cfg,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_display','geometry_openings','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear')}
+        if self.palette.findText(cfg.palette)<0:self.palette.addItem(cfg.palette)
+        self.scene_overrides={key:getattr(cfg,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_display','geometry_openings','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
         for name,box in self.data_checks.items():box.setChecked(name in cfg.detectors)
+        for name,combo in self.detector_modes.items():combo.setCurrentText(cfg.detector_modes.get(name,cfg.mode))
         for name,box in self.geometry_checks.items():box.setChecked(name in cfg.geometry)
         for name,field in self.asset_fields.items():field.setText(cfg.geometry_assets.get(name,''))
         for name,button in self.color_buttons.items():
@@ -332,6 +375,9 @@ class Window(QMainWindow):
         if cfg.scale_min is not None:self.minimum.setValue(cfg.scale_min)
         if cfg.scale_max is not None:self.maximum.setValue(cfg.scale_max)
         self.width.setValue(1920);self.height.setValue(max(64,round(1920/cfg.frame_aspect)))
+        for name,combo in self.detector_modes.items():combo.setCurrentText(cfg.detector_modes.get(name,cfg.mode))
+        self.roll.setValue(cfg.roll);self.highlight_ids.setText(', '.join(cfg.highlight_track_ids));self.highlight_width.setValue(cfg.highlight_track_radius_cm*2);self.highlight_clusters.setValue(cfg.highlight_cluster_radius_cm);self.highlight_override.setChecked(cfg.highlight_override_color);self.highlight_track_color.setText(cfg.highlight_track_color);self.highlight_cluster_color.setText(cfg.highlight_cluster_color)
+        self.scene_overrides['palette_lut']=cfg.palette_lut
         self.scene_overrides['camera_pose']=cfg.camera_pose
         self.scene_overrides['geometry_openings']=cfg.geometry_openings
     def open_editor(self):

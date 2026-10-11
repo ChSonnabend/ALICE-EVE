@@ -4,6 +4,8 @@ import dataclasses, json, os, shutil, subprocess, sys, tempfile, time
 from pathlib import Path
 from .model import RenderSettings, capabilities
 from .catalogue import load_event
+from .object_selection import selected_tracks,selected_clusters,enabled_detectors
+from .palettes import materialize,sample,names
 
 WORKER=Path(__file__).parent/'blender'/'worker.py'
 
@@ -35,16 +37,14 @@ def preflight(settings: RenderSettings, events, devices: dict, output: Path) -> 
     count=0;peak_points=0;peak_clusters=0;clip_assets=set()
     for event in events:
         count+=1
-        tracks=[t for t in event['tracks'] if set(t['detectors'])&set(settings.detectors)]
-        clusters=[c for c in event['clusters'] if c['detector'] in settings.detectors]
-        if settings.clip_tracks and settings.mode!='clusters' and event['kind']!='synthetic' and not settings.schematic:
+        tracks=selected_tracks(event,settings.to_dict());clusters=selected_clusters(event,settings.to_dict())
+        if settings.clip_tracks and bool(enabled_detectors(settings.to_dict(),'tracks')) and event['kind']!='synthetic' and not settings.schematic:
             from .track_clipping import selected_track_detectors
-            clip_assets.update(d for t in tracks for d in selected_track_detectors({'detectors':settings.detectors,'geometry':settings.geometry},t))
+            clip_assets.update(d for t in tracks for d in selected_track_detectors({'detectors':settings.detectors,'geometry':settings.geometry,'mode':settings.mode,'detector_modes':settings.detector_modes},t))
         peak_points=max(peak_points,sum(len(t['points']) for t in tracks));peak_clusters=max(peak_clusters,len(clusters))
-        for name,mode,objects,active in [('tracks',settings.track_color_mode,tracks,settings.mode!='clusters'),('clusters',settings.cluster_color_mode,clusters,settings.mode!='tracks')]:
+        for name,mode,objects,active in [('tracks',settings.track_color_mode,tracks,bool(enabled_detectors(settings.to_dict(),'tracks'))),('clusters',settings.cluster_color_mode,clusters,bool(enabled_detectors(settings.to_dict(),'clusters')))]:
             if active and settings.detectors and mode not in capabilities(objects): errors.append(f'Event {event["id"]}: {mode} is unavailable for selected {name}')
-        if settings.detectors and ((settings.mode=='tracks' and not tracks) or (settings.mode=='clusters' and not clusters) or (settings.mode=='both' and not tracks and not clusters)):
-            errors.append(f'Event {event["id"]}: no selected objects for {settings.mode}')
+        if settings.detectors and not tracks and not clusters:errors.append(f'Event {event["id"]}: no selected tracks or clusters')
     for name in sorted(clip_assets):
         asset=settings.geometry_assets.get(name,'')
         if not asset or not Path(asset).is_file():errors.append(f'{name}: aligned geometry is required for track clipping. Provide its asset in Setup or explicitly disable Clip tracks to selected detectors.')
@@ -83,7 +83,7 @@ def preflight(settings: RenderSettings, events, devices: dict, output: Path) -> 
 def render_events(blender: str, paths: list[Path], settings: RenderSettings, output: Path, *, preview=False, progress=lambda s:None, cancelled=lambda:False):
     output=Path(output)
     settings.validate()
-    effective=dataclasses.replace(settings)
+    effective=materialize(dataclasses.replace(settings))
     if preview:
         factor=min(1.,640/max(effective.width,effective.height))
         effective.width=max(64,int(effective.width*factor));effective.height=max(64,int(effective.height*factor))
@@ -124,7 +124,7 @@ def render_events(blender: str, paths: list[Path], settings: RenderSettings, out
 def launch_editor(blender, event_path, settings, output):
     """Launch native Blender editing; quality is chosen only by Render full."""
     import copy
-    cfg=copy.deepcopy(settings)
+    cfg=materialize(copy.deepcopy(settings))
     for name in cfg.geometry+(['L3'] if cfg.magnet else []):
         cfg.geometry_openings.setdefault(name,180. if cfg.cutaway else 0.)
     cfg.cutaway=False
@@ -133,7 +133,7 @@ def launch_editor(blender, event_path, settings, output):
     if errors:raise ValueError('\n'.join(errors))
     folder=Path(output)/('editor-'+time.strftime('%Y%m%d-%H%M%S')+'-'+os.urandom(3).hex());folder.mkdir()
     job=folder/'job.json'
-    payload={'event':str(Path(event_path).resolve()),'output':str(folder.resolve()),'settings':cfg.to_dict(),'preview':True,'blender':devices,'python':sys.executable,'render_output':str(Path(output).resolve())}
+    payload={'event':str(Path(event_path).resolve()),'output':str(folder.resolve()),'settings':cfg.to_dict(),'preview':True,'blender':devices,'python':sys.executable,'render_output':str(Path(output).resolve()),'palettes':{name:sample(name) for name in names()}}
     job.write_text(json.dumps(payload,indent=2))
     log=(folder/'editor.log').open('w')
     try:

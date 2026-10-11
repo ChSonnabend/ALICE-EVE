@@ -8,7 +8,8 @@ import numpy as np
 
 
 def selected_track_detectors(settings,track):
-    selected=set(settings['detectors'])
+    from .object_selection import enabled_detectors
+    selected=enabled_detectors(settings,'tracks')
     if settings.get('geometry'):selected&=set(settings['geometry'])
     return set(track['detectors'])&selected
 

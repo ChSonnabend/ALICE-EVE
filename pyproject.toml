@@ -7,7 +7,7 @@ name = "alice-event-renderer"
 version = "0.1.0"
 description = "ALICE O2 event inspection and individual Blender rendering"
 requires-python = ">=3.11"
-dependencies = ["PySide6-Essentials>=6.8,<7", "numpy>=2,<3", "uproot>=5.5,<6", "ijson>=3.3,<4", "psutil>=6"]
+dependencies = ["PySide6-Essentials>=6.8,<7", "numpy>=2,<3", "uproot>=5.5,<6", "ijson>=3.3,<4", "psutil>=6", "matplotlib>=3.9,<4"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
@@ -20,7 +20,7 @@ alice-render = "alice_renderer.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-alice_renderer = ["blender/*.py"]
+alice_renderer = ["blender/*.py", "palette_names.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
