@@ -36,3 +36,17 @@ def test_history_records_actual_render_camera_and_legend_and_discovers_once(tmp_
     entries=lib.entries();assert len(entries)==1 and entries[0]['event']=='RUN-PV'
     restored=lib.settings(entries[0]);assert restored.camera_pose==pose and restored.color_ranges['tracks']==[3,29]
     assert load_config(entries[0]['config'])['defaults']=={}
+
+def test_legacy_history_and_clone_preserve_ambiguous_reference_visibility(tmp_path):
+    folder=tmp_path/'render-old'/'event-00000';folder.mkdir(parents=True)
+    values=RenderSettings().to_dict();values.pop('include_ambiguous_tracks');values.pop('data_glow_lighting')
+    (folder/'job.json').write_text(json.dumps({'settings':values,'event':'old.json'}))
+    lib=SceneLibrary(tmp_path/'history.sqlite');lib.record_job(folder)
+    entry=lib.entries()[0]
+    assert lib.settings(entry).include_ambiguous_tracks
+    assert lib.settings(entry,reuse=True).include_ambiguous_tracks
+    assert lib.settings(entry,reuse=True).data_glow_lighting
+    # Recipes written before the option existed follow the same migration.
+    path=Path(entry['config']);data=load_config(path);data['scene'].pop('include_ambiguous_tracks');save_config(path,data)
+    assert lib.settings(entry).include_ambiguous_tracks
+    assert lib.settings(entry,reuse=True).include_ambiguous_tracks

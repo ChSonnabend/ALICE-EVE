@@ -18,6 +18,7 @@ with tempfile.TemporaryDirectory(prefix='alice-geometry-qa-') as tmp:
     cfg=RenderSettings(detectors=['TPC'],geometry=[],geometry_assets={'TPC':str(a.asset.resolve())},geometry_units='m',geometry_opacity=1.,geometry_lod='full',geometry_openings={'TPC':180},cutaway=False)
     job=root/'job.json';job.write_text(json.dumps({'event':str(event),'output':str(root),'settings':cfg.to_dict(),'blender':{'version':list(bpy.app.version),'devices':[{'type':'CPU'}]}}))
     worker.render(job,True);ui=bpy.context.scene.alice_eve;item=ui.detectors.get('TPC')
+    assert ui.viewport_renderer=='CYCLES' and bpy.context.scene.cycles.preview_samples==128
     assert item.geometry_available and not item.visible
     assert bpy.data.collections.get('TPC') is None
     assert not ui.detectors['TRD'].geometry_available
@@ -31,6 +32,16 @@ with tempfile.TemporaryDirectory(prefix='alice-geometry-qa-') as tmp:
     assert all(m.surface_render_method=='BLENDED' and not m.use_transparency_overlap for o in bpy.data.collections['TPC'].objects if o.type=='MESH' for m in o.data.materials)
     assert bpy.ops.alice_eve.solid_surfaces()=={'FINISHED'} and item.opacity==1
     assert all(m.surface_render_method=='DITHERED' for o in bpy.data.collections['TPC'].objects if o.type=='MESH' for m in o.data.materials)
+    camera=bpy.context.scene.camera;camera_pose=camera.matrix_world.copy()
+    assert bpy.ops.alice_eve.light_transparent_surfaces()=={'FINISHED'}
+    assert abs(item.opacity-.035)<1.e-6 and item.detail=='full' and item.display=='surfaces'
+    assert camera.matrix_world==camera_pose
+    item.exclusions='TPC_IFC*';item.inner_mask_radius=1.
+    assert bpy.ops.alice_eve.restore_surface_exclusions()=={'FINISHED'}
+    assert item.exclusions=='' and item.inner_mask_radius==0 and camera.matrix_world==camera_pose
+    ui.viewport_samples=192
+    assert bpy.context.scene.cycles.preview_samples==192 and bpy.context.scene.cycles.use_preview_denoising
+    assert bpy.context.scene.eevee.taa_samples==192
     ui.viewport_renderer='CYCLES';assert bpy.context.scene.render.engine=='CYCLES'
     ui.viewport_renderer='BLENDER_EEVEE';assert bpy.context.scene.render.engine=='BLENDER_EEVEE'
     ui.track_width_cm=.5

@@ -11,12 +11,12 @@ with tempfile.TemporaryDirectory(prefix='alice-controls-qa-') as tmp:
     root=Path(tmp);event=root/'event.json'
     event.write_text(json.dumps({'id':'SYNTHETIC-CONTROLS-QA','kind':'synthetic','tracks':[
         {'id':'1','source':'ITS','detectors':['ITS'],'points':[[-20,-40,0],[20,-40,0]]},
-        {'id':'2','source':'TPC','detectors':['TPC'],'points':[[-20,40,0],[20,40,0]]},
+        {'id':'2','source':'TPC','detectors':['TPC'],'association':{'ambiguous':True,'pv_contributor':False},'points':[[-20,40,0],[20,40,0]]},
         {'id':'3','source':'ITS-TPC','detectors':['ITS','TPC'],'points':[[-20,0,0],[20,0,0]]}],
         'clusters':[{'id':'a','detector':'ITS','position':[0,0,0],'track_id':'3'},
                     {'id':'b','detector':'TPC','position':[0,40,0],'track_id':'2'}]}))
     cfg=RenderSettings(detectors=['ITS','TPC'],detector_modes={'ITS':'clusters','TPC':'tracks'},schematic=True,
-        track_color_mode='matching',cluster_color_mode='matching',palette='transferred',palette_lut=[[0,0,1],[1,0,0]],
+        include_ambiguous_tracks=True,track_color_mode='matching',cluster_color_mode='matching',palette='transferred',palette_lut=[[0,0,1],[1,0,0]],
         highlight_track_ids=['3'],highlight_track_radius_cm=.6,highlight_cluster_radius_cm=1.5,
         highlight_override_color=False,elevation=90,roll=73)
     job=root/'job.json';job.write_text(json.dumps({'event':str(event),'output':str(root),'settings':cfg.to_dict(),
@@ -48,6 +48,11 @@ with tempfile.TemporaryDirectory(prefix='alice-controls-qa-') as tmp:
     assert max(abs(camera.matrix_world[r][c]-expected[r][c]) for r in range(4) for c in range(4))<1.e-6
     ui.detectors['TPC'].mode='both';assert bpy.ops.alice_eve.apply_data()=={'FINISHED'}
     assert sum(len(o.data.vertices) for o in bpy.data.collections['Clusters'].objects)==2
+    ui.include_ambiguous_tracks=False;assert bpy.ops.alice_eve.apply_data()=={'FINISHED'}
+    assert {i for o in bpy.data.collections['Tracks'].objects for i in json.loads(o['alice_track_ids_json'])}=={'3'}
+    assert sum(len(o.data.vertices) for o in bpy.data.collections['Clusters'].objects)==1
+    assert not editor.current_settings().include_ambiguous_tracks
+    ui.include_ambiguous_tracks=True;assert bpy.ops.alice_eve.apply_data()=={'FINISHED'}
     ui.export_path=str(root/'scene.json');assert bpy.ops.alice_eve.export()=={'FINISHED'}
     saved=json.loads(Path(ui.export_path).read_text())['scene']
     assert saved['detector_modes']['ITS']=='clusters' and saved['detector_modes']['TPC']=='both'
@@ -69,6 +74,10 @@ with tempfile.TemporaryDirectory(prefix='alice-controls-qa-') as tmp:
                 if modifier.type=='NODES':materials.extend(n.inputs['Material'].default_value for n in modifier.node_group.nodes if n.bl_idname=='GeometryNodeSetMaterial')
             assert materials
             assert all(abs(m.node_tree.nodes['Principled BSDF'].inputs['Emission Strength'].default_value-expected)<1.e-6 for m in materials)
+            assert all(m.cycles.emission_sampling=='NONE' for m in materials)
+    ui.data_glow_lighting=True
+    assert all(m.cycles.emission_sampling=='AUTO' for m in bpy.data.materials if m.name.startswith(('Track ','Cluster ')))
+    assert editor.current_settings().data_glow_lighting
     assert editor.current_settings().view_transform=='Standard'
     ui.view_transform='AgX';ui.exposure=0
 

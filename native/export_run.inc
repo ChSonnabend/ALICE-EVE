@@ -11,7 +11,7 @@
     geometry.Close();
   }
   EveWorkflowHelper helper;helper.setRecoContainer(&recoCont);helper.setTPCVDrift(&mTPCVDriftHelper.getVDriftObject());
-  if(mClMask[GID::TPC]) {
+  if(mClMask[GID::TPC] || mTrkMask[GID::TPC]) {
     auto raw=pc.inputs().get<const char*>("aliceTPCMap");
     helper.mExportTPCMap=&o2::gpu::TPCFastTransformPOD::get(raw);
   }

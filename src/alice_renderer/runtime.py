@@ -39,7 +39,10 @@ def preflight(settings: RenderSettings, events, devices: dict, output: Path) -> 
     count=0;peak_points=0;peak_clusters=0;clip_assets=set()
     for event in events:
         count+=1
-        tracks=selected_tracks(event,settings.to_dict());clusters=selected_clusters(event,settings.to_dict())
+        tracks=selected_tracks(event,settings.to_dict())
+        clusters=selected_clusters(event,settings.to_dict())
+        if event.get('calibration_timestamp_ms') is not None and event.get('coordinate_export_version',0)<3 and (any(t.get('source')=='TPC' for t in tracks) or any(c['detector']=='TPC' for c in clusters)):
+            errors.append('Legacy TF export has unsupported TPC time hypotheses that can misplace tracks or clusters. Re-export with coordinate exporter version 3 or load the corrected dataset; no render was started.')
         if settings.clip_tracks and bool(enabled_detectors(values,'tracks')) and event['kind']!='synthetic':
             from .track_clipping import selected_track_detectors
             clip_assets.update(d for t in tracks for d in selected_track_detectors(values,t) if not is_schematic(values,d))
@@ -99,7 +102,9 @@ def render_events(blender: str, paths: list[Path], settings: RenderSettings, out
     if preview:
         factor=min(1.,640/max(effective.width,effective.height))
         effective.width=max(64,int(effective.width*factor));effective.height=max(64,int(effective.height*factor))
-        effective.samples=min(16,effective.samples);effective.save_blend=False
+        # Nested transparent detector surfaces need enough samples to converge;
+        # keep resolution low while letting translucent surfaces converge.
+        effective.samples=128;effective.denoise=True;effective.save_blend=False
     # Re-check at execution, not only in the UI. Never silently switch the selected backend.
     devices=probe(blender)
     events=(load_event(p) for p in paths)

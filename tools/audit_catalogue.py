@@ -13,14 +13,33 @@ class EventAudit:
         for vertex in tf['vertices']:
             inventory[(tf['run'],tf['tf_counter'],tf['orbit'],vertex['index'])]=vertex
     self.inventory=inventory
-    self.report=dict(events=0,tracks=0,clusters=0,unrendered_tracks=0,unrendered_clusters=0,invalid_spatial_by_timeframe={},tracks_with_dca=0,detector_clusters=collections.Counter(),track_sources=collections.Counter(),missing_reference_sources=collections.Counter(),extra_reference_sources=collections.Counter())
+    self.report=dict(events=0,tracks=0,clusters=0,unrendered_tracks=0,unrendered_clusters=0,invalid_spatial_by_timeframe={},tracks_with_dca=0,tpc_time_basis_records=0,constrained_tpc_time_records=0,detector_clusters=collections.Counter(),track_sources=collections.Counter(),missing_reference_sources=collections.Counter(),extra_reference_sources=collections.Counter())
   def observe(self,event):
         inventory=self.inventory;report=self.report
         key=(event['run'],event['timeframe'],event['orbit'],event['primary_vertex'])
         native=inventory.pop(key)
-        expected={int(g)&((1<<30)-1) for g in native['matched_track_ids']}
+        references={int(g)&((1<<30)-1):int(g) for g in native['matched_track_ids']}
+        expected=set(references)
         fitted=event['tracks']+event.get('unrendered_tracks',[])
         actual={int(t['input_gid']) for t in fitted}
+        if event.get('coordinate_export_version',0)>=2:
+            for track in fitted:
+                raw=references.get(int(track['input_gid']))
+                if raw is None:raise ValueError('Track reference absent from native inventory')
+                association=track.get('association',{})
+                # GlobalTrackID reserves its top two bits for VtxTrackIndex:
+                # bit 30 is Contributor, bit 31 is Ambiguous.
+                if association.get('ambiguous')!=bool(raw&(1<<31)) or association.get('pv_contributor')!=bool(raw&(1<<30)):
+                    raise ValueError('Vertex-association flags differ from native inventory in '+event['id'])
+        constrained=set()
+        if event.get('coordinate_export_version',0)>=3:
+            for track in fitted:
+                if 'tpc_cluster_time_tb' in track:
+                    report['tpc_time_basis_records']+=1
+                    if track['tpc_cluster_time_basis']=='constrained both-side standalone TPC fit time':
+                        if track['tpc_cluster_time_tb']!=track['tpc_component_fit_time0_tb']:raise ValueError('Constrained fit and cluster times disagree')
+                        constrained.add(track['id']);report['constrained_tpc_time_records']+=1
+                elif int(track['id'])>>25==1:raise ValueError('Standalone TPC time hypothesis missing')
         for g in expected-actual:report['missing_reference_sources'][str(g>>25)]+=1
         for g in actual-expected:report['extra_reference_sources'][str(g>>25)]+=1
         track_ids={t['id'] for t in fitted}
@@ -33,6 +52,7 @@ class EventAudit:
         for cluster in event['clusters']:
             if cluster.get('track_id') is not None and cluster['track_id'] not in track_ids:raise ValueError('Dangling cluster association in '+event['id'])
             if not cluster.get('coordinate_basis'):raise ValueError('Missing cluster coordinate basis')
+            if cluster['detector']=='TPC' and cluster.get('track_id') in constrained and 'constrained both-side' not in cluster['coordinate_basis']:raise ValueError('Constrained cluster time basis missing')
             report['detector_clusters'][cluster['detector']]+=1
         report['events']+=1;report['tracks']+=len(event['tracks']);report['clusters']+=len(event['clusters']);report['unrendered_tracks']+=len(event.get('unrendered_tracks',[]))
         report['tracks_with_dca']+=sum('dca' in t.get('kinematics',{}) for t in event['tracks'])

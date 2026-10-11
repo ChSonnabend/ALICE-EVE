@@ -195,10 +195,11 @@ class Window(QMainWindow):
         self.palette.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon);self.palette.setMinimumContentsLength(16);self.palette.setCurrentText(self.base.palette);layout.addRow('Colour scale',self.palette);self.palette.currentTextChanged.connect(lambda *_:self.scene_overrides.pop('palette_lut',None))
         self.auto_range=QCheckBox('Automatic scale range per event');self.auto_range.setChecked(self.base.scale_min is None);layout.addRow(self.auto_range)
         self.minimum=number(self.base.scale_min or 0,-1000000,1000000,3);self.maximum=number(self.base.scale_max or 10,-1000000,1000000,3);layout.addRow('Minimum',self.minimum);layout.addRow('Maximum',self.maximum)
-        self.track_radius=number(self.base.track_radius_cm*2,.002,20,3);self.cluster_radius=number(self.base.cluster_radius_cm,.001,20,3);layout.addRow('Track linewidth (cm)',self.track_radius);self.clip_tracks=QCheckBox('Clip tracks to selected detectors');self.clip_tracks.setChecked(self.base.clip_tracks);layout.addRow(self.clip_tracks);layout.addRow('Cluster radius (cm)',self.cluster_radius)
+        self.track_radius=number(self.base.track_radius_cm*2,.002,20,3);self.cluster_radius=number(self.base.cluster_radius_cm,.001,20,3);layout.addRow('Track linewidth (cm)',self.track_radius);self.clip_tracks=QCheckBox('Clip tracks to selected detectors');self.clip_tracks.setChecked(self.base.clip_tracks);layout.addRow(self.clip_tracks);self.include_ambiguous=QCheckBox('Include tracks ambiguously associated to several vertices');self.include_ambiguous.setChecked(self.base.include_ambiguous_tracks);layout.addRow(self.include_ambiguous);layout.addRow('Cluster radius (cm)',self.cluster_radius)
         self.view_transform=QComboBox();self.view_transform.addItems(['AgX','Standard']);self.view_transform.setCurrentText(self.base.view_transform);layout.addRow('Display colours',self.view_transform)
         self.exposure=number(self.base.exposure,-20,20,2);layout.addRow('Exposure (stops)',self.exposure)
         self.track_emission=number(self.base.track_emission,0,100,2);self.cluster_emission=number(self.base.cluster_emission,0,100,2);layout.addRow('Track glow',self.track_emission);layout.addRow('Cluster glow',self.cluster_emission)
+        self.data_glow_lighting=QCheckBox('Data glow lights geometry');self.data_glow_lighting.setChecked(self.base.data_glow_lighting);layout.addRow(self.data_glow_lighting)
         self.highlight_ids=QLineEdit(', '.join(self.base.highlight_track_ids));self.highlight_ids.setPlaceholderText('Track IDs: 11730, 50331650, …');layout.addRow('Special track IDs',self.highlight_ids)
         self.highlight_width=number(self.base.highlight_track_radius_cm*2,.002,20,3);layout.addRow('Special track linewidth (cm)',self.highlight_width)
         self.highlight_clusters=number(self.base.highlight_cluster_radius_cm,.001,20,3);layout.addRow('Linked cluster radius (cm)',self.highlight_clusters)
@@ -320,10 +321,11 @@ class Window(QMainWindow):
         for key,value in self.scene_overrides.items():setattr(cfg,key,value)
         cfg.detector_modes={name:combo.currentText() for name,combo in self.detector_modes.items()}
         cfg.highlight_track_ids=parse_track_ids(self.highlight_ids.text());cfg.highlight_track_radius_cm=self.highlight_width.value()/2;cfg.highlight_cluster_radius_cm=self.highlight_clusters.value();cfg.highlight_override_color=self.highlight_override.isChecked();cfg.highlight_track_color=self.highlight_track_color.text();cfg.highlight_cluster_color=self.highlight_cluster_color.text();cfg.roll=self.roll.value()
-        cfg.clip_tracks=self.clip_tracks.isChecked()
+        cfg.clip_tracks=self.clip_tracks.isChecked();cfg.include_ambiguous_tracks=self.include_ambiguous.isChecked()
         cfg.camera_orbit_axis=self.camera_orbit_axis.currentText()
         cfg.geometry_lod=self.geometry_lod.currentText()
         cfg.view_transform=self.view_transform.currentText();cfg.exposure=self.exposure.value();cfg.track_emission=self.track_emission.value();cfg.cluster_emission=self.cluster_emission.value()
+        cfg.data_glow_lighting=self.data_glow_lighting.isChecked()
         cfg.camera_lens_mm=self.camera_lens.value()
         if cfg.camera_pose:cfg.camera_pose={**cfg.camera_pose,'lens':cfg.camera_lens_mm}
         cfg.frame_aspect=cfg.width/cfg.height
@@ -536,7 +538,7 @@ class Window(QMainWindow):
         for name,value in [('opacity',cfg.geometry_opacity),('track_radius',cfg.track_radius_cm*2),('cluster_radius',cfg.cluster_radius_cm),('azimuth',cfg.azimuth),('elevation',cfg.elevation),('distance',cfg.distance_cm)]:getattr(self,name).setValue(value)
         for spin,value in zip(self.target,cfg.target_cm):spin.setValue(value)
         self.geometry_lod.setCurrentText(cfg.geometry_lod)
-        self.clip_tracks.setChecked(cfg.clip_tracks)
+        self.clip_tracks.setChecked(cfg.clip_tracks);self.include_ambiguous.setChecked(cfg.include_ambiguous_tracks)
         self.magnet.setChecked(cfg.magnet);self.cutaway.setChecked(cfg.cutaway);self.schematic.setChecked(cfg.schematic)
         self.auto_range.setChecked(cfg.scale_min is None)
         if cfg.scale_min is not None:self.minimum.setValue(cfg.scale_min)
@@ -545,6 +547,7 @@ class Window(QMainWindow):
         for name,combo in self.detector_modes.items():combo.setCurrentText(cfg.detector_modes.get(name,cfg.mode))
         self.roll.setValue(cfg.roll);self.highlight_ids.setText(', '.join(cfg.highlight_track_ids));self.highlight_width.setValue(cfg.highlight_track_radius_cm*2);self.highlight_clusters.setValue(cfg.highlight_cluster_radius_cm);self.highlight_override.setChecked(cfg.highlight_override_color);self.highlight_track_color.setText(cfg.highlight_track_color);self.highlight_cluster_color.setText(cfg.highlight_cluster_color)
         self.view_transform.setCurrentText(cfg.view_transform);self.exposure.setValue(cfg.exposure);self.track_emission.setValue(cfg.track_emission);self.cluster_emission.setValue(cfg.cluster_emission)
+        self.data_glow_lighting.setChecked(cfg.data_glow_lighting)
         self.camera_lens.setValue(cfg.camera_pose.get('lens',cfg.camera_lens_mm))
         self.scene_overrides['palette_lut']=cfg.palette_lut
         self.scene_overrides['camera_pose']=cfg.camera_pose

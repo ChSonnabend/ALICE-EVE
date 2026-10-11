@@ -63,6 +63,10 @@ def materials(name,color,opacity=1.,emission=0.,cutaway=False,settings=None):
     bsdf.inputs['Metallic'].default_value=(settings or {}).get('metallic',.15)
     bsdf.inputs['Emission Color'].default_value=(*color,1)
     bsdf.inputs['Emission Strength'].default_value=emission
+    if name.startswith(('Track ','Cluster ')):
+        # Glyph glow remains visible. Sampling thousands of tiny data glyphs
+        # as mesh lights is optional and can dominate preview tracing time.
+        mat.cycles.emission_sampling='AUTO' if (settings or {}).get('data_glow_lighting',True) else 'NONE'
     if opacity<1 or settings and name in settings.get('geometry_openings',{}):
         nodes,links=mat.node_tree.nodes,mat.node_tree.links
         transparent=nodes.new('ShaderNodeBsdfTransparent')

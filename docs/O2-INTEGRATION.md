@@ -24,7 +24,7 @@ Setup selects the explicitly configured ingestion profile. Opening a raw TF or R
 
 ```sh
 .venv/bin/alice-render index data/low_density/reconstructed-ctf-run560067.root --profile profiles/example-remote-ingest.json
-.venv/bin/alice-render index data/validated/run560067-raw-v9
+.venv/bin/alice-render index data/validated/run560067-raw-v14
 ```
 
 Opening an existing validated export needs neither O2 nor an active Virgo job. Input and profile/configuration fingerprints invalidate processed caches. Preflight and reconstruction logs remain in the cache. The profile uses argument arrays, not shell strings. A failed prerequisite stops before expensive reconstruction.
@@ -33,7 +33,9 @@ Opening an existing validated export needs neither O2 nor an active Virgo job. I
 
 `tools/prepare_o2_exporter.py` creates an isolated derivative of the exact installed O2 EventVisualisation source; its upstream GPL license is retained. `tools/build_o2_exporter.py` compiles against installed suite headers and public FairMQ definitions. `native/canonical_export.h`, `native/export_run.inc` and `native/timeframe_export.h` supply collision and whole-TF output. The original checkout is unchanged.
 
-Tracks preserve source GID, original PV-reference GID, fitted kinematics and sampled trajectories. Failed sampling remains in `unrendered_tracks`. Barrel DCA is `sqrt(DCAxy²+DCAz²)` in cm, using O2 propagation with nominal Bz and no material correction; status and signed components are retained. Unsupported forward DCA and real-data MC classifications remain unavailable.
+Tracks preserve source GID, original PV-reference GID, fitted kinematics and sampled trajectories. Original `VtxTrackIndex` ambiguity and PV-contributor flags are retained for drawable and unsampled tracks, independently of MC truth. Time-window matches may name multiple vertices; they are not uniquely assigned collision particles. New scenes exclude explicitly ambiguous tracks and their linked clusters; a checkbox includes them. Failed sampling remains in `unrendered_tracks`. Barrel DCA is `sqrt(DCAxy²+DCAz²)` in cm, using O2 propagation with nominal Bz and no material correction; status and signed components are retained. Unsupported forward DCA and real-data MC classifications remain unavailable.
+
+Coordinate export version 3 corrects standalone TPC tracks with the POD map’s calibrated delta-time conversion, using fitted track time minus PV time in time bins. A/C drift signs come from the map; its T0 is already included, so no additional drift offset is applied. The shifted state is propagated and sampled, including its Z bounds, before export. Both-side constrained standalone states keep their fitted Z and cluster time hypothesis; substituting PV time would move their two drift sides in opposite directions and require refitting. Records retain native TPC component fit T0, actual cluster time in time bins and an explicit time basis. The original PV time and association flags remain separate. Preflight rejects known legacy TF track exports; existing old render images do not validate their physical track positions.
 
 Associated TPC clusters use the same per-TF `TPCCORRMAP` POD transform supplied to GPU reconstruction, with track/PV time and sector-to-global rotation. ITS/MFT use topology dictionaries and aligned transforms; TRD uses calibrated tracklets; TOF, MCH, MID and HMP use their O2 converters. PHOS/EMCAL cells are labelled as cells. CPV whole-TF positions use the aligned module transform of local `(x,0,z)`; this is the module-plane convention.
 

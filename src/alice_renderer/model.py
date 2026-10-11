@@ -55,6 +55,9 @@ def validate_event(raw: dict) -> dict:
         if len(track['points'])<2: raise ValueError("A track needs at least two sampled points")
         if 'matching' in track and (not isinstance(track['matching'],bool) or not track.get('matching_basis')):raise ValueError('Matching status requires a boolean and matching_basis')
         track['kinematics'] = kinematics(track.get('kinematics',{}))
+        if 'association' in track:
+            association=track['association']
+            if not isinstance(association,dict) or any(k in association and not isinstance(association[k],bool) for k in ('ambiguous','pv_contributor')):raise ValueError('Invalid vertex association flags')
         if 'features' in track:
             if not isinstance(track['features'],dict):raise ValueError('Track features must be a numeric mapping')
             track['features']={str(k):v for k,v in track['features'].items() if isinstance(v,(int,float)) and math.isfinite(v)}
@@ -131,6 +134,7 @@ class RenderSettings:
     device: str = ''
     threads: int = 0
     track_radius_cm: float = 0.12
+    include_ambiguous_tracks: bool = False
     clip_tracks: bool = True
     highlight_track_ids: list = field(default_factory=list)
     highlight_track_radius_cm: float = .35
@@ -171,12 +175,15 @@ class RenderSettings:
     exposure: float = 0.
     track_emission: float = .7
     cluster_emission: float = 1.
+    data_glow_lighting: bool = False
     lights: list = field(default_factory=lambda:[
         {'position_m':[5.,-5.,10.], 'energy':1800., 'size_m':8., 'color':'#ffffff'},
         {'position_m':[-8.,3.,4.], 'energy':1200., 'size_m':10., 'color':'#ffffff'},
         {'position_m':[0.,0.,-10.], 'energy':1000., 'size_m':8., 'color':'#ffffff'}])
 
     def validate(self):
+        if not isinstance(self.data_glow_lighting,bool):raise ValueError('Data glow lighting must be a boolean')
+        if not isinstance(self.include_ambiguous_tracks,bool):raise ValueError('Ambiguous-track selection must be a boolean')
         if not isinstance(self.clip_tracks,bool):raise ValueError('Track clipping must be a boolean')
         if self.mode not in ('tracks','clusters','both'): raise ValueError('Invalid rendering mode')
         for name,mode in self.detector_modes.items():

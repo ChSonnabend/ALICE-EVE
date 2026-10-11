@@ -43,18 +43,23 @@ def prepare(reference,destination,templates):
   std::vector<GID> mExportTrackGIDs;
   GID mExportCurrentGID;
   std::unordered_map<GID,GID> mExportInputGIDs;
+  std::unordered_map<GID,std::array<float,3>> mExportTPCClusterTimes;
   std::vector<std::array<float,5>> mExportKinematics;
   std::vector<std::optional<o2::track::TrackPar>> mExportBarrelFits;
   std::unordered_map<GID,float> mExactTrackTime;
   const o2::gpu::TPCFastTransformPOD* mExportTPCMap=nullptr;
+  float tpcPVShift(const o2::tpc::TrackTPC& tr,float pvTimeMUS) const {
+    if(!mExportTPCMap)throw std::runtime_error("Per-TF TPC map is required for a vertex-time hypothesis");
+    return alice_export::tpcVertexShift(*mExportTPCMap,tr,pvTimeMUS,mMUS2TPCTimeBins);
+  }
   void recordPoint(const float xyz[],const char* detector,bool associated=true) {
     for(int i=0;i<3;++i)if(!std::isfinite(xyz[i]))throw std::runtime_error("Non-finite calibrated cluster");
     mExportClusters.push_back({{xyz[0],xyz[1],xyz[2]},detector,associated?int(mEvent.getTrackCount())-1:-1});
     if(associated)mEvent.addCluster(xyz);
   }
 '''
-    text=replace(text,'#include "TPCFastTransform.h"','#include "TPCFastTransform.h"\n#include "TPCFastTransformPOD.h"\n#include <optional>\n#include <limits>\n#include <stdexcept>')
-    text=replace(text,'  void clear() { mEvent.clear(); }','  void clear() { mEvent.clear();mExportClusters.clear();mExportTrackGIDs.clear();mExportKinematics.clear();mExportBarrelFits.clear(); }\n'+extra)
+    text=replace(text,'#include "TPCFastTransform.h"','#include "TPCFastTransform.h"\n#include "DataFormatsTPC/TrackTPC.h"\n#include "DataFormatsTPC/Defs.h"\n#include "TPCFastTransformPOD.h"\n#include "tpc_vertex_shift.h"\n#include <optional>\n#include <limits>\n#include <stdexcept>')
+    text=replace(text,'  void clear() { mEvent.clear(); }','  void clear() { mEvent.clear();mExportClusters.clear();mExportTrackGIDs.clear();mExportKinematics.clear();mExportBarrelFits.clear();mExportTPCClusterTimes.clear(); }\n'+extra)
     header.write_text(text)
     source=destination/'src/EveWorkflowHelper.cxx';text=source.read_text()
     for name,signature in [('drawAODBarrel','void'),('drawAODMFT','void'),('drawAODFwd','void'),('detectorMapToGIDSource','GID::Source')]:
@@ -84,15 +89,21 @@ def prepare(reference,destination,templates):
     # MCH-MID is stored in MATCHES, not TRACKS in RecoContainer.
     text=replace(text,'!mRecoCont->isTrackSourceLoaded(tvid.getSource())',
                  '!(tvid.getSource()==GID::MCHMID ? mRecoCont->isMatchSourceLoaded(GID::MCHMID) : mRecoCont->isTrackSourceLoaded(tvid.getSource()))')
-    # The reference declares an inner dz and silently leaves the rendered TPC
-    # track unshifted. Update the outer value used by drawTPC instead.
-    a,b=body(text,'void EveWorkflowHelper::draw(');section=text[a:b]
-    section=replace(section,'float dz = (tpcTr.getTime0()', 'dz = (tpcTr.getTime0()')
-    text=text[:a]+section+text[b:]
+    # Use the same calibrated POD/time convention as the TPC cluster transform,
+    # not the reference helper's reversed sign and additional drift offset.
+    shift_pattern=r'(?:float )?dz = \(tpcTr\.getTime0\(\) \* mTPCTimeBins2MUS -.*?if \(tpcTr\.hasCSideClustersOnly\(\)\) \{\s*dz = -dz;\s*\}'
+    for signature,time_expression,declaration in [('void EveWorkflowHelper::draw(', 'pvTime', ''),('void EveWorkflowHelper::selectTracks(', 'pv.getTimeStamp().getTimeStamp()', 'float ')]:
+        a,b=body(text,signature);section=text[a:b]
+        section,n=re.subn(shift_pattern,declaration+'dz = tpcPVShift(tpcTr, '+time_expression+');',section,flags=re.S)
+        if n!=1:raise ValueError('TPC PV-shift anchor mismatch: '+signature)
+        text=text[:a]+section+text[b:]
+    text=function(text,'void EveWorkflowHelper::addTrackToEvent(',lambda section:replace(replace(section,'auto pnts = getTrackPoints(tr,','auto shifted=tr;shifted.setZ(tr.getZ()+dz);\n  auto pnts = getTrackPoints(shifted,'),'pnts[ip][2] + dz','pnts[ip][2]'))
+    text=function(text,'void EveWorkflowHelper::drawTPC(',lambda section:replace(section,'? trackTime * mMUS2TPCTimeBins','? alice_export::tpcClusterTimeTB(tr, trackTime * mMUS2TPCTimeBins)'))
     for name in ('drawTOFClusters','drawITSClusters','drawMFTClusters','drawMCHClusters','drawTRDClusters','drawMIDClusters'):
         detector={'drawTOFClusters':'TOF','drawITSClusters':'ITS','drawMFTClusters':'MFT','drawMCHClusters':'MCH','drawTRDClusters':'TRD','drawMIDClusters':'MID'}[name]
         text=function(text,'void EveWorkflowHelper::'+name+'(',lambda s,d=detector:re.sub(r'drawPoint\(([^;]*?)\);',lambda m:f'recordPoint({m[1]},"{d}");',s))
     def tpc(section):
+        section=replace(section,'  // store the TPC cluster positions','  mExportTPCClusterTimes[mExportCurrentGID]={trc.getTime0(),trackTimeTB,float(mExportCurrentGID.getSource()==GID::TPC && trc.hasBothSidesClusters())};\n  // store the TPC cluster positions')
         section=replace(section,'this->mTPCFastTransform->TransformIdeal(','this->mExportTPCMap->Transform(')
         section=replace(section,'mEvent.addCluster(\n      xyz.data());','recordPoint(xyz.data(),"TPC");')
         return '\n  if(!mExportTPCMap)throw std::runtime_error("Calibrated per-TF TPC map is missing");'+section
@@ -132,7 +143,7 @@ def prepare(reference,destination,templates):
   if(!marker)throw std::runtime_error("Export completion write failed");
 ''')
     text=replace(text,'const auto& conf = EveConfParam::Instance();','o2::conf::ConfigurableParam::updateFromString("eveconf.PVMode=true;eveconf.maxTracks=-1;eveconf.filterITSROF=false;eveconf.TPCEtaAbsMax=-1;eveconf.timeMinMax[0]=-999;eveconf.timeMinMax[1]=-999;eveconf.TPCOnlyMaxDCARZ[0]=-999;eveconf.TPCOnlyMaxDCARZ[1]=-999;eveconf.calibrateEMC=false");\n  const auto& conf = EveConfParam::Instance();')
-    text=replace(text,'o2::tpc::VDriftHelper::requestCCDBInputs(dataRequest->inputs);','o2::tpc::VDriftHelper::requestCCDBInputs(dataRequest->inputs);\n  if(srcCl[GID::TPC])dataRequest->inputs.emplace_back("aliceTPCMap","TPC","TPCCORRMAP",0,Lifetime::Timeframe);')
+    text=replace(text,'o2::tpc::VDriftHelper::requestCCDBInputs(dataRequest->inputs);','o2::tpc::VDriftHelper::requestCCDBInputs(dataRequest->inputs);\n  if(srcCl[GID::TPC] || srcTrk[GID::TPC])dataRequest->inputs.emplace_back("aliceTPCMap","TPC","TPCCORRMAP",0,Lifetime::Timeframe);')
     text=replace(text,'  dataRequest->requestClusters(srcCl, useMC);','''  dataRequest->requestClusters(srcCl, useMC);
   if(srcCl[GID::FT0])dataRequest->requestFT0RecPoints(false);
   if(srcCl[GID::FV0])dataRequest->requestFV0RecPoints(false);
@@ -142,6 +153,7 @@ def prepare(reference,destination,templates):
 ''')
     text=replace(text,'"o2-eve-export",','"alice-complete-export",')
     source.write_text(text)
+    shutil.copy2(templates/'tpc_vertex_shift.h',destination/'include/tpc_vertex_shift.h')
     shutil.copy2(templates/'canonical_export.h',destination/'include/canonical_export.h')
     shutil.copy2(templates/'timeframe_export.h',destination/'include/timeframe_export.h')
     print(destination)

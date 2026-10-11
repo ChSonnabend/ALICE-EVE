@@ -127,3 +127,27 @@ def test_picking_yields_to_overlapping_sidebar_and_toolbar():
     assert not inside_viewport(area,window,30,100)
     assert not inside_viewport(area,window,0,0)
     space.show_region_ui=False;assert inside_viewport(area,window,800,100)
+
+def test_ambiguous_vertex_selection_filters_tracks_and_linked_clusters():
+    from alice_renderer.object_selection import selected_tracks,selected_clusters,event_counts
+    event={'tracks':[{'id':'a','detectors':['TPC'],'association':{'ambiguous':True}},{'id':'b','detectors':['TPC'],'association':{'ambiguous':False}},{'id':'c','detectors':['ITS']}],
+           'clusters':[{'detector':'TPC','track_id':'a'},{'detector':'TPC','track_id':'b'},{'detector':'TPC','track_id':'failed'},{'detector':'ITS'}],
+           'unrendered_tracks':[{'id':'failed','association':{'ambiguous':True}}]}
+    settings={'detectors':['ITS','TPC'],'mode':'both','include_ambiguous_tracks':False}
+    assert [t['id'] for t in selected_tracks(event,settings)]==['b','c']
+    assert len(selected_clusters(event,settings))==2
+    assert event_counts(event)['ambiguous_drawable_tracks']==1
+    settings['include_ambiguous_tracks']=True
+    assert len(selected_tracks(event,settings))==3 and len(selected_clusters(event,settings))==4
+
+def test_legacy_tpc_vertex_shift_export_cannot_pass_render_preflight(tmp_path):
+    from alice_renderer.runtime import preflight
+    from alice_renderer.model import RenderSettings
+    event={'id':'legacy-native','kind':'collision','calibration_timestamp_ms':1,'tracks':[{'id':'1','source':'TPC','detectors':['TPC'],'points':[[100,0,0],[150,0,1]]}],'clusters':[{'id':'1','detector':'TPC','position':[100,0,0]}]}
+    cfg=RenderSettings(detectors=['TPC'],geometry=[],clip_tracks=False)
+    errors=preflight(cfg,[event],{'version':[5,0,0],'devices':[{'type':'CPU'}]},tmp_path)
+    assert any('unsupported TPC time hypotheses' in e for e in errors)
+    cfg.mode='clusters'
+    assert any('unsupported TPC time hypotheses' in e for e in preflight(cfg,[event],{'version':[5,0,0],'devices':[{'type':'CPU'}]},tmp_path))
+    event['coordinate_export_version']=3
+    assert not preflight(cfg,[event],{'version':[5,0,0],'devices':[{'type':'CPU'}]},tmp_path)

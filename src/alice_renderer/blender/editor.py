@@ -56,13 +56,14 @@ def current_settings():
     cfg['colors']['background']=hex_color(ui.background)
     cfg['colors']['tracks']=hex_color(ui.track_color);cfg['colors']['clusters']=hex_color(ui.cluster_color)
     cfg['colors_linear'].update(background=list(ui.background),tracks=list(ui.track_color),clusters=list(ui.cluster_color))
-    cfg['track_radius_cm']=ui.track_width_cm/2;cfg['cluster_radius_cm']=ui.cluster_radius_cm;cfg['clip_tracks']=ui.clip_tracks
+    cfg['track_radius_cm']=ui.track_width_cm/2;cfg['cluster_radius_cm']=ui.cluster_radius_cm;cfg['clip_tracks']=ui.clip_tracks;cfg['include_ambiguous_tracks']=ui.include_ambiguous_tracks
     cfg['highlight_track_ids']=parse_track_ids(ui.highlight_ids);cfg['highlight_track_radius_cm']=ui.highlight_width_cm/2;cfg['highlight_cluster_radius_cm']=ui.highlight_cluster_radius_cm;cfg['highlight_override_color']=ui.highlight_override;cfg['highlight_track_color']=hex_color(ui.highlight_track_color);cfg['highlight_cluster_color']=hex_color(ui.highlight_cluster_color)
     cfg['geometry_lod']=ui.geometry_lod
     cfg['geometry_lods']={i.name:i.detail for i in ui.detectors if i.detail!='inherit'}
     cfg['geometry_schematics']={**cfg.get('geometry_schematics',{}),**{i.name:False for i in ui.detectors if i.detail!='inherit'}}
     cfg['world_strength']=ui.world_strength;cfg['roughness']=ui.roughness;cfg['metallic']=ui.metallic;cfg['shading']=ui.shading
     cfg['view_transform']=ui.view_transform;cfg['exposure']=ui.exposure;cfg['track_emission']=ui.track_emission;cfg['cluster_emission']=ui.cluster_emission
+    cfg['data_glow_lighting']=ui.data_glow_lighting
     cfg['mode']=ui.mode;cfg['track_color_mode']=ui.track_mode;cfg['cluster_color_mode']=ui.cluster_mode;cfg['palette']=ui.palette;cfg['palette_lut']=PALETTES.get(ui.palette,JOB['settings'].get('palette_lut',[]))
     cfg['color_ranges']={'tracks':[ui.track_min,ui.track_max],'clusters':[ui.cluster_min,ui.cluster_max]}
     cfg['scale_min']=None;cfg['scale_max']=None
@@ -70,7 +71,7 @@ def current_settings():
     return RenderSettings(**cfg).validate()
 
 def track_signature(ui):
-    return (tuple((i.name,i.mode) for i in ui.detectors if i.data and i.data_available),tuple(i.name for i in ui.detectors if i.visible and i.geometry_available and i.name!='L3'),ui.track_width_cm,ui.cluster_radius_cm,ui.clip_tracks,ui.highlight_ids,ui.highlight_width_cm,ui.highlight_cluster_radius_cm,ui.highlight_override,tuple(ui.highlight_track_color),tuple(ui.highlight_cluster_color))
+    return (tuple((i.name,i.mode) for i in ui.detectors if i.data and i.data_available),tuple(i.name for i in ui.detectors if i.visible and i.geometry_available and i.name!='L3'),ui.track_width_cm,ui.cluster_radius_cm,ui.clip_tracks,ui.include_ambiguous_tracks,ui.highlight_ids,ui.highlight_width_cm,ui.highlight_cluster_radius_cm,ui.highlight_override,tuple(ui.highlight_track_color),tuple(ui.highlight_cluster_color))
 
 def set_all_modes(self,context):
     if not JOB:return
@@ -177,6 +178,7 @@ def appearance_update(self,context):
                         if node.bl_idname=='GeometryNodeSetMaterial' and node.inputs['Material'].default_value:mats.append(node.inputs['Material'].default_value)
             color=special if emphasis and ui.highlight_override else base
             for mat in mats:
+                mat.cycles.emission_sampling='AUTO' if ui.data_glow_lighting else 'NONE'
                 bsdf=mat.node_tree.nodes.get('Principled BSDF')
                 if bsdf:
                     bsdf.inputs['Emission Strength'].default_value=ui.track_emission if kind=='Tracks' else ui.cluster_emission
@@ -242,7 +244,7 @@ class DetectorSettings(bpy.types.PropertyGroup):
     inner_mask_radius: FloatProperty(name='Inner placement mask radius (m)',description='0 disables; hide matching placements inside this radius, retaining outer placements. Apply geometry appearance',min=0,max=100,default=0)
     inner_mask_patterns: StringProperty(name='Inner component names',description='Comma-separated patterns of instancer groups to mask inside the chosen radius')
     inner_mask_front: BoolProperty(name='Only opening-facing inner placements',description='Use the opening direction to retain the back half of the inner structure',default=True)
-    opacity: FloatProperty(name='Opacity',min=0,max=1,default=.18,update=appearance_update)
+    opacity: FloatProperty(name='Opacity per surface',min=0,max=1,default=.18,precision=3,update=appearance_update)
     display: EnumProperty(name='Appearance',items=[('surfaces','Existing surfaces','Keep the current aligned surfaces or simplified cells'),('shell','Outer shell','Approximate outer hull; removes internal structures and openings'),('outline','Outline','Edges of the approximate outer hull')])
     color: FloatVectorProperty(name='Colour',subtype='COLOR',size=3,min=0,max=1,default=(.02,.04,.2),update=appearance_update)
 
@@ -252,11 +254,11 @@ def viewport_renderer_update(self,context):
     scene=context.scene;scene.render.engine=self.viewport_renderer
     # Progressive Cycles uses the same materials and geometry as the full
     # render; Eevee remains the fast choice. This is an editor-only preference.
-    scene.cycles.preview_samples=32;scene.cycles.use_preview_denoising=True
-    scene.eevee.taa_samples=64;scene.eevee.use_shadow_jitter_viewport=False
+    scene.cycles.preview_samples=self.viewport_samples;scene.cycles.use_preview_adaptive_sampling=True;scene.cycles.preview_adaptive_threshold=.025;scene.cycles.use_preview_denoising=True
+    scene.eevee.taa_samples=self.viewport_samples;scene.eevee.use_shadow_jitter_viewport=False
 
 class SceneSettings(bpy.types.PropertyGroup):
-    viewport_renderer: EnumProperty(name='Viewport renderer',items=[('BLENDER_EEVEE','Fast (Eevee)','Responsive preview; transparency and lighting are approximate'),('CYCLES','Accurate (Cycles)','Progressive preview using the final renderer; slower on CPU')],default='BLENDER_EEVEE',update=viewport_renderer_update)
+    viewport_renderer: EnumProperty(name='Viewport renderer',items=[('BLENDER_EEVEE','Fast (Eevee)','Responsive preview; transparency and lighting are approximate'),('CYCLES','Accurate (Cycles)','Progressive preview using the final renderer; slower on CPU')],default='CYCLES',update=viewport_renderer_update)
     detectors: CollectionProperty(type=DetectorSettings)
     geometry_lod: EnumProperty(name='Geometry detail',items=[('full','Full aligned surfaces','Preserve the actual detector geometry'),('simplified','Coarse cells','Reduce complexity; approximate bounding cells')])
     mode: EnumProperty(name='Set all object modes',items=[(v,v,'') for v in ('tracks','clusters','both')],update=set_all_modes)
@@ -269,6 +271,10 @@ class SceneSettings(bpy.types.PropertyGroup):
     highlight_track_color: FloatVectorProperty(name='Special tracks',subtype='COLOR',size=3,min=0,max=1,update=appearance_update)
     highlight_cluster_color: FloatVectorProperty(name='Linked clusters',subtype='COLOR',size=3,min=0,max=1,update=appearance_update)
     picking_active: BoolProperty(default=False)
+    displayed_tracks: IntProperty(default=0)
+    displayed_clusters: IntProperty(default=0)
+    include_ambiguous_tracks: BoolProperty(name='Include ambiguous vertex matches',description='Show possible time-window matches to multiple vertices and their clusters. They are not uniquely assigned collision particles',default=False,update=selection_update)
+    viewport_samples: IntProperty(name='Preview samples',default=128,min=16,max=4096,update=viewport_renderer_update)
     clip_tracks: BoolProperty(name='Clip tracks to selected detectors',default=True,update=selection_update)
     track_mode: EnumProperty(name='Track coding',items=lambda self,context:COLOR_ITEMS)
     cluster_mode: EnumProperty(name='Cluster coding',items=lambda self,context:COLOR_ITEMS)
@@ -283,6 +289,7 @@ class SceneSettings(bpy.types.PropertyGroup):
     exposure: FloatProperty(name='Exposure (stops)',min=-20,max=20,default=0,update=appearance_update)
     track_emission: FloatProperty(name='Track glow',min=0,max=100,default=.7,update=appearance_update)
     cluster_emission: FloatProperty(name='Cluster glow',min=0,max=100,default=1.,update=appearance_update)
+    data_glow_lighting: BoolProperty(name='Data glow lights geometry',description='Sample tracks and clusters as mesh lights. Keep off for faster, cleaner preview lighting; glyph glow stays visible',default=False,update=appearance_update)
     roughness: FloatProperty(name='Roughness',min=0,max=1,default=.38,update=appearance_update)
     metallic: FloatProperty(name='Metallic',min=0,max=1,default=.15,update=appearance_update)
     shading: EnumProperty(name='Shading',items=[('smooth','Smooth',''),('flat','Flat','')],update=appearance_update)
@@ -315,11 +322,13 @@ class ApplyData(bpy.types.Operator):
             for name in ('Tracks','Clusters'):
                 old=bpy.data.collections.get(name)
                 if old:remove_owned_collection(old)
-            if bool(enabled_detectors(cfg,'tracks')):tracks(ts,cfg)
+            if bool(enabled_detectors(cfg,'tracks')):context.scene.alice_eve.displayed_tracks=tracks(ts,cfg)['visible_tracks']
             else:
                 from worker import collection
                 collection('Tracks')
+                context.scene.alice_eve.displayed_tracks=0
             clusters(cs,cfg);JOB['applied_track_signature']=track_signature(context.scene.alice_eve);appearance_update(self,context)
+            context.scene.alice_eve.displayed_clusters=len(cs)
             self.report({'INFO'},'Data selection and fixed colour ranges applied')
             return {'FINISHED'}
         except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
@@ -398,6 +407,29 @@ class SolidDetectorSurfaces(bpy.types.Operator):
         appearance_update(self,context)
         self.report({'INFO'},'Full aligned opaque surfaces loaded; event clusters remain separate data')
         return {'FINISHED'}
+
+class LightTransparentSurfaces(bpy.types.Operator):
+    bl_idname='alice_eve.light_transparent_surfaces';bl_label='Light transparent detector surfaces'
+    bl_description='Load full aligned meshes at 3.5% opacity per face, avoiding the heavy darkening of many overlapping 50% surfaces'
+    def execute(self,context):
+        if not any(i.visible and i.geometry_available for i in context.scene.alice_eve.detectors):
+            self.report({'ERROR'},'Select a detector Surface first');return {'CANCELLED'}
+        result=bpy.ops.alice_eve.full_geometry()
+        if result!={'FINISHED'}:return result
+        for item in context.scene.alice_eve.detectors:
+            if item.visible and item.geometry_available:item.opacity=.035
+        context.scene.alice_eve.data_glow_lighting=False
+        appearance_update(self,context)
+        return {'FINISHED'}
+
+class RestoreSurfaceExclusions(bpy.types.Operator):
+    bl_idname='alice_eve.restore_surface_exclusions';bl_label='Restore excluded detector surfaces'
+    bl_description='Restore selected detectors\' walls and services hidden by name or inner-radius filters; retain component checkboxes, camera, openings and colours'
+    def execute(self,context):
+        for item in context.scene.alice_eve.detectors:
+            if item.visible and item.geometry_available:
+                item.exclusions='';item.inner_mask_radius=0
+        return bpy.ops.alice_eve.apply_geometry()
 
 class CameraFromView(bpy.types.Operator):
     bl_idname='alice_eve.camera_from_view';bl_label='Use current view as camera'
@@ -605,7 +637,7 @@ class EVEPanel(bpy.types.Panel):
         layout=self.layout;ui=context.scene.alice_eve
         cfg=current_settings().to_dict()
         layout.label(text='Detector surfaces')
-        layout.operator('alice_eve.solid_surfaces');layout.prop(ui,'viewport_renderer')
+        layout.operator('alice_eve.solid_surfaces');layout.operator('alice_eve.light_transparent_surfaces');layout.operator('alice_eve.restore_surface_exclusions');layout.prop(ui,'viewport_renderer');layout.prop(ui,'viewport_samples')
         layout.prop(ui,'geometry_lod');layout.operator('alice_eve.full_geometry')
         layout.operator('alice_eve.select_no_detectors');layout.operator('alice_eve.complete_geometry')
         layout.label(text='Outer shell / outline are approximate hulls.')
@@ -616,6 +648,10 @@ class EVEPanel(bpy.types.Panel):
         layout.label(text='Trackball navigation permits arbitrary orientation.')
         if EVENT.get('contributors') is not None:layout.label(text='Primary vertex contributors: '+str(EVENT['contributors']))
         layout.label(text='Detector counts refer to input fitted records.')
+        counts=JOB['input_counts']
+        layout.label(text=f'Displayed: {ui.displayed_tracks} tracks / {ui.displayed_clusters} clusters')
+        if counts['association_flags_available']:layout.label(text=str(counts['ambiguous_drawable_tracks'])+' input tracks have ambiguous vertex matches')
+        row=layout.row();row.enabled=counts['association_flags_available'];row.prop(ui,'include_ambiguous_tracks')
         layout.prop(context.scene.camera.data,'type');layout.prop(context.scene.camera.data,'lens');layout.prop(context.scene.camera.data,'ortho_scale')
         layout.operator('alice_eve.opaque_geometry');layout.operator('alice_eve.apply_geometry')
         layout.prop(ui,'mode');layout.prop(ui,'track_width_cm');layout.prop(ui,'cluster_radius_cm');layout.prop(ui,'clip_tracks');layout.prop(ui,'track_color');layout.prop(ui,'cluster_color')
@@ -650,13 +686,13 @@ class EVEPanel(bpy.types.Panel):
                     if not item.components:box.label(text='No hierarchy metadata for this asset')
                 box.prop(item,'inner_mask_radius')
                 if item.inner_mask_radius>0:box.prop(item,'inner_mask_patterns');box.prop(item,'inner_mask_front')
-        layout.prop(ui,'background');layout.prop(ui,'world_strength');layout.prop(ui,'view_transform');layout.prop(ui,'exposure');layout.prop(ui,'track_emission');layout.prop(ui,'cluster_emission');layout.prop(ui,'roughness');layout.prop(ui,'metallic');layout.prop(ui,'shading')
+        layout.prop(ui,'background');layout.prop(ui,'world_strength');layout.prop(ui,'view_transform');layout.prop(ui,'exposure');layout.prop(ui,'track_emission');layout.prop(ui,'cluster_emission');layout.prop(ui,'data_glow_lighting');layout.prop(ui,'roughness');layout.prop(ui,'metallic');layout.prop(ui,'shading')
         for lamp in (o for o in context.scene.objects if o.type=='LIGHT'):
             box=layout.box();box.label(text=lamp.name);box.prop(lamp,'location');box.prop(lamp,'rotation_euler');box.prop(lamp.data,'energy');box.prop(lamp.data,'size');box.prop(lamp.data,'color')
         layout.prop(ui,'export_path');layout.prop(ui,'include_defaults')
         row=layout.row();row.operator('alice_eve.export');row.operator('alice_eve.render_full')
 
-CLASSES=(GeometryComponent,ToggleComponent,RefreshComponents,DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,SolidDetectorSurfaces,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,ExportConfig,RenderFull,EVEPanel)
+CLASSES=(GeometryComponent,ToggleComponent,RefreshComponents,DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,SolidDetectorSurfaces,LightTransparentSurfaces,RestoreSurfaceExclusions,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,ExportConfig,RenderFull,EVEPanel)
 
 def start_editor(job,event,metadata):
     global JOB,EVENT,DEVICES,RECOMMENDATION,PALETTES
@@ -678,12 +714,13 @@ def start_editor(job,event,metadata):
     # Suppress updates during property initialization.
     from worker import rgb
     ui.cluster_radius_cm=settings['cluster_radius_cm'];ui.highlight_ids=', '.join(settings.get('highlight_track_ids',[]));ui.highlight_width_cm=settings.get('highlight_track_radius_cm',.35)*2;ui.highlight_cluster_radius_cm=settings.get('highlight_cluster_radius_cm',1.);ui.highlight_override=settings.get('highlight_override_color',True);ui.highlight_track_color=rgb(settings.get('highlight_track_color','#ffcc33'));ui.highlight_cluster_color=rgb(settings.get('highlight_cluster_color','#ff6633'))
-    ui.track_width_cm=settings['track_radius_cm']*2;ui.clip_tracks=settings.get('clip_tracks',True)
+    ui.track_width_cm=settings['track_radius_cm']*2;ui.clip_tracks=settings.get('clip_tracks',True);ui.include_ambiguous_tracks=settings.get('include_ambiguous_tracks',True)
     ui.geometry_lod=settings.get('geometry_lod','full')
     ui.mode=settings['mode'];ui.track_mode=settings['track_color_mode'];ui.cluster_mode=settings['cluster_color_mode'];ui.palette=settings['palette']
     ui.background=settings.get('colors_linear',{}).get('background',rgb(settings['colors']['background']));ui.track_color=settings.get('colors_linear',{}).get('tracks',rgb(settings['colors']['tracks']));ui.cluster_color=settings.get('colors_linear',{}).get('clusters',rgb(settings['colors']['clusters']))
     ui.world_strength=settings['world_strength'];ui.roughness=settings['roughness'];ui.metallic=settings['metallic'];ui.shading=settings['shading']
     ui.view_transform=settings.get('view_transform','AgX');ui.exposure=settings.get('exposure',0.);ui.track_emission=settings.get('track_emission',.7);ui.cluster_emission=settings.get('cluster_emission',1.)
+    ui.data_glow_lighting=settings.get('data_glow_lighting',True)
     available=set(event.get('data_detectors',[]))|{d for t in event['tracks'] for d in t['detectors']}|{c['detector'] for c in event['clusters']}
     counts=event_counts(event);track_counts=counts['tracks_by_detector'];cluster_counts=counts['clusters_by_detector']
     from alice_renderer.model import DETECTORS
@@ -700,7 +737,9 @@ def start_editor(job,event,metadata):
     locked=recipe(RenderSettings(**settings),event)['scene']['color_ranges']
     ui.track_min,ui.track_max=locked['tracks'];ui.cluster_min,ui.cluster_max=locked['clusters']
     ui.export_path=str(Path(job['output'])/'scene-config.json')
-    JOB=job;JOB['applied_track_signature']=track_signature(ui);appearance_update(ui,bpy.context)
+    JOB=job;JOB['input_counts']=metadata.get('input_counts') or event_counts(event)
+    ui.displayed_tracks=metadata['rendered_tracks'];ui.displayed_clusters=metadata['rendered_clusters']
+    JOB['applied_track_signature']=track_signature(ui);appearance_update(ui,bpy.context)
     bpy.context.preferences.inputs.view_rotate_method='TRACKBALL'
     viewport_renderer_update(ui,bpy.context);scene.render.resolution_percentage=100
     for screen in bpy.data.screens:

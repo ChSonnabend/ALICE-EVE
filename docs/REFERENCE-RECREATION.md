@@ -138,3 +138,5 @@ radial mask preserved outer context while opening the inner cage.
 Directional openings, recorded component masks, selective inner-instance masks,
 portable colour/lens/glow controls and the improved default are implemented.
 The remaining plan items above are not completed features.
+
+The reference-fitting renders above are historical style comparisons from before the coordinate-version-3 correction. They do not validate standalone TPC track placement. Reuse their camera/material choices with freshly exported version-3 data; earlier TPC Z shifts were superseded.

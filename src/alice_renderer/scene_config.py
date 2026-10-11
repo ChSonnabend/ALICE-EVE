@@ -129,6 +129,8 @@ def resolve_settings(data,config_path,geometry_root=None,asset_overrides=None):
     # Older recipes used azimuth around Z. Keep their exact framing when loaded.
     if 'camera_orbit_axis' not in scene:
         scene['camera_orbit_axis']='Z';scene.setdefault('elevation',22.)
+    scene.setdefault('include_ambiguous_tracks',True) # Legacy recipes deliberately displayed every reference.
+    scene.setdefault('data_glow_lighting',True)
     cfg=RenderSettings(**scene,geometry_assets=assets)
     required=cfg.geometry+(['L3'] if cfg.magnet else [])
     from .geometry_selection import is_schematic

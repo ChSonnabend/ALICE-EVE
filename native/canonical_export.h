@@ -9,11 +9,24 @@
 #include <fstream>
 #include <string>
 #include "ReconstructionDataFormats/PrimaryVertex.h"
+#include "ReconstructionDataFormats/VtxTrackIndex.h"
 
 namespace alice_export {
 using GID=o2::dataformats::GlobalTrackID;
 using Writer=rapidjson::Writer<rapidjson::StringBuffer>;
 inline std::string trackID(o2::dataformats::GlobalTrackID gid) {return std::to_string(gid.getRawWOFlags());}
+inline void association(Writer& w,const GID& input) {
+  const o2::dataformats::VtxTrackIndex ref(input);
+  w.Key("association");w.StartObject();w.Key("ambiguous");w.Bool(ref.isAmbiguous());w.Key("pv_contributor");w.Bool(ref.isPVContributor());
+  w.Key("basis");w.String("Original O2 VtxTrackIndex flags; time-window association may name multiple vertices");w.EndObject();
+}
+template<class Times>
+inline void tpcTimeBasis(Writer& w,const Times& times,const GID& gid) {
+  const auto it=times.find(gid);if(it==times.end())return;
+  w.Key("tpc_component_fit_time0_tb");w.Double(it->second[0]);
+  w.Key("tpc_cluster_time_tb");w.Double(it->second[1]);
+  w.Key("tpc_cluster_time_basis");w.String(it->second[2]?"constrained both-side standalone TPC fit time":"matched-source or primary-vertex time hypothesis");
+}
 inline void point(Writer& w,const std::array<float,3>& p) {w.StartArray();for(float v:p)w.Double(v);w.EndArray();}
 inline void kin(Writer& w,const std::array<float,5>& values) {
   static const char* names[]={"eta","tan_lambda","phi","p","pt"};
@@ -27,7 +40,7 @@ inline void write(std::ostream& output,o2::event_visualisation::EveWorkflowHelpe
     throw std::runtime_error("Export track instrumentation lost synchronization");
   rapidjson::StringBuffer buffer;Writer w(buffer);w.StartObject();
   auto id=std::to_string(timing.runNumber)+":"+std::to_string(timing.tfCounter)+":"+std::to_string(timing.firstTForbit)+":"+std::to_string(index);
-  w.Key("schema_version");w.Int(1);w.Key("units");w.String("cm");w.Key("kind");w.String("collision");
+  w.Key("schema_version");w.Int(1);w.Key("coordinate_export_version");w.Int(3);w.Key("units");w.String("cm");w.Key("kind");w.String("collision");
   w.Key("id");w.String(id.c_str());w.Key("run");w.Uint(timing.runNumber);w.Key("timeframe");w.Uint(timing.tfCounter);
   w.Key("orbit");w.Uint(timing.firstTForbit);w.Key("primary_vertex");w.Uint64(index);
   w.Key("calibration_timestamp_ms");w.Uint64(timing.creation);
@@ -47,7 +60,8 @@ inline void write(std::ostream& output,o2::event_visualisation::EveWorkflowHelpe
     for(size_t j=0;j<track.getPointCount();++j)for(auto value:track.getPoint(j))pointsValid=pointsValid&&std::isfinite(value);
     if(!pointsValid){failed.push_back(i);continue;}
     w.StartObject();w.Key("id");w.String(trackID(gid).c_str());w.Key("source");w.String(gid.getSourceName().c_str());
-    w.Key("input_gid");w.String(trackID(helper.mExportInputGIDs.at(gid)).c_str());
+    w.Key("input_gid");w.String(trackID(helper.mExportInputGIDs.at(gid)).c_str());association(w,helper.mExportInputGIDs.at(gid));
+    tpcTimeBasis(w,helper.mExportTPCClusterTimes,gid);
     w.Key("detectors");w.StartArray();
     for(int d=0;d<o2::detectors::DetID::nDetectors;++d)if(gid.includesDet(o2::detectors::DetID(d)))w.String(o2::detectors::DetID::getName(d));
     w.EndArray();w.Key("time_us");w.Double(track.getTime());w.Key("points");w.StartArray();
@@ -63,7 +77,7 @@ inline void write(std::ostream& output,o2::event_visualisation::EveWorkflowHelpe
     }
     if(hasDCA)trackDCA[i]=dca;
     w.EndObject();
-    if(hasDCA){w.Key("dca_basis");w.String("sqrt(DCAxy^2+DCAz^2), cm; O2 Propagator::propagateToDCA, nominal Bz, no material correction; TPC Z corrected to this PV time");
+    if(hasDCA){w.Key("dca_basis");w.String("sqrt(DCAxy^2+DCAz^2), cm; O2 Propagator::propagateToDCA, nominal Bz, no material correction; standalone TPC uses calibrated PV-time Z shift except constrained both-side fits");
       w.Key("dca_xy_cm");w.Double(dca[0]);w.Key("dca_z_cm");w.Double(dca[1]);}
     w.Key("dca_status");w.String(hasDCA?"success":helper.mExportBarrelFits[i]?"propagation_failed":"not_available_for_this_source");
     w.EndObject();
@@ -92,17 +106,20 @@ inline void write(std::ostream& output,o2::event_visualisation::EveWorkflowHelpe
       if(trackDCA[t]){w.Key("dca");w.Double(std::hypot((*trackDCA[t])[0],(*trackDCA[t])[1]));}
       w.EndObject();
     }
-    w.Key("coordinate_basis");w.String(cluster.detector=="TPC"?"O2 per-TF TPCCORRMAP POD Transform; track/PV time; sector-to-global rotation":"O2 detector converter and aligned geometry");
+    bool constrainedTPC=false;
+    if(cluster.detector=="TPC" && cluster.track>=0){const auto it=helper.mExportTPCClusterTimes.find(helper.mExportTrackGIDs.at(cluster.track));constrainedTPC=it!=helper.mExportTPCClusterTimes.end() && it->second[2];}
+    w.Key("coordinate_basis");w.String(cluster.detector=="TPC"?(constrainedTPC?"O2 per-TF TPCCORRMAP POD Transform; constrained both-side TPC fit time; sector-to-global rotation":"O2 per-TF TPCCORRMAP POD Transform; matched-source/PV time; sector-to-global rotation"):"O2 detector converter and aligned geometry");
     w.EndObject();
   }
   w.EndArray();w.Key("unrendered_tracks");w.StartArray();
-  for(auto i:failed){w.StartObject();w.Key("id");w.String(trackID(helper.mExportTrackGIDs[i]).c_str());w.Key("input_gid");w.String(trackID(helper.mExportInputGIDs.at(helper.mExportTrackGIDs[i])).c_str());w.Key("reason");w.String("O2 propagation produced fewer than two points or nonfinite positions");w.Key("kinematics");w.StartObject();kin(w,helper.mExportKinematics[i]);w.EndObject();w.EndObject();}
+  for(auto i:failed){w.StartObject();w.Key("id");w.String(trackID(helper.mExportTrackGIDs[i]).c_str());w.Key("input_gid");w.String(trackID(helper.mExportInputGIDs.at(helper.mExportTrackGIDs[i])).c_str());association(w,helper.mExportInputGIDs.at(helper.mExportTrackGIDs[i]));tpcTimeBasis(w,helper.mExportTPCClusterTimes,helper.mExportTrackGIDs[i]);w.Key("reason");w.String("O2 propagation produced fewer than two points or nonfinite positions");w.Key("kinematics");w.StartObject();kin(w,helper.mExportKinematics[i]);w.EndObject();w.EndObject();}
   w.EndArray();w.Key("unrendered_clusters");w.StartArray();
   for(auto i:failedClusters){const auto& c=helper.mExportClusters[i];w.StartObject();w.Key("detector");w.String(c.detector.c_str());w.Key("association_index");w.Uint64(i);w.Key("position_components_cm");w.StartArray();for(float v:c.xyz){if(std::isfinite(v))w.Double(v);else w.Null();}w.EndArray();w.Key("reason");w.String("O2 detector conversion produced a nonfinite position");if(c.track>=0){w.Key("track_id");w.String(trackID(helper.mExportTrackGIDs.at(c.track)).c_str());}w.EndObject();}
   w.EndArray();w.Key("warnings");w.StartArray();
   if(invalidTFSpatial)w.String((std::to_string(invalidTFSpatial)+" whole-TF measurements have invalid converted coordinates; retained with coordinate_status in the sidecar, never rendered as finite points.").c_str());
   if(!failedClusters.empty())w.String("Some associated clusters have nonfinite converted positions; preserved in unrendered_clusters.");
   if(!failed.empty())w.String("Some fitted tracks could not be sampled; preserved in unrendered_tracks.");
+  w.String("Ambiguous O2 time-window associations are retained with flags; they are not uniquely identified collision particles.");
   w.String("Real data has no MC primary/secondary truth labels. Cluster kinematics are track-associated, not independent cluster momentum measurements.");
   w.String("Unassociated clusters and timing/energy signals are retained in timeframe-objects.jsonl. Detector availability records payload support; a detector can have no spatial objects associated with this collision.");
   w.EndArray();w.EndObject();output<<buffer.GetString()<<'\n';if(!output)throw std::runtime_error("Canonical event write failed");

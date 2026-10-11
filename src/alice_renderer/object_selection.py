@@ -6,7 +6,9 @@ def event_counts(event):
             'clusters_by_detector':dict(Counter(c['detector'] for c in event['clusters'])),
             'tracks_by_source':dict(Counter(t.get('source','unknown') for t in event['tracks'])),
             'primary_vertex_contributors':event.get('contributors'),
-            'unsampled_tracks':len(event.get('unrendered_tracks',[]))}
+            'unsampled_tracks':len(event.get('unrendered_tracks',[])),
+            'ambiguous_drawable_tracks':sum(t.get('association',{}).get('ambiguous',False) for t in event['tracks']),
+            'association_flags_available':any('association' in t for t in event['tracks'])}
 
 def detector_mode(settings,name):return settings.get('detector_modes',{}).get(name,settings.get('mode','tracks'))
 
@@ -15,11 +17,12 @@ def enabled_detectors(settings,kind):
 
 def selected_tracks(event,settings):
     active=enabled_detectors(settings,'tracks')
-    return [t for t in event['tracks'] if active.intersection(t['detectors'])]
+    return [t for t in event['tracks'] if active.intersection(t['detectors']) and (settings.get('include_ambiguous_tracks',True) or not t.get('association',{}).get('ambiguous',False))]
 
 def selected_clusters(event,settings):
     active=enabled_detectors(settings,'clusters')
-    return [c for c in event['clusters'] if c['detector'] in active]
+    excluded={str(t['id']) for t in [*event['tracks'],*event.get('unrendered_tracks',[])] if t.get('association',{}).get('ambiguous',False)} if not settings.get('include_ambiguous_tracks',True) else set()
+    return [c for c in event['clusters'] if c['detector'] in active and str(c.get('track_id','')) not in excluded]
 
 def parse_track_ids(value):
     values=value.split(',') if isinstance(value,str) else value

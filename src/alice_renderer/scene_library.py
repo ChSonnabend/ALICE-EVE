@@ -47,11 +47,14 @@ class SceneLibrary:
         data=load_config(entry['config'])
         if not reuse:return resolve_settings(data,entry['config'],asset_overrides=entry['assets'])
         scene=copy.deepcopy(data['scene']);scene['highlight_track_ids']=[]
+        scene.setdefault('include_ambiguous_tracks',True)
+        scene.setdefault('data_glow_lighting',True)
         if 'camera_orbit_axis' not in scene:scene['camera_orbit_axis']='Z';scene.setdefault('elevation',22.)
         if geometry_units:scene['geometry_units']=geometry_units
         return RenderSettings(**scene,geometry_assets=dict(entry['assets'] if assets is None else assets)).validate()
     def record_job(self,folder,*,kind=None):
-        folder=Path(folder);job=json.loads((folder/'job.json').read_text());cfg=RenderSettings(**job['settings'])
+        folder=Path(folder);job=json.loads((folder/'job.json').read_text())
+        values=dict(job['settings']);values.setdefault('include_ambiguous_tracks',True);values.setdefault('data_glow_lighting',True);cfg=RenderSettings(**values)
         meta_path=folder/'metadata.json'
         if meta_path.is_file():
             meta=json.loads(meta_path.read_text());cfg.camera_pose=meta.get('camera',cfg.camera_pose)
