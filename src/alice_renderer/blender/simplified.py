@@ -13,14 +13,17 @@ VERSION=1
 def simplify(objects,collection,name):
     cells={}
     meshes=[o for o in objects if o.type=='MESH' and not o.hide_render]
-    positions=[]
+    positions=[];placement_masks={}
     for obj in meshes:
         if 'num_instances' in obj:
             group=obj.modifiers['GeometryNodes'].node_group
             inst=next(n for n in group.nodes if n.bl_idname=='GeometryNodeInstanceOnPoints')
             po=inst.inputs['Points'].links[0].from_node.inputs['Object'].default_value
             a=np.empty(len(po.data.vertices)*3,dtype=np.float32);po.data.vertices.foreach_get('co',a)
-            positions.append((obj,po,a.reshape(-1,3),inst.inputs['Instance'].links[0].from_node.inputs['Object'].default_value))
+            a=a.reshape(-1,3)
+            if 'alice_inner_mask_keep' in po.data.attributes:
+                keep=np.empty(len(a),dtype=bool);po.data.attributes['alice_inner_mask_keep'].data.foreach_get('value',keep);placement_masks[po.name]=keep;a=a[keep]
+            if len(a):positions.append((obj,po,a,inst.inputs['Instance'].links[0].from_node.inputs['Object'].default_value))
         else:
             corners=np.array([tuple(obj.matrix_world@__import__('mathutils').Vector(c)) for c in obj.bound_box])
             positions.append((obj,None,corners,None))
@@ -34,8 +37,9 @@ def simplify(objects,collection,name):
         if po is None:bounds=[(points.min(axis=0),points.max(axis=0))]
         else:
             count=len(points);original+=count
-            angles=np.empty(count*3,dtype=np.float32);po.data.attributes['rot_euler'].data.foreach_get('vector',angles);angles=angles.reshape(-1,3)
-            scales=np.empty(count*3,dtype=np.float32);po.data.attributes['instance_scale'].data.foreach_get('vector',scales);scales=scales.reshape(-1,3)
+            angles=np.empty(len(po.data.vertices)*3,dtype=np.float32);po.data.attributes['rot_euler'].data.foreach_get('vector',angles);angles=angles.reshape(-1,3)
+            scales=np.empty(len(po.data.vertices)*3,dtype=np.float32);po.data.attributes['instance_scale'].data.foreach_get('vector',scales);scales=scales.reshape(-1,3)
+            if po.name in placement_masks:angles=angles[placement_masks[po.name]];scales=scales[placement_masks[po.name]]
             bbox=np.array(prototype.bound_box);center=(bbox.min(axis=0)+bbox.max(axis=0))/2;half=(bbox.max(axis=0)-bbox.min(axis=0))/2
             world=np.array(obj.matrix_world);bounds=[]
             # Batches avoid a huge expanded instance mesh, including HMP's million cells.

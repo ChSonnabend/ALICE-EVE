@@ -33,6 +33,8 @@ def current_settings():
     cfg['width']=scene.render.resolution_x;cfg['height']=scene.render.resolution_y
     cfg['geometry']=[];cfg['magnet']=False;cfg['detectors']=[]
     cfg['detector_modes']={};cfg['geometry_display']={};cfg['geometry_openings']={};cfg['geometry_opacities']={};cfg['colors_linear']={};cfg['geometry_assets']={}
+    cfg['geometry_opening_directions']={};cfg['geometry_exclusions']={}
+    cfg['geometry_inner_masks']={}
     for item in ui.detectors:
         if item.asset_path:cfg['geometry_assets'][item.name]=bpy.path.abspath(item.asset_path)
         if item.data and item.data_available:cfg['detectors'].append(item.name)
@@ -42,6 +44,10 @@ def current_settings():
         if item.name!='L3':cfg['detector_modes'][item.name]=item.mode
         cfg['geometry_display'][item.name]=item.display
         cfg['geometry_openings'][item.name]=item.opening
+        cfg['geometry_opening_directions'][item.name]=item.opening_direction
+        cfg['geometry_exclusions'][item.name]=[p.strip() for p in item.exclusions.split(',') if p.strip()]
+        if item.inner_mask_radius>0:
+            cfg['geometry_inner_masks'][item.name]={'radius_m':item.inner_mask_radius,'patterns':[p.strip() for p in item.inner_mask_patterns.split(',') if p.strip()],'front_only':item.inner_mask_front}
         cfg['geometry_opacities'][item.name]=item.opacity
         cfg['colors']['magnet' if item.name=='L3' else item.name]=hex_color(item.color)
         cfg['colors_linear']['magnet' if item.name=='L3' else item.name]=list(item.color)
@@ -145,6 +151,8 @@ def appearance_update(self,context):
             bsdf.inputs['Base Color'].default_value=(*item.color,1)
             opening=mat.node_tree.nodes.get('ALICE opening')
             if opening:opening.inputs[1].default_value=math.radians(item.opening)/2
+            direction=mat.node_tree.nodes.get('ALICE opening direction')
+            if direction:direction.inputs[1].default_value=-math.radians(item.opening_direction)
             for node in mat.node_tree.nodes:
                 if node.bl_idname=='ShaderNodeMixShader' and not node.inputs[0].is_linked:node.inputs[0].default_value=item.opacity
             mat.diffuse_color=(*item.color,item.opacity)
@@ -182,6 +190,11 @@ class DetectorSettings(bpy.types.PropertyGroup):
     visible: BoolProperty(name='Surface',default=True,update=surface_update)
     detail: EnumProperty(name='Geometry detail',items=[('inherit','Use scene detail','Use the Geometry detail control above'),('full','Full geometry','Keep aligned detector surfaces'),('simplified','Simplified geometry','Use approximate coarse spatial cells')],default='inherit')
     opening: FloatProperty(name='Opening (degrees)',min=0,max=360,default=0,update=appearance_update)
+    opening_direction: FloatProperty(name='Opening direction (degrees)',description='Wedge centre in ALICE XY: 0 is +X, 90 is +Y, −90 is −Y',min=-360,max=360,default=-90,update=appearance_update)
+    exclusions: StringProperty(name='Hide component names',description='Comma-separated object-name patterns, e.g. ITSServices*, CageCover*. Apply geometry appearance to update. Recorded in the recipe; data and clipping bounds remain unchanged')
+    inner_mask_radius: FloatProperty(name='Inner placement mask radius (m)',description='0 disables; hide matching placements inside this radius, retaining outer placements. Apply geometry appearance',min=0,max=100,default=0)
+    inner_mask_patterns: StringProperty(name='Inner component names',description='Comma-separated patterns of instancer groups to mask inside the chosen radius')
+    inner_mask_front: BoolProperty(name='Only opening-facing inner placements',description='Use the opening direction to retain the back half of the inner structure',default=True)
     opacity: FloatProperty(name='Opacity',min=0,max=1,default=.18,update=appearance_update)
     display: EnumProperty(name='Appearance',items=[('surfaces','Existing surfaces','Keep the current aligned surfaces or simplified cells'),('shell','Outer shell','Approximate outer hull; removes internal structures and openings'),('outline','Outline','Edges of the approximate outer hull')])
     color: FloatVectorProperty(name='Colour',subtype='COLOR',size=3,min=0,max=1,default=(.02,.04,.2),update=appearance_update)
@@ -267,7 +280,11 @@ class ApplyGeometry(bpy.types.Operator):
                 old=bpy.data.collections.get(item.name)
                 if not item.visible and not old:continue
                 same_asset=is_schematic(cfg,item.name) or old and old.get('alice_asset_path')==str(Path(cfg['geometry_assets'].get(item.name,'')).resolve())
-                if old and same_asset and old.get('alice_display')==item.display and old.get('alice_geometry_lod')==cfg['geometry_lods'].get(item.name,cfg['geometry_lod']) and old.get('alice_schematic',False)==is_schematic(cfg,item.name):continue
+                same_exclusions=old and old.get('alice_exclusions','[]')==json.dumps(cfg['geometry_exclusions'].get(item.name,[]))
+                inner_rule=cfg['geometry_inner_masks'].get(item.name,{})
+                same_direction=not inner_rule or not inner_rule.get('front_only',True) or old and abs(old.get('alice_inner_direction',-90.)-item.opening_direction)<1.e-5
+                same_inner=old and old.get('alice_inner_mask','{}')==json.dumps(inner_rule,sort_keys=True) and same_direction
+                if old and same_asset and same_exclusions and same_inner and old.get('alice_display')==item.display and old.get('alice_geometry_lod')==cfg['geometry_lods'].get(item.name,cfg['geometry_lod']) and old.get('alice_schematic',False)==is_schematic(cfg,item.name):continue
                 changed_regions|=bool(old and (not same_asset or old.get('alice_schematic',False)!=is_schematic(cfg,item.name)))
                 if old:remove_owned_collection(old)
                 if is_schematic(cfg,item.name):envelope(item.name,cfg)
@@ -543,7 +560,9 @@ class EVEPanel(bpy.types.Panel):
             if item.geometry_available:
                 kind='aligned' if item.detail!='inherit' else 'schematic' if is_schematic(JOB['settings'],item.name) else 'aligned'
                 box.label(text='Geometry source: '+kind)
-                box.prop(item,'detail');box.prop(item,'display');box.prop(item,'opening');box.prop(item,'color');box.prop(item,'opacity')
+                box.prop(item,'detail');box.prop(item,'display');box.prop(item,'opening');box.prop(item,'opening_direction');box.prop(item,'exclusions');box.prop(item,'color');box.prop(item,'opacity')
+                box.prop(item,'inner_mask_radius')
+                if item.inner_mask_radius>0:box.prop(item,'inner_mask_patterns');box.prop(item,'inner_mask_front')
         layout.prop(ui,'background');layout.prop(ui,'world_strength');layout.prop(ui,'view_transform');layout.prop(ui,'exposure');layout.prop(ui,'track_emission');layout.prop(ui,'cluster_emission');layout.prop(ui,'roughness');layout.prop(ui,'metallic');layout.prop(ui,'shading')
         for lamp in (o for o in context.scene.objects if o.type=='LIGHT'):
             box=layout.box();box.label(text=lamp.name);box.prop(lamp,'location');box.prop(lamp,'rotation_euler');box.prop(lamp.data,'energy');box.prop(lamp.data,'size');box.prop(lamp.data,'color')
@@ -582,6 +601,8 @@ def start_editor(job,event,metadata):
         item.detail='inherit' if is_schematic(settings,name) else settings.get('geometry_lods',{}).get(name,'inherit')
         item.event_track_count=track_counts.get(name,0);item.event_cluster_count=cluster_counts.get(name,0)
         item.opening=settings['geometry_openings'].get(name,180 if settings['cutaway'] else 0);item.opacity=settings['geometry_opacities'].get(name,settings['geometry_opacity']);item.color=settings.get('colors_linear',{}).get('magnet' if name=='L3' else name,rgb(settings['colors'].get('magnet' if name=='L3' else name,'#243a82')))
+        item.opening_direction=settings.get('geometry_opening_directions',{}).get(name,-90.);item.exclusions=', '.join(settings.get('geometry_exclusions',{}).get(name,[]))
+        inner=settings.get('geometry_inner_masks',{}).get(name,{});item.inner_mask_radius=inner.get('radius_m',0);item.inner_mask_patterns=', '.join(inner.get('patterns',[]));item.inner_mask_front=inner.get('front_only',True)
     settings['palette_lut']=PALETTES[settings['palette']]
     locked=recipe(RenderSettings(**settings),event)['scene']['color_ranges']
     ui.track_min,ui.track_max=locked['tracks'];ui.cluster_min,ui.cluster_max=locked['clusters']

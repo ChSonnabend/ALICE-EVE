@@ -4,7 +4,7 @@ A scene recipe is a JSON file with schema `alice-eve-scene`, version 1. It conta
 
 Recipes also preserve `camera_lens_mm`, `view_transform` (`AgX` or `Standard`), exposure in stops, and independent `track_emission` / `cluster_emission`. **Display colours**, **Exposure**, **Track glow** and **Cluster glow** update the interactive scene and export unchanged. Older recipes retain AgX and the previous emission defaults. Standard preserves saturated blue more directly; AgX compresses highlights. Desktop **Focal length (mm)** updates a loaded camera pose without discarding its position/rotation.
 
-Fresh desktop installations use the [commissioning interior preset](REFERENCE-RECREATION.md), the best of five reference trials. Saved local preferences take priority. **Appearance → Use commissioning defaults** restores this style for the current input/event and local aligned assets. This preset deliberately uses an interior camera, roll and 180° openings; **Show complete detectors** restores complete geometry.
+Fresh desktop installations use the improved [commissioning interior preset](REFERENCE-RECREATION.md). Saved local preferences take priority. **Appearance → Use commissioning defaults** applies it to the current input/event and aligned assets. It uses a 16 mm interior camera, +13.3° roll, an ITS opening and recorded component/inner-placement masks. **Show complete detectors** resets angular openings; component masks remain explicit choices until cleared and applied.
 
 ## Desktop workflow
 
@@ -76,8 +76,40 @@ The **matching** quantity has range 0–1: 1 identifies a composite O2 fitted-so
 
 ## Camera convention and input density
 
-ALICE event and geometry coordinates remain global XYZ; Y is vertical and Z is the beam. `camera_orbit_axis: "Y"` makes azimuth rotate around Y and elevation rise above the XZ plane. General programmatic settings default to zero elevation and zero roll; the desktop commissioning preset supplies its tested interior camera and roll. `"Z"` retains the historical orbit convention. Older portable recipes without this field keep their historical framing, including explicit camera matrices; untouched old local UI defaults are upgraded, while custom camera settings are preserved.
+ALICE event and geometry coordinates remain global XYZ; Y is vertical and Z is the beam. `camera_orbit_axis: "Y"` makes azimuth rotate around Y and elevation rise above the XZ plane. Programmatic general settings default to zero elevation and zero roll; the desktop commissioning preset supplies its tested interior camera and roll. `"Z"` retains the historical orbit convention. Older portable recipes without this field keep their historical framing, including explicit camera matrices; untouched old local UI defaults are upgraded, while custom camera settings are preserved.
 
 The event table now shows **PV contributors**, and the Blender sidebar shows input fitted-track and cluster counts per detector. Counts include matched fitted sources in each constituent detector and are taken before display selection/clipping. They do not imply that standalone TPC tracks have ITS measurements. TPC-only polylines in the O2 export begin near the TPC inner radius; the renderer does not fabricate inward ITS segments. Choose another collision for a denser ITS view. In the validated raw run-560067 file, event `560067:2619419:212036032:5` has 3 ITS-associated drawable fitted records and 3 PV contributors; event `560067:2619419:212036032:4` has 4,926 ITS-associated drawable fitted records and 4,161 PV contributors. These are fitted-record counts, not a deduplicated physical-particle count.
 
 `geometry_schematics` supplies optional per-detector booleans (including `L3`) that override the legacy global `schematic` default. An explicit aligned choice writes `false` here, preventing a schematic preview from overriding the final selection. Portable configs include hash-checked assets required by the effective choices. Optional local `--assets` entries also remain available when a schematic recipe is reopened and subsequently upgraded to aligned rendering.
+
+## Structural visibility and opening direction
+
+`geometry_opening_directions` maps detector names to wedge-centre angles in the
+ALICE XY plane: 0° points along +X, 90° along +Y and −90° along −Y (the default
+for older recipes). `geometry_openings` remains the wedge width. Final full
+surfaces with 180° openings use an oriented physical plane cut; the editor
+retains a reversible shader cut. The desktop half-cutaway shortcut resets the
+direction to −Y.
+
+`geometry_exclusions` maps detectors to lists of case-sensitive object-name
+patterns (`*`, `?`, bracket sets). They hide selected structures and their named
+helpers, without changing source geometry or detector clipping envelopes. The
+Blender sidebar has **Hide component names**; enter comma-separated patterns and
+click **Apply geometry appearance**. Matched names/patterns are recorded in
+render metadata. The desktop preserves these fields on config load/export.
+
+`geometry_inner_masks` selectively hides placements in mixed-radius instancer
+groups. Each detector's rule contains `patterns`, `radius_m`, and `front_only`
+(default true). Matching placements whose ALICE-global origin lies inside the
+radius are hidden; front-only rules hide only the half facing the configured
+opening direction. Thus inner TPC rod placements can be removed without
+discarding outer rods in the same group. This is an explicit placement-centre
+selection, not a physical surface intersection or modification of data.
+
+In the sidebar set **Inner placement mask radius (m)** (0 disables), **Inner
+component names** and **Only opening-facing inner placements**, then apply
+geometry appearance. Reapply after changing direction for a front-only mask.
+Full and simplified aligned rendering honour the selection. Metadata records
+the rules and removed placement counts; original detector bounds still govern
+track clipping. Generic merged meshes lack individual placements, so this
+control applies to instanced assets.

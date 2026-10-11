@@ -17,7 +17,7 @@ from .object_selection import parse_track_ids
 from .palettes import names as palette_names
 from .scene_library import SceneLibrary
 from .resolution import PRESET_PERCENT, minimum_percent, percentage_size
-from .defaults import startup_settings
+from .defaults import startup_settings,commissioning_settings
 
 ROOT=Path(__file__).resolve().parents[2]
 
@@ -78,7 +78,7 @@ class Window(QMainWindow):
             except Exception:self.saved={}
         else:self.saved={}
         self.scene_detector_selection=set(self.base.detectors)
-        self.scene_overrides={key:getattr(self.base,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
+        self.scene_overrides={key:getattr(self.base,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_opening_directions','geometry_exclusions','geometry_inner_masks','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
         central=QWidget();self.setCentralWidget(central);layout=QVBoxLayout(central)
         title=QLabel('ALICE  /  EVENT RENDERER');title.setObjectName('title');layout.addWidget(title)
         self.summary=QLabel('Choose an input, select events and detectors, then preview or render.');layout.addWidget(self.summary)
@@ -145,7 +145,7 @@ class Window(QMainWindow):
         self.magnet=QCheckBox('L3 magnet');self.magnet.setChecked(self.base.magnet);layout.addWidget(self.magnet)
         self.schematic=QCheckBox('Use approximate schematic envelopes');self.schematic.setChecked(self.base.schematic);self.schematic.setToolTip('Approximate dimensions, not calibrated detector geometry. This choice is recorded in render metadata.');layout.addWidget(self.schematic)
         self.cutaway=QCheckBox('Half cutaway (global Y plane)');self.cutaway.setChecked(self.base.cutaway);self.cutaway.toggled.connect(self.change_cutaway);layout.addWidget(self.cutaway)
-        opening_note=QLabel('Openings remove a wedge centred on −Y. A 180° opening removes the −Y half; view it from negative Y. Show complete detectors resets all openings.');opening_note.setWordWrap(True);layout.addWidget(opening_note)
+        opening_note=QLabel('Opening direction is configurable per detector in the interactive editor: 0° is +X, 90° is +Y, −90° is −Y. The half-cutaway shortcut uses −Y. Show complete detectors resets opening angles.');opening_note.setWordWrap(True);layout.addWidget(opening_note)
         self.geometry_opening_label=QLabel();self.geometry_opening_label.setWordWrap(True);layout.addWidget(self.geometry_opening_label);self.refresh_opening_summary()
         self.geometry_lod=QComboBox();self.geometry_lod.addItems(['full','simplified']);self.geometry_lod.setCurrentText(self.base.geometry_lod);layout.addWidget(QLabel('Geometry detail'));layout.addWidget(self.geometry_lod)
         self.opacity=number(self.base.geometry_opacity,0,1,2);form=QFormLayout();form.addRow('Geometry opacity',self.opacity);layout.addLayout(form);layout.addStretch()
@@ -160,13 +160,15 @@ class Window(QMainWindow):
         self.scene_detector_selection={name for name,box in self.data_checks.items() if box.isChecked()}
     def change_cutaway(self,on):
         self.scene_overrides['geometry_openings']={name:180 if on else 0 for name in (*DETECTORS,'L3')}
+        self.scene_overrides['geometry_opening_directions']={name:-90. for name in (*DETECTORS,'L3')}
         self.refresh_opening_summary()
     def show_complete_detectors(self):
         self.cutaway.setChecked(False);self.scene_overrides['geometry_openings']={name:0 for name in (*DETECTORS,'L3')}
         self.refresh_opening_summary()
     def refresh_opening_summary(self):
         values=self.scene_overrides.get('geometry_openings',{})
-        text=', '.join(f'{name}: {angle:g}°' for name,angle in values.items() if angle)
+        directions=self.scene_overrides.get('geometry_opening_directions',{})
+        text=', '.join(f'{name}: {angle:g}° toward {directions.get(name,-90.):g}° in XY' for name,angle in values.items() if angle)
         self.geometry_opening_label.setText('Configured openings: '+(text or 'complete surfaces'))
     def color_button(self,key):
         button=QPushButton(self.base.colors.get(key,'#243a82'));button.clicked.connect(lambda:self.pick_color(key));self.color_buttons[key]=button;return button
@@ -464,7 +466,7 @@ class Window(QMainWindow):
     def apply_scene(self,cfg):
         self.scene_detector_selection=set(cfg.detectors);self.requested_modes=(cfg.track_color_mode,cfg.cluster_color_mode)
         if self.palette.findText(cfg.palette)<0:self.palette.addItem(cfg.palette)
-        self.scene_overrides={key:getattr(cfg,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
+        self.scene_overrides={key:getattr(cfg,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_opening_directions','geometry_exclusions','geometry_inner_masks','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
         for name,box in self.data_checks.items():box.setChecked(name in cfg.detectors)
         for name,combo in self.detector_modes.items():combo.setCurrentText(cfg.detector_modes.get(name,cfg.mode))
         for name,box in self.geometry_checks.items():box.setChecked(name in cfg.geometry)
@@ -488,12 +490,15 @@ class Window(QMainWindow):
         self.scene_overrides['palette_lut']=cfg.palette_lut
         self.scene_overrides['camera_pose']=cfg.camera_pose
         self.scene_overrides['geometry_openings']=cfg.geometry_openings
+        self.scene_overrides['geometry_opening_directions']=cfg.geometry_opening_directions
+        self.scene_overrides['geometry_exclusions']=cfg.geometry_exclusions
+        self.scene_overrides['geometry_inner_masks']=cfg.geometry_inner_masks
         self.refresh_opening_summary()
     def use_commissioning_defaults(self):
-        cfg=startup_settings({k:v.text() for k,v in self.asset_fields.items() if v.text()},self.geometry_units.currentText())
+        cfg=commissioning_settings({k:v.text() for k,v in self.asset_fields.items() if v.text()},self.geometry_units.currentText())
         self.apply_scene(cfg);self.update_availability()
         saved=self.settings();saved.detectors=cfg.detectors;self.save_settings(saved)
-        self.message('Commissioning interior defaults applied. Input, selected events and local geometry assets retained.')
+        self.message('Improved commissioning defaults applied. Input, selected events and local geometry assets retained.')
     def open_editor(self):
         if not self.catalogue or not self.model.selected:return
         if self.source.text()!=self.loaded_input:self.failure('The input path has changed. Press Enter or Load input, then select its event before opening the editor.');return

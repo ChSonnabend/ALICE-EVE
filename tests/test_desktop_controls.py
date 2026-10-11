@@ -108,7 +108,7 @@ def test_commissioning_defaults_clone_style_keep_input_events_assets_and_hardwar
     assert w.source.text()==source and w.model.selected=={1}
     assert cfg.geometry_assets['ITS']=='/local/aligned/ITS.blend' and cfg.geometry_units=='cm'
     assert cfg.backend=='CPU' and cfg.samples==17 and cfg.view_transform=='Standard'
-    assert cfg.camera_pose and cfg.geometry_openings=={'ITS':180.,'TPC':180.}
+    assert cfg.camera_pose and cfg.geometry_openings=={'ITS':180.,'TPC':0.}
     saved=json.loads(w.settings_file.read_text())['render']
     assert saved['detectors']==['ITS','TPC']
 
@@ -201,3 +201,10 @@ def test_display_glow_and_lens_controls_roundtrip_preserve_camera_pose(window):
     assert pose['lens']==36
     w.azimuth.setValue(5)
     assert w.settings().camera_pose=={} and w.settings().camera_lens_mm==42
+def test_loaded_component_visibility_preserves_direction_across_cutaway_signals(window):
+    w,application,root=window
+    w.cutaway.setChecked(True)
+    cfg=RenderSettings(geometry_openings={'ITS':180.},geometry_opening_directions={'ITS':29.},geometry_exclusions={'ITS':['ITSServices*']})
+    w.apply_scene(cfg);actual=w.settings()
+    assert actual.geometry_opening_directions=={'ITS':29.} and actual.geometry_exclusions==cfg.geometry_exclusions
+    assert 'toward 29°' in w.geometry_opening_label.text()

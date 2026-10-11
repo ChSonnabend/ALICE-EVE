@@ -77,3 +77,18 @@ def test_portable_display_colours_glow_and_lens(tmp_path):
     assert (restored.view_transform,restored.exposure,restored.track_emission,restored.cluster_emission,restored.camera_lens_mm)==('Standard',-.5,.2,.8,36)
     for kwargs in ({'view_transform':'bad'},{'exposure':float('nan')},{'cluster_emission':-1},{'track_emission':float('inf')},{'camera_lens_mm':0}):
         with pytest.raises(ValueError):RenderSettings(**kwargs).validate()
+def test_component_masks_and_opening_direction_roundtrip():
+    from alice_renderer.model import RenderSettings
+    from alice_renderer.scene_config import recipe,validate_recipe
+    cfg=RenderSettings(geometry_opening_directions={'ITS':29.},geometry_exclusions={'ITS':['ITSServices*','Cage*']},geometry_inner_masks={'TPC':{'radius_m':1.,'patterns':['TPC_ring*'],'front_only':True}})
+    data=recipe(cfg)
+    actual=RenderSettings(**validate_recipe(data)['scene'])
+    assert actual.geometry_opening_directions==cfg.geometry_opening_directions
+    assert actual.geometry_exclusions==cfg.geometry_exclusions
+    assert actual.geometry_inner_masks==cfg.geometry_inner_masks
+
+
+@pytest.mark.parametrize('values',[{'geometry_opening_directions':{'TPC':float('nan')}},{'geometry_exclusions':{'ITS':'Cage*'}},{'geometry_exclusions':{'ITS':['']}},{'geometry_inner_masks':{'TPC':{'radius_m':-1,'patterns':['*']}}},{'geometry_inner_masks':{'TPC':{'radius_m':1,'patterns':'*'}}},{'geometry_inner_masks':{'TPC':{'radius_m':1,'patterns':['*'],'front_only':'yes'}}}])
+def test_invalid_structural_visibility_settings(values):
+    from alice_renderer.model import RenderSettings
+    with pytest.raises(ValueError):RenderSettings(**values).validate()

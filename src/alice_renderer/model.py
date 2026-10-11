@@ -153,6 +153,9 @@ class RenderSettings:
     geometry_schematics: dict = field(default_factory=dict)
     geometry_display: dict = field(default_factory=dict)
     geometry_openings: dict = field(default_factory=dict)
+    geometry_opening_directions: dict = field(default_factory=dict)
+    geometry_exclusions: dict = field(default_factory=dict)
+    geometry_inner_masks: dict = field(default_factory=dict)
     geometry_opacities: dict = field(default_factory=dict)
     roughness: float = .38
     metallic: float = .15
@@ -226,6 +229,18 @@ class RenderSettings:
         for name,angle in self.geometry_openings.items():
             if name!='L3':detector(name)
             if not math.isfinite(angle) or not 0<=angle<=360:raise ValueError('Opening must be 0–360 degrees')
+        for name,angle in self.geometry_opening_directions.items():
+            if name!='L3':detector(name)
+            if not math.isfinite(angle) or not -360<=angle<=360:raise ValueError('Opening direction must be between −360 and 360 degrees')
+        for name,patterns in self.geometry_exclusions.items():
+            if name!='L3':detector(name)
+            if not isinstance(patterns,list) or any(not isinstance(p,str) or not p.strip() or len(p)>1024 for p in patterns):raise ValueError('Geometry exclusions must be a list of nonempty name patterns')
+        for name,rule in self.geometry_inner_masks.items():
+            if name!='L3':detector(name)
+            if not isinstance(rule,dict) or set(rule)-{'patterns','radius_m','front_only'}:raise ValueError('Invalid inner geometry mask')
+            patterns=rule.get('patterns',[]);radius=rule.get('radius_m',0)
+            if not isinstance(patterns,list) or any(not isinstance(p,str) or not p.strip() for p in patterns):raise ValueError('Invalid inner component patterns')
+            if not math.isfinite(radius) or radius<=0 or not isinstance(rule.get('front_only',True),bool):raise ValueError('Invalid inner component mask radius or side')
         for name,opacity in self.geometry_opacities.items():
             if name!='L3':detector(name)
             if not math.isfinite(opacity) or not 0<=opacity<=1:raise ValueError('Invalid detector opacity')

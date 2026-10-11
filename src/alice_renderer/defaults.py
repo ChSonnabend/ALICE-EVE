@@ -5,9 +5,13 @@ from .scene_config import load_config
 
 COMMISSIONING_PRESET=Path(__file__).with_name('presets')/'commissioning-interior.json'
 
-def startup_settings(assets=None,geometry_units=None):
+def commissioning_settings(assets=None,geometry_units=None):
     # This is a style clone. Exact reproduction through render-config still
     # requires the hash-checked original geometry bundle in the portable recipe.
     scene=dict(load_config(COMMISSIONING_PRESET)['scene'])
     if geometry_units is not None:scene['geometry_units']=geometry_units
     return RenderSettings(**scene,geometry_assets=dict(assets or {})).validate()
+
+def startup_settings():
+    # The second batch's reviewed, tested scene supersedes the withdrawn trial.
+    return commissioning_settings()

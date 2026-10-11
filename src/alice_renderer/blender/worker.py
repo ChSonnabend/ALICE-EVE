@@ -75,19 +75,19 @@ def materials(name,color,opacity=1.,emission=0.,cutaway=False,settings=None):
         links.new(negative.outputs[0],clip.inputs[0]);links.new(surface,clip.inputs[1]);links.new(transparent.outputs[0],clip.inputs[2])
         links.new(clip.outputs[0],output.inputs['Surface'])
     if settings and name in settings.get('geometry_openings',{}):
-        angular_cut(mat,settings['geometry_openings'][name])
+        angular_cut(mat,settings['geometry_openings'][name],settings.get('geometry_opening_directions',{}).get(name,-90.))
     mat.diffuse_color=(*color,opacity)
     if hasattr(mat,'surface_render_method'):mat.surface_render_method='BLENDED' if (settings or {}).get('_interactive') else 'DITHERED'
     return mat
 
-def angular_cut(mat,opening):
+def angular_cut(mat,opening,direction=-90.):
     # Remove a wedge centred on -Y around the beam (global Z). Shader clipping
     # keeps every instance in global axes and is editable without rebuilding.
     nodes,links=mat.node_tree.nodes,mat.node_tree.links
     output=nodes.get('Material Output');surface=output.inputs['Surface'].links[0].from_socket
     geom=nodes.new('ShaderNodeNewGeometry');sep=nodes.new('ShaderNodeSeparateXYZ')
     atan=nodes.new('ShaderNodeMath');atan.operation='ARCTAN2'
-    add=nodes.new('ShaderNodeMath');add.operation='ADD';add.inputs[1].default_value=math.pi/2
+    add=nodes.new('ShaderNodeMath');add.name='ALICE opening direction';add.operation='ADD';add.inputs[1].default_value=-math.radians(direction)
     cos=nodes.new('ShaderNodeMath');cos.operation='COSINE'
     acos=nodes.new('ShaderNodeMath');acos.operation='ARCCOSINE'
     less=nodes.new('ShaderNodeMath');less.name='ALICE opening';less.operation='LESS_THAN';less.inputs[1].default_value=math.radians(opening)/2
@@ -259,6 +259,41 @@ def imported_geometry(name,path,settings,bounds_only=False):
     if bounds_only:
         remove_owned_collection(coll)
         return track_region
+    # Visibility is a display choice. Bounds above retain the complete aligned
+    # detector so hiding services never changes calibrated track extents.
+    from fnmatch import fnmatchcase
+    patterns=settings.get('geometry_exclusions',{}).get(name,[])
+    coll['alice_exclusions']=json.dumps(patterns)
+    inner_rule=settings.get('geometry_inner_masks',{}).get(name,{})
+    coll['alice_inner_mask']=json.dumps(inner_rule,sort_keys=True)
+    inner_removed={}
+    excluded=[]
+    for obj in objects:
+        obj['alice_geometry_excluded']=any(fnmatchcase(obj.name,p) for p in patterns)
+        if obj['alice_geometry_excluded']:
+            excluded.append(obj.name);obj.hide_render=True;obj.hide_set(True)
+    # Instancer groups can contain both inner and outer cage placements. Mask
+    # by global placement origin; never discard an entire mixed-radius group.
+    inner_keep={}
+    phi=math.radians(settings.get('geometry_opening_directions',{}).get(name,-90.))
+    coll['alice_inner_direction']=math.degrees(phi)
+    toward=Vector((math.cos(phi),math.sin(phi),0))
+    for obj in objects:
+        if 'num_instances' not in obj or obj.hide_render or not any(fnmatchcase(obj.name,p) for p in inner_rule.get('patterns',[])):continue
+        group=obj.modifiers['GeometryNodes'].node_group
+        instance=next(n for n in group.nodes if n.bl_idname=='GeometryNodeInstanceOnPoints')
+        points_object=instance.inputs['Points'].links[0].from_node.inputs['Object'].default_value
+        points=points_object.data
+        keep=[]
+        for point in points.vertices:
+            global_origin=obj.matrix_world@point.co
+            inner=math.hypot(global_origin.x,global_origin.y)<inner_rule['radius_m']
+            front=not inner_rule.get('front_only',True) or global_origin.dot(toward)>0
+            keep.append(not (inner and front))
+        inner_keep[obj.name]=keep;inner_removed[obj.name]=len(keep)-sum(keep)
+        attribute=points.attributes.new('alice_inner_mask_keep','BOOLEAN','POINT');attribute.data.foreach_set('value',keep)
+        selection=group.nodes.new('GeometryNodeInputNamedAttribute');selection.data_type='BOOLEAN';selection.inputs['Name'].default_value='alice_inner_mask_keep'
+        group.links.new(selection.outputs['Attribute'],instance.inputs['Selection'])
     lod={}
     detail=settings.get('geometry_lods',{}).get(name,settings.get('geometry_lod','full'))
     style=settings.get('geometry_display',{}).get(name,'surfaces')
@@ -282,16 +317,19 @@ def imported_geometry(name,path,settings,bounds_only=False):
     for obj in meshes:
         for poly in getattr(obj.data,'polygons',[]):poly.use_smooth=settings.get('shading','smooth')=='smooth' and not lod
     crossing_count=0;discarded_count=0
+    opening_direction=settings.get('geometry_opening_directions',{}).get(name,-90.)
+    cut_normal=Vector((-math.cos(math.radians(opening_direction)),-math.sin(math.radians(opening_direction)),0))
     def clip_mesh(mesh,matrix):
         import bmesh
         mesh.materials.clear();mesh.materials.append(mat)
         mesh.transform(matrix)
         bm=bmesh.new();bm.from_mesh(mesh)
         bmesh.ops.bisect_plane(bm,geom=[*bm.verts,*bm.edges,*bm.faces],dist=1.e-7,
-            plane_co=(0,0,0),plane_no=(0,1,0),clear_inner=True)
+            plane_co=(0,0,0),plane_no=cut_normal,clear_inner=True)
         bm.to_mesh(mesh);bm.free();mesh.update()
     for obj in meshes:
         obj.data.materials.clear();obj.data.materials.append(mat)
+        if obj.get('alice_geometry_excluded'):continue
         if physical_cut and 'num_instances' in obj:
             # Keep compact instances wholly behind the cut. Only crossing
             # instances need separate meshes, clipped in ALICE global Y.
@@ -307,10 +345,12 @@ def imported_geometry(name,path,settings,bounds_only=False):
             rotations=points.attributes['rot_euler'].data;scales=points.attributes['instance_scale'].data
             keep=[]
             for i,point in enumerate(points.vertices):
+                if obj.name in inner_keep and not inner_keep[obj.name][i]:
+                    keep.append(False);continue
                 matrix=Euler(rotations[i].vector,'XYZ').to_matrix() @ Matrix.Diagonal(scales[i].vector)
                 pose=matrix.to_4x4();pose.translation=point.co
                 pose=obj.matrix_world@pose
-                ys=[(pose@c).y for c in corners]
+                ys=[(pose@c).dot(cut_normal) for c in corners]
                 positive=min(ys)>=-1.e-6;negative=max(ys)<-1.e-6
                 keep.append(positive)
                 if negative:discarded_count+=1
@@ -327,9 +367,9 @@ def imported_geometry(name,path,settings,bounds_only=False):
             from mathutils import Matrix
             mesh=obj.data.copy();clip_mesh(mesh,obj.matrix_world)
             obj.data=mesh;obj.parent=None;obj.matrix_world=Matrix.Identity(4)
-    return {'lod':detail,'requested_detail':detail,'display':style,**lod,'track_region':track_region,'meshes':len(meshes),'cutaway_crossing_instances':crossing_count,
+    return {'lod':detail,'requested_detail':detail,'display':style,**lod,'track_region':track_region,'meshes':len(meshes),'excluded_objects':excluded,'exclusion_patterns':patterns,'inner_mask':inner_rule,'inner_masked_instances':inner_removed,'opening_direction_degrees':opening_direction,'cutaway_crossing_instances':crossing_count,
             'cutaway_discarded_instances':discarded_count,
-            'cutaway_method':'ALICE global Y>=0 mesh clipping' if physical_cut else 'shader wedge' if name in settings.get('geometry_openings',{}) else 'none'}
+            'cutaway_method':('ALICE global Y>=0 mesh clipping' if opening_direction==-90 else 'ALICE global oriented plane clipping') if physical_cut else 'shader wedge' if name in settings.get('geometry_openings',{}) else 'none'}
 
 def schematic_region(name):
     inner,outer,length=ENVELOPES[name];z=ZPOSITIONS.get(name,0.)
