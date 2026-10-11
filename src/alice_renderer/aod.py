@@ -68,6 +68,7 @@ def forward_detectors(data,count):
 
 def options_for(path,options=None):
     options=dict(options or {});conditions=options.pop('conditions',None)
+    if options.get('bz_kG') is None:options.pop('bz_kG',None)
     candidate=Path(conditions) if conditions else Path(str(path)+'.renderer.json')
     if candidate.is_file():
         options['fields']=json.loads(candidate.read_text()).get('fields',{})

@@ -48,7 +48,9 @@ def test_aod_rejects_broken_association_or_extra_alignment(tmp_path,kwargs,reaso
 
 def test_aod_conditions_sidecar_and_changed_source(tmp_path):
     source=fixture_file(tmp_path/'AO2D.root');(tmp_path/'AO2D.root.renderer.json').write_text(json.dumps({'fields':{'99':{'bz_kG':-5,'basis':'fixture'}}}))
-    cat=Catalogue.build(source,tmp_path/'cache');assert load_event(cat.event_path(0))['trajectory_conditions']['bz_kG']==-5
+    cat=Catalogue.build(source,tmp_path/'cache')
+    equivalent=Catalogue.build(source,tmp_path/'cache',aod_options={'conditions':'','bz_kG':None});assert equivalent.folder==cat.folder
+    assert load_event(cat.event_path(0))['trajectory_conditions']['bz_kG']==-5
     source.touch()
     with pytest.raises(ValueError,match='changed'):cat.event_path(1)
 
