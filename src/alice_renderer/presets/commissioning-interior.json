@@ -102,6 +102,91 @@
       "ITS",
       "TPC"
     ],
+    "geometry_components": {
+      "TPC": {
+        "parts/TPC_CDCE": false,
+        "parts/TPC_CDCI": false,
+        "parts/TPC_CDR": false,
+        "parts/TPC_CDRS": false,
+        "parts/TPC_CR": false,
+        "parts/TPC_GRES1": false,
+        "parts/TPC_HSM": true,
+        "parts/TPC_HSS": true,
+        "parts/TPC_HV": false,
+        "parts/TPC_HV_Rod": false,
+        "parts/TPC_ICGEM": true,
+        "parts/TPC_ICVM": true,
+        "parts/TPC_ICVS": true,
+        "parts/TPC_IFC1": true,
+        "parts/TPC_IFC11": true,
+        "parts/TPC_IFC2": true,
+        "parts/TPC_IFC3": true,
+        "parts/TPC_IFC7": true,
+        "parts/TPC_IFEPOX1": true,
+        "parts/TPC_IFEPOX2": true,
+        "parts/TPC_IFEPOX3": true,
+        "parts/TPC_IGR1": false,
+        "parts/TPC_IGR2": false,
+        "parts/TPC_IGR3": false,
+        "parts/TPC_IGR4": false,
+        "parts/TPC_IHSS": false,
+        "parts/TPC_IHSTR": false,
+        "parts/TPC_IHVH": false,
+        "parts/TPC_INPLL": false,
+        "parts/TPC_IPP": false,
+        "parts/TPC_IRCAP": true,
+        "parts/TPC_IRH": false,
+        "parts/TPC_IROCB": true,
+        "parts/TPC_ISB": false,
+        "parts/TPC_MMH1": false,
+        "parts/TPC_MMH2": false,
+        "parts/TPC_MMHC": false,
+        "parts/TPC_OCGEM": true,
+        "parts/TPC_OCV": false,
+        "parts/TPC_OGRI": false,
+        "parts/TPC_OGRO": false,
+        "parts/TPC_OHS4": false,
+        "parts/TPC_OHS5": false,
+        "parts/TPC_OHVH": false,
+        "parts/TPC_OMH1": false,
+        "parts/TPC_OMH2": false,
+        "parts/TPC_OMH5": false,
+        "parts/TPC_OMH6": false,
+        "parts/TPC_OPLL": false,
+        "parts/TPC_OPP": false,
+        "parts/TPC_ORCAP": true,
+        "parts/TPC_ORH": false,
+        "parts/TPC_OROCB": true,
+        "parts/TPC_OSB": false,
+        "parts/TPC_PR": false,
+        "parts/TPC_PRSTR1": false,
+        "parts/TPC_PRSTR2": false,
+        "parts/TPC_PRSTR3": false,
+        "parts/TPC_RES": false,
+        "parts/TPC_RP": false,
+        "parts/TPC_RR_CU": false,
+        "parts/TPC_SWC1": false,
+        "parts/TPC_SWSEG": false,
+        "parts/TPC_TOFC": false,
+        "parts/TPC_WBAR": false,
+        "parts/TPC_WSEG": false,
+        "parts/TPC_bcon": false,
+        "parts/TPC_clampi1v": false,
+        "parts/TPC_clampo1v": false,
+        "parts/TPC_clampo2v": false,
+        "parts/TPC_clampo3v": false,
+        "parts/TPC_clampo4v": false,
+        "parts/TPC_cliholdv": false,
+        "parts/TPC_clitrapv": false,
+        "parts/TPC_clotrapv": false,
+        "parts/TPC_hook": false,
+        "parts/TPC_mrodl": false,
+        "parts/TPC_mrods": false,
+        "parts/TPC_ring": false,
+        "parts/TPC_rodl": false,
+        "parts/TPC_rods": false
+      }
+    },
     "geometry_display": {},
     "geometry_exclusions": {
       "ITS": [
@@ -110,29 +195,9 @@
         "BPSupport*",
         "OBCone*",
         "ConeA*"
-      ],
-      "TPC": [
-        "TPC_IFC*",
-        "TPC_IFEPOX*",
-        "TPC_HSM*",
-        "TPC_HSS*",
-        "TPC_HV-*",
-        "TPC_CDR-*",
-        "TPC_ICV*"
       ]
     },
-    "geometry_inner_masks": {
-      "TPC": {
-        "front_only": true,
-        "patterns": [
-          "TPC_mrod*",
-          "TPC_rod*",
-          "TPC_ring*",
-          "TPC_bcon*"
-        ],
-        "radius_m": 1.0
-      }
-    },
+    "geometry_inner_masks": {},
     "geometry_lod": "full",
     "geometry_lods": {},
     "geometry_opacities": {
@@ -176,6 +241,116 @@
           -1.1
         ],
         "size_m": 2.0
+      },
+      {
+        "color": "#ffffff",
+        "energy": 200.0,
+        "name": "ALICE surround light 1",
+        "position_m": [
+          4.242167725819286,
+          4.242289539519285,
+          -3.0711026287
+        ],
+        "size_m": 4.0
+      },
+      {
+        "color": "#ffffff",
+        "energy": 200.0,
+        "name": "ALICE surround light 2",
+        "position_m": [
+          -4.243113648419285,
+          4.242289539519286,
+          -3.0711026287
+        ],
+        "size_m": 4.0
+      },
+      {
+        "color": "#ffffff",
+        "energy": 200.0,
+        "name": "ALICE surround light 3",
+        "position_m": [
+          -4.2431136484192855,
+          -4.242991834719285,
+          -3.0711026287
+        ],
+        "size_m": 4.0
+      },
+      {
+        "color": "#ffffff",
+        "energy": 200.0,
+        "name": "ALICE surround light 4",
+        "position_m": [
+          4.242167725819284,
+          -4.242991834719286,
+          -3.0711026287
+        ],
+        "size_m": 4.0
+      },
+      {
+        "color": "#ffffff",
+        "energy": 200.0,
+        "name": "ALICE surround light 5",
+        "position_m": [
+          4.242167725819286,
+          4.242289539519285,
+          2.9288973713
+        ],
+        "size_m": 4.0
+      },
+      {
+        "color": "#ffffff",
+        "energy": 200.0,
+        "name": "ALICE surround light 6",
+        "position_m": [
+          -4.243113648419285,
+          4.242289539519286,
+          2.9288973713
+        ],
+        "size_m": 4.0
+      },
+      {
+        "color": "#ffffff",
+        "energy": 200.0,
+        "name": "ALICE surround light 7",
+        "position_m": [
+          -4.2431136484192855,
+          -4.242991834719285,
+          2.9288973713
+        ],
+        "size_m": 4.0
+      },
+      {
+        "color": "#ffffff",
+        "energy": 200.0,
+        "name": "ALICE surround light 8",
+        "position_m": [
+          4.242167725819284,
+          -4.242991834719286,
+          2.9288973713
+        ],
+        "size_m": 4.0
+      },
+      {
+        "color": "#ffffff",
+        "energy": 150.0,
+        "name": "ALICE surround light 9",
+        "position_m": [
+          -0.0004729613,
+          -0.00035114760000000005,
+          -8.0711026287
+        ],
+        "size_m": 4.0
+      },
+      {
+        "color": "#ffffff",
+        "energy": 150.0,
+        "name": "ALICE surround light 10",
+        "position_m": [
+          -0.0004729613,
+          -0.00035114760000000005,
+          7.9288973713
+        ],
+        "size_m": 4.0
       }
     ],
     "magnet": false,

@@ -249,6 +249,15 @@ class DetectorSettings(bpy.types.PropertyGroup):
     color: FloatVectorProperty(name='Colour',subtype='COLOR',size=3,min=0,max=1,default=(.02,.04,.2),update=appearance_update)
 
 COLOR_ITEMS=[(name,name,'0 = standalone fitted source; 1 = composite matched source (e.g. ITS-TPC); grey = unknown' if name=='matching' else '') for name in COLOR_FIELDS]
+def use_scene_lighting():
+    for screen in bpy.data.screens:
+        for area in screen.areas:
+            if area.type=='VIEW_3D':
+                shading=area.spaces.active.shading
+                shading.type='RENDERED'
+                shading.use_scene_lights=True;shading.use_scene_world=True
+                shading.use_scene_lights_render=True;shading.use_scene_world_render=True
+
 def viewport_renderer_update(self,context):
     if not JOB:return
     scene=context.scene;scene.render.engine=self.viewport_renderer
@@ -256,6 +265,7 @@ def viewport_renderer_update(self,context):
     # render; Eevee remains the fast choice. This is an editor-only preference.
     scene.cycles.preview_samples=self.viewport_samples;scene.cycles.use_preview_adaptive_sampling=True;scene.cycles.preview_adaptive_threshold=.025;scene.cycles.use_preview_denoising=True
     scene.eevee.taa_samples=self.viewport_samples;scene.eevee.use_shadow_jitter_viewport=False
+    use_scene_lighting()
 
 class SceneSettings(bpy.types.PropertyGroup):
     viewport_renderer: EnumProperty(name='Viewport renderer',items=[('BLENDER_EEVEE','Fast (Eevee)','Responsive preview; transparency and lighting are approximate'),('CYCLES','Accurate (Cycles)','Progressive preview using the final renderer; slower on CPU')],default='CYCLES',update=viewport_renderer_update)
@@ -446,6 +456,7 @@ class TPCSectorsInnerWall(bpy.types.Operator):
                 component.explicit=component.identifier in choices
                 component.enabled=choices.get(component.identifier,True)
             item.detail='full';item.display='surfaces';item.exclusions='';item.inner_mask_radius=0;item.visible=True
+            item.component_category='parts';item.show_components=True
             return bpy.ops.alice_eve.apply_geometry()
         except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
 
@@ -465,6 +476,14 @@ class SurroundLighting(bpy.types.Operator):
             lamp=bpy.data.objects.new(light['name'],data);context.scene.collection.objects.link(lamp)
             lamp.location=light['position_m'];lamp.rotation_euler=(target-lamp.location).to_track_quat('-Z','Y').to_euler()
         self.report({'INFO'},'Surround lighting added; each light remains adjustable and exports with the scene')
+        use_scene_lighting()
+        return {'FINISHED'}
+
+class ShowSceneLighting(bpy.types.Operator):
+    bl_idname='alice_eve.show_scene_lighting';bl_label='Show scene lighting'
+    bl_description='Use rendered shading and the exported scene lights/world instead of Solid or studio/HDRI preview lighting'
+    def execute(self,context):
+        viewport_renderer_update(context.scene.alice_eve,context)
         return {'FINISHED'}
 
 class CameraFromView(bpy.types.Operator):
@@ -723,12 +742,14 @@ class EVEPanel(bpy.types.Panel):
                 box.prop(item,'inner_mask_radius')
                 if item.inner_mask_radius>0:box.prop(item,'inner_mask_patterns');box.prop(item,'inner_mask_front')
         layout.prop(ui,'background');layout.prop(ui,'world_strength');layout.prop(ui,'view_transform');layout.prop(ui,'exposure');layout.prop(ui,'track_emission');layout.prop(ui,'cluster_emission');layout.prop(ui,'data_glow_lighting');layout.prop(ui,'roughness');layout.prop(ui,'metallic');layout.prop(ui,'shading')
+        layout.operator('alice_eve.show_scene_lighting')
+        layout.label(text='Scene area lights: '+str(sum(o.type=='LIGHT' and o.data.type=='AREA' for o in context.scene.objects)))
         for lamp in (o for o in context.scene.objects if o.type=='LIGHT'):
             box=layout.box();box.label(text=lamp.name);box.prop(lamp,'location');box.prop(lamp,'rotation_euler');box.prop(lamp.data,'energy');box.prop(lamp.data,'size');box.prop(lamp.data,'color')
         layout.prop(ui,'export_path');layout.prop(ui,'include_defaults')
         row=layout.row();row.operator('alice_eve.export');row.operator('alice_eve.render_full')
 
-CLASSES=(GeometryComponent,ToggleComponent,RefreshComponents,DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,SolidDetectorSurfaces,LightTransparentSurfaces,RestoreSurfaceExclusions,TPCSectorsInnerWall,SurroundLighting,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,ExportConfig,RenderFull,EVEPanel)
+CLASSES=(GeometryComponent,ToggleComponent,RefreshComponents,DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,SolidDetectorSurfaces,LightTransparentSurfaces,RestoreSurfaceExclusions,TPCSectorsInnerWall,SurroundLighting,ShowSceneLighting,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,ExportConfig,RenderFull,EVEPanel)
 
 def start_editor(job,event,metadata):
     global JOB,EVENT,DEVICES,RECOMMENDATION,PALETTES
@@ -768,6 +789,7 @@ def start_editor(job,event,metadata):
         item.opening=settings['geometry_openings'].get(name,180 if settings['cutaway'] else 0);item.opacity=settings['geometry_opacities'].get(name,settings['geometry_opacity']);item.color=settings.get('colors_linear',{}).get('magnet' if name=='L3' else name,rgb(settings['colors'].get('magnet' if name=='L3' else name,'#243a82')))
         item.opening_direction=settings.get('geometry_opening_directions',{}).get(name,-90.);item.exclusions=', '.join(settings.get('geometry_exclusions',{}).get(name,[]))
         populate_components(item,settings.get('geometry_components',{}).get(name,{}))
+        if name=='TPC':item.component_category='parts';item.show_components=True
         inner=settings.get('geometry_inner_masks',{}).get(name,{});item.inner_mask_radius=inner.get('radius_m',0);item.inner_mask_patterns=', '.join(inner.get('patterns',[]));item.inner_mask_front=inner.get('front_only',True)
     settings['palette_lut']=PALETTES[settings['palette']]
     locked=recipe(RenderSettings(**settings),event)['scene']['color_ranges']

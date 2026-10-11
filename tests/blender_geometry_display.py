@@ -48,6 +48,11 @@ with tempfile.TemporaryDirectory(prefix='alice-geometry-qa-') as tmp:
     choices=current_settings().geometry_components['TPC']
     assert choices['parts/TPC_ICVM'] and choices['parts/TPC_IROCB']
     assert not choices['parts/TPC_OCV'] and not choices['parts/TPC_ring']
+    assert item.show_components and item.component_category=='parts'
+    bpy.context.view_layer.update()
+    evaluated=bpy.context.evaluated_depsgraph_get()
+    tpc_instances=[instance for instance in evaluated.object_instances if instance.is_instance and instance.parent and instance.parent.original.name in bpy.data.collections['TPC'].objects]
+    assert len(tpc_instances)==254, len(tpc_instances)
     assert camera.matrix_world==camera_pose
     light_count=len([o for o in bpy.context.scene.objects if o.type=='LIGHT'])
     assert bpy.ops.alice_eve.surround_lighting()=={'FINISHED'}
@@ -65,6 +70,17 @@ with tempfile.TemporaryDirectory(prefix='alice-geometry-qa-') as tmp:
     exported=json.loads(Path(ui.export_path).read_text())['scene']
     assert sum(light.get('name','').startswith(SURROUND_LIGHT_PREFIX) for light in exported['lights'])==10
     assert exported['geometry_components']['TPC']==choices
+    viewports=[area.spaces.active for screen in bpy.data.screens for area in screen.areas if area.type=='VIEW_3D']
+    assert viewports
+    for viewport in viewports:
+        viewport.shading.type='MATERIAL'
+        viewport.shading.use_scene_lights=False;viewport.shading.use_scene_world=False
+        viewport.shading.use_scene_lights_render=False;viewport.shading.use_scene_world_render=False
+    assert bpy.ops.alice_eve.show_scene_lighting()=={'FINISHED'}
+    for viewport in viewports:
+        assert viewport.shading.type=='RENDERED'
+        assert viewport.shading.use_scene_lights and viewport.shading.use_scene_world
+        assert viewport.shading.use_scene_lights_render and viewport.shading.use_scene_world_render
     ui.viewport_samples=192
     assert bpy.context.scene.cycles.preview_samples==192 and bpy.context.scene.cycles.use_preview_denoising
     assert bpy.context.scene.eevee.taa_samples==192

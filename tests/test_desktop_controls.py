@@ -111,6 +111,31 @@ def test_commissioning_defaults_clone_style_keep_input_events_assets_and_hardwar
     assert cfg.camera_pose and cfg.geometry_openings=={'ITS':180.,'TPC':0.}
     saved=json.loads(w.settings_file.read_text())['render']
     assert saved['detectors']==['ITS','TPC']
+    assert not saved['geometry_components']['TPC']['parts/TPC_INPLL']
+    assert len(saved['lights'])==12
+
+
+def test_import_config_preserves_disabled_tpc_parts_and_surround_lights(window,monkeypatch):
+    import gzip
+    from alice_renderer.scene_config import recipe,save_config,sha256
+    from alice_renderer.scene_presets import surround_lights
+    from alice_renderer.geometry_components import sidecar_path
+    w,application,root=window
+    generate(root/'events.jsonl');w.load_input(root/'events.jsonl');settle(w,application)
+    w.model.select_all(False);w.model.selected={1};w.update_availability()
+    asset=root/'TPC.blend';asset.write_bytes(b'geometry-fixture')
+    metadata={'schema':'alice-geometry-components','version':1,'asset_sha256':sha256(asset),
+              'components':{'parts/TPC_INPLL':{'parent':'','label':'Inner support','count':1},
+                            'parts/TPC_IROCB':{'parent':'','label':'Sector','count':1}},'groups':{}}
+    with gzip.open(sidecar_path(asset),'wt') as stream:json.dump(metadata,stream)
+    choices={'parts/TPC_INPLL':False,'parts/TPC_IROCB':True}
+    cfg=RenderSettings(detectors=['TPC'],geometry=['TPC'],geometry_assets={'TPC':str(asset)},
+                       geometry_components={'TPC':choices},lights=surround_lights())
+    path=root/'scene.json';save_config(path,recipe(cfg))
+    monkeypatch.setattr(app_module.QFileDialog,'getOpenFileName',lambda *args:(str(path),''))
+    w.import_scene();actual=w.settings()
+    assert actual.geometry_components['TPC']==choices and actual.lights==cfg.lights
+    assert w.model.selected=={1} and w.source.text()==str(root/'events.jsonl')
 
 
 def test_recent_clone_retains_new_input_and_event_and_favourites_picker(window):

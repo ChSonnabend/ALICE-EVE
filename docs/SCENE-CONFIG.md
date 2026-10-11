@@ -143,6 +143,12 @@ and 38 inner-wall placements out of 10,316 TPC placements; these are full aligne
 surfaces, not a schematic envelope. Track clipping still uses the complete
 aligned detector bounds.
 
+This reduced TPC selection and surround-light rig are now part of the startup
+commissioning preset. The TPC component browser opens on **Parts**, with the
+unwanted named elements unchecked. Saved recipes still use their own explicit
+choices; **Use commissioning defaults** in the desktop app restores the new
+defaults, while **TPC sectors + inner wall** changes just the TPC in the editor.
+
 **Add lights around detector** keeps existing lights and adds eight broad white
 area lights at two longitudinal positions around the sides plus one at each
 end. The side lights use 200 W, a 6 m radial distance and 4 m size; the end lights
@@ -151,6 +157,13 @@ Repeating the button replaces its own rig without accumulating duplicate lights.
 Each light's position, direction, power, size and colour can be edited in the
 sidebar and travels in the exported recipe. The black background stays black;
 surface illumination does not depend on making the background brighter.
+
+The editor enables scene lights and the scene world for rendered and material
+preview shading. **Show scene lighting** switches back to rendered shading if
+the viewport has been changed to Solid or studio/HDRI lighting. The sidebar's
+**Scene area lights** count confirms which rig was actually loaded (12 for the
+default two original lights plus the ten surrounding lights). Viewport samples
+may take time to converge in Accurate (Cycles); Fast (Eevee) remains available.
 
 Recipes store `geometry_components`, for example:
 

@@ -24,8 +24,13 @@ def test_default_style_clone_uses_current_local_alignment_and_independent_instan
     assert b.colors['TPC']!='#ffffff' and b.camera_pose['lens']!=99
 
 
-def test_reviewed_second_batch_is_startup_default():
+def test_startup_keeps_reviewed_camera_with_reduced_tpc_and_surround_lights():
     cfg=startup_settings()
     assert cfg.camera_lens_mm==16 and cfg.roll==13.3
-    assert cfg.geometry_inner_masks['TPC']['radius_m']==1
+    assert 'TPC' not in cfg.geometry_inner_masks and 'TPC' not in cfg.geometry_exclusions
+    parts=cfg.geometry_components['TPC']
+    assert parts['parts/TPC_ICVM'] and parts['parts/TPC_IROCB']
+    assert not any(parts[key] for key in ('parts/TPC_IGR1','parts/TPC_INPLL','parts/TPC_ring','parts/TPC_rodl','parts/TPC_MMHC'))
+    from alice_renderer.scene_presets import SURROUND_LIGHT_PREFIX
+    assert sum(light.get('name','').startswith(SURROUND_LIGHT_PREFIX) for light in cfg.lights)==10
     assert cfg.geometry_openings=={'ITS':180.,'TPC':0.}

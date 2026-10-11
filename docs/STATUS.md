@@ -26,7 +26,7 @@ All checks use run **560067**, TF counter **2619419**, first orbit **212036032**
 - All **15 detector systems plus L3** were built as aligned assets, covering **1,418,318 physical surface instances**. Every translation passed at stored precision; maximum rotation-matrix entry error was **2.07 × 10⁻⁷**. All surface hashes match the exact geometry manager captured during the final raw and CTF reconstructions.
 - Actual real-data CPU preview and Apple Metal renders passed. Separate selected events have independent PNG/configuration/log/Blender outputs. A global-Y cutaway clips geometry rather than relying on long transparent ray chains. The camera uses ALICE +Y as up.
 - Actual GUI import, selection, geometry auto-fill, scalar availability and Preview-button execution passed. No MC truth is fabricated.
-- **150 automated tests passed**, including atomic caches, complete enumeration, flow control, private socket namespaces and the native-component TPC preset. Python source compilation and native exporter compilation passed.
+- **151 automated tests passed**, including atomic caches, complete enumeration, flow control, private socket namespaces, the native-component TPC preset and desktop config import of disabled parts/lights. Python source compilation and native exporter compilation passed.
 
 Those earlier datasets passed enumeration checks but have superseded TPC coordinates; do not use them for new TPC renders. Coordinate-version-3 exports and their full audits replace them. Their manifests, enumeration reports, object audits and geometry reports retain the evidence. Earlier exports remain available for comparison. Current assets are under `geometry/run-560067`; real render evidence is under `renders/qa/real-data`.
 
@@ -99,3 +99,13 @@ the tested portable settings are in
 choices and lights match the render metadata exactly. The interior is brighter
 but still translucent; other selected detector surfaces retain layered patterns.
 This is not a claim of an exact match to the commissioning reference.
+
+The subsequent interactive-session check found that the last launched job still
+used the earlier startup preset (two lights, no explicit TPC part selection).
+The shipped startup preset now contains the reduced TPC selection and surround
+rig, and the TPC browser opens on Parts. Native QA counts exactly 254 evaluated
+TPC instances in the interactive dependency graph, verifies restoring scene
+lights/world after intentionally choosing studio lighting, and checks the
+sidebar's Show scene lighting operator. An additional opaque-default exterior
+CPU image confirms illuminated surfaces at the default exposure, independent
+of the earlier transparent material example.
