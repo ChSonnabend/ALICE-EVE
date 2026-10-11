@@ -23,6 +23,7 @@ def main():
         command.add_argument('--cache',type=Path,default=Path('cache'));command.add_argument('--output',type=Path,default=Path('renders'))
         command.add_argument('--blender',default=find_blender());command.add_argument('--backend',default='AUTO',choices=['AUTO','CPU','METAL','HIP','CUDA','OPTIX']);command.add_argument('--device',default='')
         command.add_argument('--quality',default='balanced',choices=['draft','balanced','final','publication']);command.add_argument('--width',type=int);command.add_argument('--height',type=int);command.add_argument('--samples',type=int)
+        command.add_argument('--resolution-percent',type=float,help='Linear percentage of the 7680x4320 8K canvas; 25=1080p, 50=4K, 100=8K at 16:9')
     args=parser.parse_args()
     try:
         if args.command=='inspect':print(json.dumps(inspect_input(args.input).__dict__,indent=2))
@@ -45,7 +46,7 @@ def main():
             cfg=resolve_settings(data,args.config,args.geometry_root,json.loads(args.assets.read_text()) if args.assets else None)
             devices_info=probe(args.blender);recommendation=recommended_quality(devices_info)
             backend=recommendation['backend'] if args.backend=='AUTO' else args.backend
-            cfg=quality_settings(cfg,args.quality,backend=backend,device=args.device,width=args.width,height=args.height,samples=args.samples)
+            cfg=quality_settings(cfg,args.quality,backend=backend,device=args.device,width=args.width,height=args.height,samples=args.samples,resolution_percent=args.resolution_percent)
             info=inspect_input(source)
             if info.format!='events':
                 if not args.profile:raise ValueError('Raw TF/CTF requires --profile for O2 collision extraction; exported events render directly')

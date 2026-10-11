@@ -262,7 +262,7 @@ def imported_geometry(name,path,settings,bounds_only=False):
     lod={}
     detail=settings.get('geometry_lods',{}).get(name,settings.get('geometry_lod','full'))
     style=settings.get('geometry_display',{}).get(name,'surfaces')
-    coll['alice_display']=style;coll['alice_geometry_lod']=detail;coll['alice_schematic']=False
+    coll['alice_display']=style;coll['alice_geometry_lod']=detail;coll['alice_schematic']=False;coll['alice_asset_path']=str(Path(path).resolve())
     if style=='outline' and settings['cutaway'] and name not in settings.get('geometry_openings',{}):
         settings=dict(settings,geometry_openings={**settings.get('geometry_openings',{}),name:180})
     if detail=='simplified' or style!='surfaces':

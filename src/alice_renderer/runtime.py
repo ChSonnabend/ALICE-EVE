@@ -82,7 +82,7 @@ def preflight(settings: RenderSettings, events, devices: dict, output: Path) -> 
     except OSError as exc: errors.append(f'Output directory is not writable: {exc}')
     return list(dict.fromkeys(errors))
 
-def render_events(blender: str, paths: list[Path], settings: RenderSettings, output: Path, *, preview=False, progress=lambda s:None, cancelled=lambda:False):
+def render_events(blender: str, paths: list[Path], settings: RenderSettings, output: Path, *, preview=False, progress=lambda s:None, cancelled=lambda:False, library_path=None):
     output=Path(output)
     settings.validate()
     effective=materialize(dataclasses.replace(settings))
@@ -120,10 +120,12 @@ def render_events(blender: str, paths: list[Path], settings: RenderSettings, out
                 time.sleep(.1)
         if process.returncode or not (folder/'render.png').exists(): raise ValueError(f'Blender failed for event {event_id}. See {folder/"blender.log"}')
         # Worker output contains display ranges, counts and geometry provenance.
+        from .scene_library import SceneLibrary
+        SceneLibrary(library_path).record_job(folder)
         progress(str(folder/'render.png'))
     return batch
 
-def launch_editor(blender, event_path, settings, output):
+def launch_editor(blender, event_path, settings, output, *, library_path=None):
     """Launch native Blender editing; quality is chosen only by Render full."""
     import copy
     cfg=materialize(copy.deepcopy(settings))
@@ -136,6 +138,8 @@ def launch_editor(blender, event_path, settings, output):
     folder=Path(output)/('editor-'+time.strftime('%Y%m%d-%H%M%S')+'-'+os.urandom(3).hex());folder.mkdir()
     job=folder/'job.json'
     payload={'event':str(Path(event_path).resolve()),'output':str(folder.resolve()),'settings':cfg.to_dict(),'preview':True,'blender':devices,'python':sys.executable,'render_output':str(Path(output).resolve()),'palettes':{name:sample(name) for name in names()}}
+    from .scene_library import SceneLibrary
+    library=SceneLibrary(library_path);payload['library_path']=str(library.path.resolve())
     job.write_text(json.dumps(payload,indent=2))
     log=(folder/'editor.log').open('w')
     try:

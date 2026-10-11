@@ -22,3 +22,5 @@ profiles/run-560067-raw.json
 *.ctf
 .DS_Store
 configs/
+scene-library.local.sqlite*
+scene-library/

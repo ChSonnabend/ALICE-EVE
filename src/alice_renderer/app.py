@@ -1,10 +1,10 @@
 """Native desktop controls; all expensive work runs outside the UI thread."""
 from __future__ import annotations
-import json, threading, sqlite3
+import json, threading, sqlite3, math
 from pathlib import Path
-from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QThread, Signal
+from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QThread, Signal, QTimer
 from PySide6.QtGui import QColor, QPixmap
-from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QFormLayout,QLabel,QPushButton,QLineEdit,QCheckBox,QComboBox,QSpinBox,QDoubleSpinBox,QTabWidget,QScrollArea,QSplitter,QTableView,QFileDialog,QMessageBox,QPlainTextEdit,QHeaderView,QDialog,QDialogButtonBox,QSizePolicy,QInputDialog)
+from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QFormLayout,QLabel,QPushButton,QLineEdit,QCheckBox,QComboBox,QSpinBox,QDoubleSpinBox,QTabWidget,QScrollArea,QSplitter,QTableView,QFileDialog,QMessageBox,QPlainTextEdit,QHeaderView,QDialog,QDialogButtonBox,QSizePolicy,QInputDialog,QSlider,QListWidget,QListWidgetItem)
 from .catalogue import Catalogue
 from .converters import convert
 from .demo import generate
@@ -15,6 +15,8 @@ from .scene_config import recipe,save_config,load_config,resolve_settings,recomm
 from .catalogue import load_event
 from .object_selection import parse_track_ids
 from .palettes import names as palette_names
+from .scene_library import SceneLibrary
+from .resolution import PRESET_PERCENT, minimum_percent, percentage_size
 
 ROOT=Path(__file__).resolve().parents[2]
 
@@ -64,8 +66,9 @@ def number(value,minimum,maximum,decimals=0):
 class Window(QMainWindow):
     def __init__(self):
         super().__init__();self.setWindowTitle('ALICE · Event Renderer');self.resize(1440,980)
-        self.catalogue=None;self.task=None;self.device_info=None;self.base=RenderSettings();self.images=[];self.close_pending=False
+        self.catalogue=None;self.loaded_input=None;self.task=None;self.device_info=None;self.base=RenderSettings();self.images=[];self.close_pending=False
         self.scene_overrides={};self.timeframe_source=None;self.collision_source=None;self.showing_timeframes=False;self.collision_mode='tracks'
+        self.library=SceneLibrary(ROOT/'scene-library.local.sqlite');self.library_signature=None;self.scene_detector_selection=None;self.requested_modes=None
         self.settings_file=ROOT/'settings.local.json'
         if self.settings_file.exists():
             try:
@@ -84,11 +87,17 @@ class Window(QMainWindow):
         self.folder_button=QPushButton('Browse folder…');self.folder_button.clicked.connect(self.open_folder);top.addWidget(self.folder_button)
         self.timeframe_button=QPushButton('Whole-TF detector views');self.timeframe_button.setEnabled(False);self.timeframe_button.clicked.connect(self.toggle_timeframe_views);top.addWidget(self.timeframe_button)
         self.demo_button=QPushButton('Synthetic demonstration');self.demo_button.clicked.connect(self.open_demo);top.addWidget(self.demo_button)
+        reuse=QHBoxLayout();layout.addLayout(reuse)
+        reuse.addWidget(QLabel('Reuse scene settings:'))
+        self.recent_picker=QComboBox();self.recent_picker.setMinimumWidth(0);self.recent_picker.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred);reuse.addWidget(self.recent_picker,1)
+        self.favourite_picker=QComboBox();self.favourite_picker.setMinimumWidth(0);self.favourite_picker.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred);reuse.addWidget(self.favourite_picker,1)
+        self.reuse_recent_button=QPushButton('Use recent');self.reuse_recent_button.clicked.connect(lambda:self.use_library_entry(self.recent_picker.currentData(),True));reuse.addWidget(self.reuse_recent_button)
+        self.reuse_favourite_button=QPushButton('Use favourite');self.reuse_favourite_button.clicked.connect(lambda:self.use_library_entry(self.favourite_picker.currentData(),True));reuse.addWidget(self.reuse_favourite_button)
         split=QSplitter();layout.addWidget(split,1)
         self.tabs=QTabWidget();split.addWidget(self.tabs)
         self.detector_modes={};self.data_checks={};self.geometry_checks={};self.asset_fields={};self.color_buttons={};self.detector_labels={}
-        self.build_detectors();self.build_appearance();self.build_render();self.build_runtime()
-        right=QWidget();right_layout=QVBoxLayout(right);split.addWidget(right);split.setSizes([480,900])
+        self.build_detectors();self.build_appearance();self.build_render();self.build_runtime();self.build_library()
+        right=QWidget();right_layout=QVBoxLayout(right);split.addWidget(right);split.setSizes([540,840])
         tools=QHBoxLayout();right_layout.addLayout(tools)
         self.all_button=QPushButton('Select all');self.none_button=QPushButton('Select none');tools.addWidget(self.all_button);tools.addWidget(self.none_button)
         self.selection_label=QLabel('0 events selected');tools.addWidget(self.selection_label,1)
@@ -108,6 +117,8 @@ class Window(QMainWindow):
         self.preview_button=QPushButton('Preview first selected event');self.preview_button.clicked.connect(lambda:self.start_render(True));bottom.addWidget(self.preview_button)
         self.render_button=QPushButton('Render selected events');self.render_button.setObjectName('primary');self.render_button.clicked.connect(lambda:self.start_render(False));bottom.addWidget(self.render_button)
         self.update_availability()
+        self.library.discover(Path(self.output.text()));self.refresh_library()
+        self.library_timer=QTimer(self);self.library_timer.timeout.connect(self.refresh_library);self.library_timer.start(2000)
         self.setStyleSheet('''QWidget{background:#101724;color:#e2e8f2;font-size:13px;} QLabel#title{font-size:24px;font-weight:700;color:#94e5ff;margin:12px 0;} QLabel#preview{background:#070b14;border:1px solid #25334b;border-radius:8px;} QPushButton{background:#26334b;border:1px solid #40516f;padding:8px 12px;border-radius:5px;} QPushButton:hover{background:#344763;} QPushButton#primary{background:#147b89;border-color:#5ccdde;} QPushButton:disabled,QCheckBox:disabled{color:#586276;} QLineEdit,QSpinBox,QDoubleSpinBox,QComboBox,QPlainTextEdit{background:#182236;border:1px solid #34435d;padding:6px;border-radius:4px;} QHeaderView::section{background:#26334b;padding:5px;border:0;} QTableView{alternate-background-color:#172034;gridline-color:#27344a;} QTabBar::tab{padding:10px;background:#182236;} QTabBar::tab:selected{background:#2b3b55;} QCheckBox{padding:4px;}''')
 
     def tab(self,name):
@@ -125,6 +136,7 @@ class Window(QMainWindow):
         for row,name in enumerate(DETECTORS,1):
             data=QCheckBox();geometry=QCheckBox();geometry.setChecked(name in self.base.geometry)
             self.data_checks[name]=data;self.geometry_checks[name]=geometry
+            data.clicked.connect(lambda checked=False:self.remember_detector_selection())
             mode=QComboBox();mode.addItems(['tracks','clusters','both']);mode.setCurrentText(self.base.detector_modes.get(name,self.base.mode));self.detector_modes[name]=mode
             label=QLabel(name);self.detector_labels[name]=label
             grid.addWidget(label,row,0);grid.addWidget(data,row,1);grid.addWidget(mode,row,2);grid.addWidget(geometry,row,3);grid.addWidget(self.color_button(name),row,4)
@@ -139,6 +151,9 @@ class Window(QMainWindow):
     def select_no_detectors(self):
         for box in (*self.data_checks.values(),*self.geometry_checks.values()):box.setChecked(False)
         self.magnet.setChecked(False)
+        self.scene_detector_selection=set()
+    def remember_detector_selection(self):
+        self.scene_detector_selection={name for name,box in self.data_checks.items() if box.isChecked()}
     def change_cutaway(self,on):
         self.scene_overrides['geometry_openings']={name:180 if on else 0 for name in (*DETECTORS,'L3')}
     def show_complete_detectors(self):
@@ -207,6 +222,66 @@ class Window(QMainWindow):
         note=QLabel('Each asset must contain only the named detector in ALICE global XYZ coordinates. GLB/glTF, OBJ and Blender files are supported. Preserve run/alignment provenance with the assets.');note.setWordWrap(True);layout.addRow(note)
         for name in (*DETECTORS,'L3'):
             field=QLineEdit(self.base.geometry_assets.get(name,''));self.asset_fields[name]=field;layout.addRow(name+' geometry',self.path_field(field))
+    def build_library(self):
+        self.library_lists={}
+        for favourites,title in ((False,'Recent scenes'),(True,'Favourites')):
+            widget=self.tab(title);layout=QVBoxLayout(widget)
+            note=QLabel('Reload the original event, or reuse camera, colours, lights and surfaces for the input/event currently selected. Favourites keep a fixed snapshot.');note.setWordWrap(True);layout.addWidget(note)
+            listing=QListWidget();self.library_lists[favourites]=listing;layout.addWidget(listing)
+            def selected(listing=listing):
+                item=listing.currentItem();return item.data(Qt.UserRole) if item else None
+            for label,action in (
+                ('Reload scene and original event',lambda checked=False,get=selected:self.use_library_entry(get(),False)),
+                ('Use for current input / event',lambda checked=False,get=selected:self.use_library_entry(get(),True)),
+                ('Remove favourite' if favourites else 'Add to favourites…',lambda checked=False,get=selected,remove=favourites:self.change_favourite(get(),remove)),
+                ('Refresh',self.discover_library)):
+                button=QPushButton(label);button.clicked.connect(action);layout.addWidget(button)
+    def discover_library(self):
+        self.library.discover(Path(self.output.text()));self.library_signature=None;self.refresh_library()
+    def refresh_library(self):
+        recent=self.library.entries();favourites=self.library.entries(True)
+        signature=json.dumps([recent,favourites],sort_keys=True)
+        if signature==self.library_signature:return
+        self.library_signature=signature
+        for combo,entries,label in ((self.recent_picker,recent,'Recent scenes…'),(self.favourite_picker,favourites,'Favourites…')):
+            chosen=combo.currentData();chosen_id=chosen.get('id') if chosen else None
+            combo.clear();combo.addItem(label,None)
+            for entry in entries:
+                combo.addItem(('★ ' if entry['favourite'] else '')+entry['title'],entry)
+                combo.setItemData(combo.count()-1,entry['config'],Qt.ToolTipRole)
+                if entry['id']==chosen_id:combo.setCurrentIndex(combo.count()-1)
+        for is_favourite,listing in self.library_lists.items():
+            old=listing.currentItem();chosen_id=old.data(Qt.UserRole)['id'] if old else None
+            listing.clear()
+            for entry in favourites if is_favourite else recent:
+                item=QListWidgetItem(('★ ' if entry['favourite'] else '')+entry['title']);item.setData(Qt.UserRole,entry);item.setToolTip(entry['config']+'\n'+entry['input']);listing.addItem(item)
+                if entry['id']==chosen_id:listing.setCurrentItem(item)
+    def change_favourite(self,entry,remove=False):
+        if not entry:return
+        try:
+            if remove:self.library.unfavourite(entry)
+            else:
+                title,ok=QInputDialog.getText(self,'Save favourite','Name',text=entry['title'])
+                if not ok:return
+                self.library.favourite(entry,title=title.strip() or entry['title'])
+            self.refresh_library()
+        except Exception as exc:self.failure(str(exc))
+    def use_library_entry(self,entry,reuse=True):
+        if not entry:return
+        try:
+            assets={k:v.text() for k,v in self.asset_fields.items() if v.text()}
+            cfg=self.library.settings(entry,reuse=reuse,assets=assets or None,geometry_units=self.geometry_units.currentText() if assets else None)
+            if not reuse:
+                if not entry['input'] or not Path(entry['input']).exists():raise ValueError('Original input is unavailable. Choose a local input and use “Use for current input / event”.')
+                if not entry['event']:raise ValueError('This config has no original event. Use it for the current input/event.')
+            self.apply_scene(cfg)
+            if reuse:self.message('Scene settings reused. Input and event selection retained; event-specific highlighted track IDs cleared.')
+            else:self.load_input(entry['input'],event_selector=entry['event'],retain_scene_geometry=True)
+        except Exception as exc:self.failure(str(exc))
+    def register_scene(self,path,kind,cfg):
+        event=str(next(r['event_id'] for r in self.model.rows if r['ordinal']==min(self.model.selected))) if self.model.selected else ''
+        self.library.register(path,kind=kind,input_path=self.loaded_input or self.source.text(),event=event,assets=cfg.geometry_assets);self.refresh_library()
+
     def path_field(self,line,folder=False):
         widget=QWidget();layout=QHBoxLayout(widget);layout.setContentsMargins(0,0,0,0);layout.addWidget(line)
         button=QPushButton('…');button.setMaximumWidth(36)
@@ -229,7 +304,7 @@ class Window(QMainWindow):
         saved={'render':cfg.to_dict(),'blender':self.blender.text(),'profile':self.profile.text(),'output':self.output.text()}
         self.settings_file.write_text(json.dumps(saved,indent=2))
     def busy(self,on):
-        for w in (self.tabs,self.source,self.open_button,self.browse_button,self.folder_button,self.demo_button,self.table,self.all_button,self.none_button,self.preview_button,self.render_button,self.editor_button,self.export_config_button,self.load_config_button):w.setEnabled(not on)
+        for w in (self.tabs,self.source,self.open_button,self.browse_button,self.folder_button,self.demo_button,self.table,self.all_button,self.none_button,self.preview_button,self.render_button,self.editor_button,self.export_config_button,self.load_config_button,self.recent_picker,self.favourite_picker,self.reuse_recent_button,self.reuse_favourite_button):w.setEnabled(not on)
         self.cancel_button.setEnabled(on)
         self.timeframe_button.setEnabled(not on and self.timeframe_source is not None)
         if not on:self.update_availability()
@@ -270,7 +345,7 @@ class Window(QMainWindow):
             self.mode.setCurrentText(self.collision_mode);self.load_input(self.collision_source)
         elif self.timeframe_source:
             self.collision_mode=self.mode.currentText();self.mode.setCurrentText('clusters');self.load_input(self.timeframe_source)
-    def load_input(self,path):
+    def load_input(self,path,event_selector=None,retain_scene_geometry=False):
         path=Path(path).expanduser()
         if path.is_dir() and not any(path.glob('*.json*')):
             candidates=sorted(p for p in path.iterdir() if p.is_file() and p.suffix.lower() in ('.tf','.rawtf','.root','.ctf'))
@@ -290,6 +365,7 @@ class Window(QMainWindow):
             cat=Catalogue.build(source,ROOT/'cache',convert=convert,progress=progress,cancelled=cancelled)
             return cat,info
         def done(result):
+            self.loaded_input=self.source.text()
             self.catalogue,info=result;self.model.set_rows(self.catalogue.rows());self.summary.setText(f'{len(self.model.rows)} records loaded · grouping is shown explicitly · {Path(info.path).name}')
             with sqlite3.connect(self.catalogue.db) as database:
                 exported_source=Path(database.execute("SELECT value FROM metadata WHERE key='source'").fetchone()[0])
@@ -299,8 +375,8 @@ class Window(QMainWindow):
                 try:
                     manifest=json.loads(manifest_path.read_text())
                     for name,path in manifest.get('geometry_assets',{}).items():
-                        if name in self.asset_fields and isinstance(path,str):self.asset_fields[name].setText(path)
-                    if manifest.get('geometry_units') in ('cm','m'):self.geometry_units.setCurrentText(manifest['geometry_units'])
+                        if not retain_scene_geometry and name in self.asset_fields and isinstance(path,str):self.asset_fields[name].setText(path)
+                    if not retain_scene_geometry and manifest.get('geometry_units') in ('cm','m'):self.geometry_units.setCurrentText(manifest['geometry_units'])
                     if manifest.get('timeframe_events_file')=='timeframe-events.jsonl.gz' and manifest.get('events_file') in ('events.jsonl','events.jsonl.gz'):
                         frames=manifest_path.parent/'timeframe-events.jsonl.gz';collisions=manifest_path.parent/manifest['events_file']
                         if frames.is_file() and collisions.is_file():
@@ -308,8 +384,14 @@ class Window(QMainWindow):
                 except (OSError,ValueError,AttributeError,TypeError):self.message('Geometry metadata could not be loaded; configure assets in Setup.')
             self.timeframe_button.setText('Collision events' if self.showing_timeframes else 'Whole-TF detector views')
             if not self.model.rows:self.failure('Event catalogue is empty; regenerate the input catalogue');return
-            available={d for row in self.model.rows for d in json.loads(row['detectors'])}
-            for d,c in self.data_checks.items():c.setChecked(d in available)
+            if event_selector is not None:
+                matches={r['ordinal'] for r in self.model.rows if str(r['event_id'])==str(event_selector)}
+                if len(matches)!=1:self.failure('The original event was not found in this input');self.model.select_all(False);return
+                self.model.select_all(False);self.model.selected=matches;self.model.dataChanged.emit(self.model.index(0,0),self.model.index(len(self.model.rows)-1,0),[Qt.CheckStateRole]);self.update_availability()
+            available={d for row in self.model.rows if row['ordinal'] in self.model.selected for d in json.loads(row['detectors'])}
+            for d,c in self.data_checks.items():c.setChecked(d in available and (self.scene_detector_selection is None or d in self.scene_detector_selection))
+            if self.requested_modes:
+                self.track_mode.setCurrentText(self.requested_modes[0]);self.cluster_mode.setCurrentText(self.requested_modes[1])
             first=self.catalogue.load(self.model.rows[0]['ordinal'])
             for warning in first.get('warnings',[]):self.message(warning)
             self.status.setText('Events ready')
@@ -323,13 +405,13 @@ class Window(QMainWindow):
             self.detector_modes[name].setEnabled(name in available)
             self.detector_labels[name].setStyleSheet('color:#e2e8f2' if name in available else 'color:#586276')
             if name not in available:box.setChecked(False)
-            elif not was:box.setChecked(True)
+            elif not was:box.setChecked(self.scene_detector_selection is None or name in self.scene_detector_selection)
         for combo,field in ((self.track_mode,'track_fields'),(self.cluster_mode,'cluster_fields')):
             supported=set(COLOR_FIELDS)
             for row in rows:supported&=set(json.loads(row[field]))
             if not rows:supported={'solid'}
             for i in range(combo.count()):combo.model().item(i).setEnabled(combo.itemText(i) in supported)
-            if combo.currentText() not in supported:combo.setCurrentText('solid')
+            if combo.currentText() not in supported and not self.requested_modes:combo.setCurrentText('solid')
         self.selection_label.setText(f'{len(rows)} / {len(self.model.rows)} selected')
         self.preview_button.setEnabled(bool(rows));self.render_button.setEnabled(bool(rows))
     def check_devices(self):
@@ -346,7 +428,8 @@ class Window(QMainWindow):
         try:
             cfg=self.settings();event=load_event(self.catalogue.event_path(min(self.model.selected))) if self.catalogue and self.model.selected else None
             path=QFileDialog.getSaveFileName(self,'Export portable scene','scene-config.json','Scene config (*.json)')[0]
-            if path:save_config(path,recipe(cfg,event));self.message('Portable scene exported: '+path)
+            if path:
+                save_config(path,recipe(cfg,event));self.register_scene(path,'export',cfg);self.message('Portable scene exported: '+path)
         except Exception as exc:self.failure(str(exc))
     def import_scene(self):
         path=QFileDialog.getOpenFileName(self,'Load portable scene','','Scene config (*.json)')[0]
@@ -358,9 +441,10 @@ class Window(QMainWindow):
                 if not chosen:return
                 root=Path(chosen)
             cfg=resolve_settings(data,path,root)
-            self.apply_scene(cfg);self.message('Scene loaded. Choose the local input and event, then preview or render.')
+            self.apply_scene(cfg);self.register_scene(path,'config',cfg);self.message('Scene loaded. Choose the local input and event, then preview or render.')
         except Exception as exc:self.failure(str(exc))
     def apply_scene(self,cfg):
+        self.scene_detector_selection=set(cfg.detectors);self.requested_modes=(cfg.track_color_mode,cfg.cluster_color_mode)
         if self.palette.findText(cfg.palette)<0:self.palette.addItem(cfg.palette)
         self.scene_overrides={key:getattr(cfg,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
         for name,box in self.data_checks.items():box.setChecked(name in cfg.detectors)
@@ -378,7 +462,7 @@ class Window(QMainWindow):
         self.auto_range.setChecked(cfg.scale_min is None)
         if cfg.scale_min is not None:self.minimum.setValue(cfg.scale_min)
         if cfg.scale_max is not None:self.maximum.setValue(cfg.scale_max)
-        self.width.setValue(1920);self.height.setValue(max(64,round(1920/cfg.frame_aspect)))
+        w,h=percentage_size(25,cfg.frame_aspect);self.width.setValue(w);self.height.setValue(h)
         for name,combo in self.detector_modes.items():combo.setCurrentText(cfg.detector_modes.get(name,cfg.mode))
         self.roll.setValue(cfg.roll);self.highlight_ids.setText(', '.join(cfg.highlight_track_ids));self.highlight_width.setValue(cfg.highlight_track_radius_cm*2);self.highlight_clusters.setValue(cfg.highlight_cluster_radius_cm);self.highlight_override.setChecked(cfg.highlight_override_color);self.highlight_track_color.setText(cfg.highlight_track_color);self.highlight_cluster_color.setText(cfg.highlight_cluster_color)
         self.scene_overrides['palette_lut']=cfg.palette_lut
@@ -386,15 +470,27 @@ class Window(QMainWindow):
         self.scene_overrides['geometry_openings']=cfg.geometry_openings
     def open_editor(self):
         if not self.catalogue or not self.model.selected:return
+        if self.source.text()!=self.loaded_input:self.failure('The input path has changed. Press Enter or Load input, then select its event before opening the editor.');return
         try:cfg=self.settings();event=self.catalogue.event_path(min(self.model.selected))
         except Exception as exc:self.failure(str(exc));return
-        self.start_task(lambda p,c:launch_editor(self.blender.text(),event,cfg,Path(self.output.text())),lambda result:self.message('Interactive Blender scene started. Open the ALICE EVE sidebar; export or render from there. Log: '+str(result[0]/'editor.log')))
+        def launched(result):
+            self.refresh_library();self.message('Interactive Blender scene started. Open the ALICE EVE sidebar; export or render from there. Log: '+str(result[0]/'editor.log'))
+        self.start_task(lambda p,c:launch_editor(self.blender.text(),event,cfg,Path(self.output.text()),library_path=self.library.path),launched)
     def render_quality_dialog(self,cfg,devices):
         rec=recommended_quality(devices);dialog=QDialog(self);dialog.setWindowTitle('Full render quality');form=QFormLayout(dialog)
         note=QLabel(rec['reason']);note.setWordWrap(True);form.addRow(note)
-        quality=QComboBox();quality.addItems(['draft','balanced','final','publication','custom']);quality.setCurrentText(rec['quality']);form.addRow('Quality preset',quality)
+        quality=QComboBox();quality.addItems(['draft','balanced','final','publication','custom']);quality.setCurrentText(rec['quality']);form.addRow('Sampling preset',quality)
         backend=QComboBox();backend.addItems(list(dict.fromkeys(d['type'] for d in devices['devices'])));backend.setCurrentText(rec['backend']);form.addRow('Available backend',backend)
-        width=number(cfg.width,64,16384);height=number(cfg.height,64,16384);samples=number(cfg.samples,1,8192);form.addRow('Custom width',width);form.addRow('Custom height',height);form.addRow('Custom samples',samples)
+        slider=QSlider(Qt.Horizontal);slider.setObjectName('resolutionPercent');slider.setRange(math.ceil(minimum_percent(cfg.frame_aspect)*10),1000);slider.setTickInterval(250);slider.setTickPosition(QSlider.TicksBelow);slider.setValue(round(PRESET_PERCENT[rec['quality']]*10))
+        form.addRow('Resolution (% of 8K)',slider);resolution=QLabel();form.addRow(resolution)
+        milestones=QWidget();row=QHBoxLayout(milestones);row.setContentsMargins(0,0,0,0)
+        for percent,label in ((25,'25% · 1080p'),(50,'50% · 4K'),(100,'100% · 8K')):
+            button=QPushButton(label);button.clicked.connect(lambda checked=False,p=percent:slider.setValue(p*10));row.addWidget(button)
+        form.addRow(milestones)
+        def show_resolution():
+            w,h=percentage_size(slider.value()/10,cfg.frame_aspect);resolution.setText(f'{slider.value()/10:g}% · {w} × {h} px · preserves camera aspect')
+        slider.valueChanged.connect(show_resolution);show_resolution()
+        samples=number(cfg.samples,1,8192);form.addRow('Custom samples',samples)
         geometry_details={}
         for name in cfg.geometry+(['L3'] if cfg.magnet else []):
             from .geometry_selection import description
@@ -402,23 +498,24 @@ class Window(QMainWindow):
         if geometry_details:
             note=QLabel('Explicit geometry choices override the preview type and appearance. Full and simplified aligned geometry require their assets.');note.setWordWrap(True);form.addRow(note)
         def toggle():
-            for field in (width,height,samples):field.setEnabled(quality.currentText()=='custom')
+            samples.setEnabled(quality.currentText()=='custom');slider.setValue(round(PRESET_PERCENT[quality.currentText()]*10))
         quality.currentTextChanged.connect(toggle);toggle()
         buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel);buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);form.addRow(buttons)
         if dialog.exec()!=QDialog.Accepted:return None
         custom=quality.currentText()=='custom'
-        chosen=quality_settings(cfg,'balanced' if custom else quality.currentText(),backend=backend.currentText(),width=width.value() if custom else None,height=height.value() if custom else None,samples=samples.value() if custom else None)
+        chosen=quality_settings(cfg,'balanced' if custom else quality.currentText(),backend=backend.currentText(),samples=samples.value() if custom else None,resolution_percent=slider.value()/10)
         from .geometry_selection import render_choices
         return render_choices(chosen,{name:combo.currentData() for name,combo in geometry_details.items()})
     def start_render(self,preview):
         if not self.catalogue:return
+        if self.source.text()!=self.loaded_input:self.failure('The input path has changed. Press Enter or Load input, then select its event before rendering.');return
         try:cfg=self.settings();self.save_settings(cfg)
         except Exception as exc:self.failure(str(exc));return
         ids=sorted(self.model.selected)
         if preview:ids=ids[:1]
         paths=[self.catalogue.event_path(i) for i in ids];blender=self.blender.text();output=Path(self.output.text())
         def run(chosen):
-            if chosen is not None:self.start_task(lambda p,c:render_events(blender,paths,chosen,output,preview=preview,progress=p,cancelled=c),lambda batch:self.message(f'Completed: {batch}'))
+            if chosen is not None:self.start_task(lambda p,c:render_events(blender,paths,chosen,output,preview=preview,progress=p,cancelled=c,library_path=self.library.path),lambda batch:(self.refresh_library(),self.message(f'Completed: {batch}')))
         if preview:run(cfg)
         else:
             def ready(info):

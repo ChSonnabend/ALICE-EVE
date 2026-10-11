@@ -112,3 +112,18 @@ def test_contributors_survive_catalogue_and_old_native_cache_header(tmp_path):
     before=cat.db.stat().st_mtime_ns
     assert cat.rows()[0]['contributors']==3
     assert cat.db.stat().st_mtime_ns==before
+
+
+def test_picking_yields_to_overlapping_sidebar_and_toolbar():
+    from types import SimpleNamespace as NS
+    from alice_renderer.picking import inside_viewport
+    window=NS(type='WINDOW',x=10,y=20,width=1000,height=700)
+    ui=NS(type='UI',x=760,y=20,width=250,height=700)
+    tools=NS(type='TOOLS',x=10,y=20,width=80,height=700)
+    space=NS(show_region_ui=True,show_region_toolbar=True)
+    area=NS(regions=[window,ui,tools],spaces=NS(active=space))
+    assert inside_viewport(area,window,300,100)
+    assert not inside_viewport(area,window,800,100)
+    assert not inside_viewport(area,window,30,100)
+    assert not inside_viewport(area,window,0,0)
+    space.show_region_ui=False;assert inside_viewport(area,window,800,100)

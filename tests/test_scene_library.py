@@ -1,0 +1,38 @@
+import json
+from pathlib import Path
+from dataclasses import replace
+from alice_renderer.model import RenderSettings
+from alice_renderer.scene_config import recipe,save_config,load_config
+from alice_renderer.scene_library import SceneLibrary
+
+def test_favourites_are_frozen_while_interactive_history_updates(tmp_path):
+    lib=SceneLibrary(tmp_path/'history.sqlite');path=tmp_path/'scene.json'
+    cfg=RenderSettings(schematic=True,geometry=['TPC'],roll=31)
+    save_config(path,recipe(cfg));lib.register(path,kind='interactive',input_path='original.json',event='E')
+    original=lib.entries()[0];lib.favourite(original,title='My view')
+    save_config(path,recipe(replace(cfg,roll=72)));lib.register(path,kind='interactive',input_path='original.json',event='E')
+    assert lib.settings(lib.entries()[0]).roll==72
+    favourite=lib.entries(True)[0];assert lib.settings(favourite).roll==31 and favourite['title']=='My view'
+    assert lib.entries()[0]['favourite']
+    lib.unfavourite(favourite);assert not lib.entries(True) and not lib.entries()[0]['favourite']
+
+def test_clone_uses_new_alignment_and_clears_event_specific_ids(tmp_path):
+    old=tmp_path/'old.blend';old.write_bytes(b'old-alignment');new=tmp_path/'new.blend';new.write_bytes(b'new-alignment')
+    cfg=RenderSettings(geometry=['TPC'],geometry_assets={'TPC':str(old)},highlight_track_ids=['17'],roll=17,geometry_openings={'TPC':125},color_ranges={'tracks':[0,20]})
+    path=tmp_path/'scene.json';save_config(path,recipe(cfg));lib=SceneLibrary(tmp_path/'history.sqlite');lib.register(path,assets=cfg.geometry_assets,input_path='old-events',event='old-event')
+    entry=lib.entries()[0];old.unlink()
+    cloned=lib.settings(entry,reuse=True,assets={'TPC':str(new)},geometry_units='m')
+    assert cloned.geometry_assets=={'TPC':str(new)} and cloned.geometry_units=='m'
+    assert cloned.roll==17 and cloned.geometry_openings==cfg.geometry_openings and cloned.color_ranges==cfg.color_ranges
+    assert cloned.highlight_track_ids==[] and lib.entries()[0]['input']==str(Path('old-events').resolve())
+    assert recipe(cloned)['geometry']['TPC']['file']=='new.blend'
+
+def test_history_records_actual_render_camera_and_legend_and_discovers_once(tmp_path):
+    folder=tmp_path/'renders'/'render-test'/'event-00000';folder.mkdir(parents=True)
+    cfg=RenderSettings();pose={'matrix_world':[[1,0,0,3],[0,1,0,2],[0,0,1,1],[0,0,0,1]],'lens':76,'ortho_scale':4}
+    (folder/'job.json').write_text(json.dumps({'settings':cfg.to_dict(),'event':'event.json','preview':False}))
+    (folder/'metadata.json').write_text(json.dumps({'event_id':'RUN-PV','camera':pose,'track_legend':{'min':3,'max':29}}));(folder/'render.png').touch()
+    lib=SceneLibrary(tmp_path/'history.sqlite');lib.discover(tmp_path/'renders');lib.discover(tmp_path/'renders')
+    entries=lib.entries();assert len(entries)==1 and entries[0]['event']=='RUN-PV'
+    restored=lib.settings(entries[0]);assert restored.camera_pose==pose and restored.color_ranges['tracks']==[3,29]
+    assert load_config(entries[0]['config'])['defaults']=={}

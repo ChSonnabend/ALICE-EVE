@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy, hashlib, json, math, os, tempfile
 from pathlib import Path
 from dataclasses import fields, replace
+from functools import lru_cache
 from .model import RenderSettings, color_value
 
 SCHEMA='alice-eve-scene'
@@ -12,6 +13,11 @@ SCENE_FIELDS={f.name for f in fields(RenderSettings)}-LOCAL_FIELDS
 QUALITY={'draft':(640,16),'balanced':(1920,128),'final':(3840,512),'publication':(7680,1024)}
 
 def sha256(path):
+    path=Path(path).resolve();stat=path.stat()
+    return _sha256(str(path),stat.st_mtime_ns,stat.st_ctime_ns,stat.st_size)
+
+@lru_cache(maxsize=128)
+def _sha256(path,mtime,ctime,size):
     h=hashlib.sha256()
     with Path(path).open('rb') as stream:
         while block:=stream.read(4<<20):h.update(block)
@@ -23,11 +29,15 @@ def recommended_quality(devices):
     return {'backend':backend,'quality':'balanced' if backend!='CPU' else 'draft',
             'reason':'GPU detected; start at 1080p / 128 samples.' if backend!='CPU' else 'CPU detected; start at 640px / 16 samples. Increase quality after checking memory and timing.'}
 
-def quality_settings(settings, quality='balanced', *, backend='CPU', device='', width=None, height=None, samples=None):
+def quality_settings(settings, quality='balanced', *, backend='CPU', device='', width=None, height=None, samples=None, resolution_percent=None):
     if quality not in QUALITY:raise ValueError('Unknown quality preset')
     default_width,default_samples=QUALITY[quality]
     w=width or default_width
     h=height or max(64,round(w/settings.frame_aspect))
+    if resolution_percent is not None:
+        if width is not None or height is not None:raise ValueError('Choose resolution percentage or explicit width/height')
+        from .resolution import percentage_size
+        w,h=percentage_size(resolution_percent,settings.frame_aspect)
     return replace(settings,width=w,height=h,samples=samples or default_samples,backend=backend,device=device).validate()
 
 def recipe(settings, event=None, *, default_input=None, default_event=None):

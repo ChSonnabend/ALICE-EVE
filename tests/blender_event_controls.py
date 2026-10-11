@@ -20,7 +20,7 @@ with tempfile.TemporaryDirectory(prefix='alice-controls-qa-') as tmp:
         highlight_track_ids=['3'],highlight_track_radius_cm=.6,highlight_cluster_radius_cm=1.5,
         highlight_override_color=False,elevation=90,roll=73)
     job=root/'job.json';job.write_text(json.dumps({'event':str(event),'output':str(root),'settings':cfg.to_dict(),
-        'blender':{'version':list(bpy.app.version),'devices':[{'type':'CPU'}]}}))
+        'library_path':str(root/'history.sqlite'),'blender':{'version':list(bpy.app.version),'devices':[{'type':'CPU'}]}}))
     worker.render(job,True);ui=bpy.context.scene.alice_eve
     tracks=bpy.data.collections['Tracks'].objects
     assert {i for o in tracks for i in json.loads(o['alice_track_ids_json'])}=={'2','3'}
@@ -53,10 +53,22 @@ with tempfile.TemporaryDirectory(prefix='alice-controls-qa-') as tmp:
     assert saved['detector_modes']['ITS']=='clusters' and saved['detector_modes']['TPC']=='both'
     assert saved['highlight_track_ids']==['3'] and saved['palette_lut']==cfg.palette_lut
     assert saved['camera_pose']['matrix_world']==[list(row) for row in camera.matrix_world]
+    editor.save_session()
+    from alice_renderer.scene_library import SceneLibrary
+    library=SceneLibrary(root/'history.sqlite')
+    assert library.entries()[0]['event']=='SYNTHETIC-CONTROLS-QA'
+    assert library.settings(library.entries()[0]).camera_pose['matrix_world']==saved['camera_pose']['matrix_world']
     assert saved['color_ranges']['tracks']==[0.,1.]
     assert bpy.context.preferences.inputs.view_rotate_method=='TRACKBALL'
     assert 'stop' in bpy.ops.alice_eve.pick_tracks.get_rna_type().description.lower()
     ui.picking_active=True
+    # The sidebar overlays WINDOW. A click on Stop must reach the UI handler.
+    window=SimpleNamespace(type='WINDOW',x=0,y=0,width=1000,height=700)
+    sidebar=SimpleNamespace(type='UI',x=750,y=0,width=250,height=700)
+    picking_area=SimpleNamespace(regions=[window,sidebar],spaces=SimpleNamespace(active=SimpleNamespace(show_region_ui=True)))
+    click=SimpleNamespace(type='LEFTMOUSE',value='PRESS',mouse_x=900,mouse_y=100)
+    picker=SimpleNamespace(area=picking_area,region=window)
+    assert editor.PickTracks.modal(picker,bpy.context,click)=={'PASS_THROUGH'}
     assert editor.PickTracks.description(bpy.context,None).startswith('Stop selecting')
     assert 'stop' in bpy.ops.alice_eve.stop_picking.get_rna_type().description.lower()
     assert bpy.ops.alice_eve.stop_picking()=={'FINISHED'}
@@ -76,12 +88,14 @@ with tempfile.TemporaryDirectory(prefix='alice-controls-qa-') as tmp:
     for name in ('TPC','L3'):
         asset=root/(name+'.blend');asset.write_bytes(b'config-contract-only')
         editor.JOB['settings']['geometry_assets'][name]=str(asset)
+        ui.detectors[name].asset_path=str(asset)
     editor.JOB['python']=sys.executable
     original=editor.current_settings().geometry_lods
     with patch.object(editor.subprocess,'Popen') as spawn:
-        assert bpy.ops.alice_eve.render_full(quality='draft',backend='CPU',output=operator.output,
+        assert bpy.ops.alice_eve.render_full(quality='draft',resolution_percent=50,backend='CPU',output=operator.output,
             geometry_details=[{'name':i.name,'detail':i.detail} for i in operator.geometry_details])=={'FINISHED'}
         command=spawn.call_args.args[0]
+        assert float(command[command.index('--resolution-percent')+1])==50
         rendered=json.loads(Path(command[command.index('render-config')+1]).read_text())['scene']
     assert rendered['geometry_lods']=={'TPC':'simplified','L3':'full'}
     assert rendered['geometry_schematics']=={'TPC':False,'L3':False}

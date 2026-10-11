@@ -15,9 +15,14 @@ a=p.parse_args(sys.argv[sys.argv.index('--')+1:])
 with tempfile.TemporaryDirectory(prefix='alice-geometry-qa-') as tmp:
     root=Path(tmp);event=root/'event.json'
     event.write_text(json.dumps({'id':'SYNTHETIC-QA','kind':'synthetic','tracks':[{'id':'1','detectors':['TPC'],'points':[[0,0,0],[20,20,30]],'kinematics':{}}],'clusters':[]}))
-    cfg=RenderSettings(detectors=['TPC'],geometry=['TPC'],geometry_assets={'TPC':str(a.asset.resolve())},geometry_units='m',geometry_lod='full',geometry_openings={'TPC':180},cutaway=False)
+    cfg=RenderSettings(detectors=['TPC'],geometry=[],geometry_assets={'TPC':str(a.asset.resolve())},geometry_units='m',geometry_lod='full',geometry_openings={'TPC':180},cutaway=False)
     job=root/'job.json';job.write_text(json.dumps({'event':str(event),'output':str(root),'settings':cfg.to_dict(),'blender':{'version':list(bpy.app.version),'devices':[{'type':'CPU'}]}}))
     worker.render(job,True);ui=bpy.context.scene.alice_eve;item=ui.detectors.get('TPC')
+    assert item.geometry_available and not item.visible
+    assert bpy.data.collections.get('TPC') is None
+    assert not ui.detectors['TRD'].geometry_available
+    item.visible=True;assert bpy.ops.alice_eve.apply_geometry()=={'FINISHED'}
+    assert 'TPC' in __import__('editor').current_settings().geometry
     assert ui.geometry_lod=='full'
     assert any('num_instances' in o for o in bpy.data.collections['TPC'].objects)
     assert all(o.hide_get() for o in bpy.data.collections['TPC'].objects if o.hide_render)

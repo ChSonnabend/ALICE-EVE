@@ -8,6 +8,7 @@ from alice_renderer.object_selection import parse_track_ids,selected_tracks,sele
 from alice_renderer.palettes import names as palette_names
 from alice_renderer.geometry_selection import is_schematic,render_choices,description as geometry_description
 from alice_renderer.scene_config import recipe, save_config, recommended_quality
+from alice_renderer.resolution import PRESET_PERCENT, percentage_size
 
 JOB=None
 EVENT=None
@@ -30,8 +31,9 @@ def current_settings():
     cfg['frame_aspect']=scene.render.resolution_x/scene.render.resolution_y
     cfg['width']=scene.render.resolution_x;cfg['height']=scene.render.resolution_y
     cfg['geometry']=[];cfg['magnet']=False;cfg['detectors']=[]
-    cfg['detector_modes']={};cfg['geometry_display']={};cfg['geometry_openings']={};cfg['geometry_opacities']={};cfg['colors_linear']={}
+    cfg['detector_modes']={};cfg['geometry_display']={};cfg['geometry_openings']={};cfg['geometry_opacities']={};cfg['colors_linear']={};cfg['geometry_assets']={}
     for item in ui.detectors:
+        if item.asset_path:cfg['geometry_assets'][item.name]=bpy.path.abspath(item.asset_path)
         if item.data and item.data_available:cfg['detectors'].append(item.name)
         if item.visible and item.geometry_available:
             if item.name=='L3':cfg['magnet']=True
@@ -79,6 +81,39 @@ def selection_update(self,context):
         return None
     bpy.app.timers.register(update,first_interval=.2)
 
+def surface_update(self,context):
+    if not JOB:return
+    self.geometry_available=bool(self.asset_path and Path(bpy.path.abspath(self.asset_path)).is_file()) or is_schematic(JOB['settings'],self.name)
+    appearance_update(self,context)
+    if self.visible and self.geometry_available:
+        if JOB.get('geometry_update_pending'):return
+        JOB['geometry_update_pending']=True
+        def update():
+            JOB['geometry_update_pending']=False
+            bpy.ops.alice_eve.apply_geometry()
+        bpy.app.timers.register(update,first_interval=.2)
+
+
+def record_scene(path,kind='interactive',cfg=None):
+    if not JOB.get('library_path'):return
+    from alice_renderer.scene_library import SceneLibrary
+    cfg=cfg or current_settings()
+    SceneLibrary(JOB['library_path']).register(path,kind=kind,input_path=JOB['event'],event=EVENT['id'],assets=cfg.geometry_assets)
+
+
+def save_session():
+    if not JOB or not JOB.get('library_path'):return None
+    try:
+        cfg=current_settings();data=recipe(cfg)
+        signature=json.dumps(data,sort_keys=True)
+        if JOB.get('session_signature')!=signature:
+            path=Path(JOB['output'])/'scene-session.json';save_config(path,data);record_scene(path,cfg=cfg)
+            JOB['session_signature']=signature
+    except Exception as exc:
+        if JOB.get('session_error')!=str(exc):print('Scene history: '+str(exc));JOB['session_error']=str(exc)
+    return 2.
+
+
 def appearance_update(self,context):
     if not JOB or not hasattr(context.scene,'alice_eve'):return
     ui=context.scene.alice_eve
@@ -98,7 +133,7 @@ def appearance_update(self,context):
     for item in ui.detectors:
         coll=bpy.data.collections.get(item.name)
         if coll:
-            coll.hide_render=not item.visible;coll.hide_viewport=not item.visible
+            coll.hide_render=not (item.visible and item.geometry_available);coll.hide_viewport=coll.hide_render
         mats={m for obj in coll.all_objects if obj.type in ('MESH','CURVE') for m in obj.data.materials if m} if coll else set()
         for mat in mats:
             if not mat.use_nodes:continue
@@ -134,11 +169,12 @@ def appearance_update(self,context):
 class DetectorSettings(bpy.types.PropertyGroup):
     data_available: BoolProperty(default=False)
     geometry_available: BoolProperty(default=False)
+    asset_path: StringProperty(name='Aligned geometry asset',subtype='FILE_PATH',update=surface_update)
     event_track_count: IntProperty(default=0)
     event_cluster_count: IntProperty(default=0)
     data: BoolProperty(name='Event data',default=True,update=selection_update)
     mode: EnumProperty(name='Objects',items=[(v,v,'') for v in ('tracks','clusters','both')],update=selection_update)
-    visible: BoolProperty(name='Surface',default=True,update=appearance_update)
+    visible: BoolProperty(name='Surface',default=True,update=surface_update)
     detail: EnumProperty(name='Geometry detail',items=[('inherit','Use scene detail','Use the Geometry detail control above'),('full','Full geometry','Keep aligned detector surfaces'),('simplified','Simplified geometry','Use approximate coarse spatial cells')],default='inherit')
     opening: FloatProperty(name='Opening (degrees)',min=0,max=360,default=0,update=appearance_update)
     opacity: FloatProperty(name='Opacity',min=0,max=1,default=.18,update=appearance_update)
@@ -220,8 +256,10 @@ class ApplyGeometry(bpy.types.Operator):
             for item in context.scene.alice_eve.detectors:
                 if not item.geometry_available:continue
                 old=bpy.data.collections.get(item.name)
-                if old and old.get('alice_display')==item.display and old.get('alice_geometry_lod')==cfg['geometry_lods'].get(item.name,cfg['geometry_lod']) and old.get('alice_schematic',False)==is_schematic(cfg,item.name):continue
-                changed_regions|=bool(old and old.get('alice_schematic',False)!=is_schematic(cfg,item.name))
+                if not item.visible and not old:continue
+                same_asset=is_schematic(cfg,item.name) or old and old.get('alice_asset_path')==str(Path(cfg['geometry_assets'].get(item.name,'')).resolve())
+                if old and same_asset and old.get('alice_display')==item.display and old.get('alice_geometry_lod')==cfg['geometry_lods'].get(item.name,cfg['geometry_lod']) and old.get('alice_schematic',False)==is_schematic(cfg,item.name):continue
+                changed_regions|=bool(old and (not same_asset or old.get('alice_schematic',False)!=is_schematic(cfg,item.name)))
                 if old:remove_owned_collection(old)
                 if is_schematic(cfg,item.name):envelope(item.name,cfg)
                 else:
@@ -252,7 +290,7 @@ class FullAlignedGeometry(bpy.types.Operator):
     def execute(self,context):
         ui=context.scene.alice_eve;ui.geometry_lod='full'
         for item in ui.detectors:
-            if item.geometry_available:item.display='surfaces';item.detail='full'
+            if item.geometry_available and item.visible:item.display='surfaces';item.detail='full'
         return bpy.ops.alice_eve.apply_geometry()
 
 class OpaqueGeometry(bpy.types.Operator):
@@ -313,6 +351,7 @@ class ExportConfig(bpy.types.Operator):
             data=recipe(cfg)
             if ui.include_defaults:data['defaults']={'input':JOB['event'],'event':str(EVENT['id'])}
             save_config(bpy.path.abspath(ui.export_path),data)
+            record_scene(bpy.path.abspath(ui.export_path),kind='export',cfg=cfg)
             self.report({'INFO'},'Portable scene exported');return {'FINISHED'}
         except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
 
@@ -329,22 +368,29 @@ def initialize_render_geometry(operator,cfg):
 def render_geometry_settings(cfg,items):
     return render_choices(cfg,{i.name:i.detail for i in items})
 
+def render_preset_update(self,context):
+    self.resolution_percent=PRESET_PERCENT[self.quality]
+
 class RenderFull(bpy.types.Operator):
     bl_idname='alice_eve.render_full';bl_label='Render full'
     bl_description='Choose image quality and geometry detail for each selected detector and L3, then start a full render'
     geometry_details: CollectionProperty(type=RenderGeometryDetail)
-    quality: EnumProperty(name='Quality',items=[(v,v.title(),'') for v in ('draft','balanced','final','publication','custom')])
+    quality: EnumProperty(name='Sampling preset',items=[(v,v.title(),'') for v in ('draft','balanced','final','publication','custom')],update=render_preset_update)
+    resolution_percent: FloatProperty(name='Resolution (% of 8K)',min=1,max=100,default=25,precision=2,subtype='PERCENTAGE')
     backend: EnumProperty(name='Backend',items=[('AUTO','Recommended','')]+[(v,v,'') for v in ('CPU','METAL','HIP','CUDA','OPTIX')])
-    width: IntProperty(name='Width',default=1920,min=64,max=16384)
     samples: IntProperty(name='Samples',default=128,min=1,max=8192)
     output: StringProperty(name='Output folder',subtype='DIR_PATH')
     def invoke(self,context,event):
-        self.quality=RECOMMENDATION['quality'];self.output=JOB['render_output']
+        self.quality=RECOMMENDATION['quality'];self.resolution_percent=PRESET_PERCENT[self.quality];self.output=JOB['render_output']
         initialize_render_geometry(self,current_settings())
         return context.window_manager.invoke_props_dialog(self,width=480)
     def draw(self,context):
         layout=self.layout;layout.label(text=RECOMMENDATION['reason']);layout.prop(self,'quality');layout.prop(self,'backend')
-        if self.quality=='custom':layout.prop(self,'width');layout.prop(self,'samples')
+        layout.prop(self,'resolution_percent',slider=True)
+        layout.label(text='25% = 1080p · 50% = 4K · 100% = 8K (16:9)')
+        w,h=percentage_size(self.resolution_percent or PRESET_PERCENT[self.quality],current_settings().frame_aspect)
+        layout.label(text=f'{w} × {h} px; retains camera aspect')
+        if self.quality=='custom':layout.prop(self,'samples')
         box=layout.box();box.label(text='Geometry detail for this render')
         cfg=current_settings().to_dict()
         for item in self.geometry_details:
@@ -360,7 +406,7 @@ class RenderFull(bpy.types.Operator):
             if not any(d['type']==backend for d in DEVICES['devices']):raise ValueError(f'{backend} is unavailable. Choose an available backend before rendering.')
             from alice_renderer.runtime import preflight
             from alice_renderer.scene_config import quality_settings
-            check=quality_settings(current_settings(),'balanced' if self.quality=='custom' else self.quality,backend=backend,width=self.width if self.quality=='custom' else None,samples=self.samples if self.quality=='custom' else None)
+            check=quality_settings(current_settings(),'balanced' if self.quality=='custom' else self.quality,backend=backend,samples=self.samples if self.quality=='custom' else None,resolution_percent=self.resolution_percent or PRESET_PERCENT[self.quality])
             check=render_geometry_settings(check,self.geometry_details)
             errors=preflight(check,[EVENT],DEVICES,Path(bpy.path.abspath(self.output)))
             if errors:raise ValueError('\n'.join(errors))
@@ -371,9 +417,11 @@ class RenderFull(bpy.types.Operator):
             # Each subprocess gets an immutable snapshot even if another render
             # starts before it has opened its config. Keep the usual last-config copy.
             path=root/('full-render-config-'+str(time.time_ns())+'.json');save_config(path,data)
-            asset_map=root/'render-assets.local.json';asset_map.write_text(json.dumps(JOB['settings']['geometry_assets']))
+            record_scene(path,kind='render settings',cfg=check)
+            asset_map=root/('render-assets-'+str(time.time_ns())+'.local.json');asset_map.write_text(json.dumps(check.geometry_assets))
             command=[JOB['python'],'-m','alice_renderer.cli','render-config',str(path),'--input',JOB['event'],'--event',str(EVENT['id']),'--assets',str(asset_map),'--blender',bpy.app.binary_path,'--backend',backend,'--quality','balanced' if self.quality=='custom' else self.quality,'--output',bpy.path.abspath(self.output)]
-            if self.quality=='custom':command+=['--width',str(self.width),'--samples',str(self.samples)]
+            command+=['--resolution-percent',str(self.resolution_percent or PRESET_PERCENT[self.quality])]
+            if self.quality=='custom':command+=['--samples',str(self.samples)]
             with (root/'full-render.log').open('w') as log:subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
             self.report({'INFO'},'Full render started; progress in '+str(root/'full-render.log'));return {'FINISHED'}
         except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
@@ -430,6 +478,8 @@ class PickTracks(bpy.types.Operator):
         ui=context.scene.alice_eve
         if not ui.picking_active or event.type=='ESC':return self.finish(context)
         if event.type=='LEFTMOUSE' and event.value=='PRESS':
+            from alice_renderer.picking import inside_viewport
+            if not inside_viewport(self.area,self.region,event.mouse_x,event.mouse_y):return {'PASS_THROUGH'}
             x=event.mouse_x-self.region.x;y=event.mouse_y-self.region.y
             if not 0<=x<self.region.width or not 0<=y<self.region.height:return {'PASS_THROUGH'}
             id_=pick_displayed_track(self.area,self.region,(x,y))
@@ -479,6 +529,8 @@ class EVEPanel(bpy.types.Panel):
             box=layout.box();box.label(text=f'{item.name}: {item.event_track_count} tracks / {item.event_cluster_count} clusters' if item.data_available else item.name)
             row=box.row();row.enabled=item.data_available;row.prop(item,'data');row.prop(item,'mode')
             row=box.row();row.enabled=item.geometry_available;row.prop(item,'visible')
+            box.prop(item,'asset_path')
+            if not item.geometry_available:box.label(text='Choose an aligned asset to add this surface')
             if item.geometry_available:
                 kind='aligned' if item.detail!='inherit' else 'schematic' if is_schematic(JOB['settings'],item.name) else 'aligned'
                 box.label(text='Geometry source: '+kind)
@@ -515,7 +567,7 @@ def start_editor(job,event,metadata):
     counts=event_counts(event);track_counts=counts['tracks_by_detector'];cluster_counts=counts['clusters_by_detector']
     from alice_renderer.model import DETECTORS
     for name in (*DETECTORS,'L3'):
-        item=ui.detectors.add();item.name=name;item.data_available=name in available;item.data=name in settings['detectors'];item.mode=settings.get('detector_modes',{}).get(name,settings['mode']);item.geometry_available=name in settings['geometry'] or name=='L3' and settings['magnet'];item.visible=item.geometry_available
+        item=ui.detectors.add();item.name=name;item.data_available=name in available;item.data=name in settings['detectors'];item.mode=settings.get('detector_modes',{}).get(name,settings['mode']);item.asset_path=settings.get('geometry_assets',{}).get(name,'');item.geometry_available=bool(item.asset_path and Path(item.asset_path).is_file()) or is_schematic(settings,name);item.visible=name in settings['geometry'] or name=='L3' and settings['magnet']
         item.display=settings.get('geometry_display',{}).get(name,'surfaces')
         item.detail='inherit' if is_schematic(settings,name) else settings.get('geometry_lods',{}).get(name,'inherit')
         item.event_track_count=track_counts.get(name,0);item.event_cluster_count=cluster_counts.get(name,0)
@@ -535,3 +587,5 @@ def start_editor(job,event,metadata):
     for obj in scene.objects:obj.select_set(False)
     scene.camera.select_set(True)
     bpy.ops.wm.save_as_mainfile(filepath=str(Path(job['output'])/'interactive.blend'))
+    if job.get('library_path'):
+        save_session();bpy.app.timers.register(save_session,first_interval=2.)

@@ -1,6 +1,16 @@
 """Screen-space picking of displayed polylines, independent of Blender UI state."""
 import numpy as np
 
+def inside_viewport(area,region,x,y):
+    if not region.x<=x<region.x+region.width or not region.y<=y<region.y+region.height:return False
+    space=area.spaces.active
+    for overlay in area.regions:
+        if overlay.type=='WINDOW':continue
+        if overlay.type=='UI' and not getattr(space,'show_region_ui',True):continue
+        if overlay.type=='TOOLS' and not getattr(space,'show_region_toolbar',True):continue
+        if overlay.width>0 and overlay.height>0 and overlay.x<=x<overlay.x+overlay.width and overlay.y<=y<overlay.y+overlay.height:return False
+    return True
+
 
 def projected_hit(mouse,points,matrix,width,height,tolerance=10.):
     points=np.asarray(points,dtype=float)
