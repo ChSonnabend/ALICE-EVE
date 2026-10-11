@@ -66,6 +66,14 @@ def recipe(settings, event=None, *, default_input=None, default_event=None):
         value=settings.geometry_assets.get(name)
         if not value or not Path(value).is_file():raise ValueError(f'{name}: provide geometry before exporting a portable scene')
         refs[name]={'file':Path(value).name,'sha256':sha256(value)}
+        from .geometry_components import load_components,sidecar_path
+        component_data=load_components(value)
+        if component_data:
+            component_file=sidecar_path(value)
+            refs[name]['components']={'file':component_file.name,'sha256':sha256(component_file)}
+            unknown=set(settings.geometry_components.get(name,{}))-set(component_data['components'])
+            if unknown:raise ValueError(name+': unknown geometry components: '+', '.join(sorted(unknown)))
+        elif settings.geometry_components.get(name):raise ValueError(name+': component metadata is missing')
     defaults={}
     if default_input is not None:defaults['input']=str(default_input)
     if default_event is not None:defaults['event']=str(default_event)
@@ -79,7 +87,10 @@ def validate_recipe(data):
     refs=data.get('geometry',{})
     if not isinstance(refs,dict):raise ValueError('Invalid geometry references')
     for name,ref in refs.items():
-        if not isinstance(ref,dict) or Path(ref.get('file','')).name!=ref.get('file') or not ref.get('file') or not isinstance(ref.get('sha256'),str) or len(ref['sha256'])!=64:raise ValueError(f'{name}: invalid geometry reference')
+        if not isinstance(ref,dict) or not isinstance(ref.get('file'),str) or Path(ref['file']).name!=ref['file'] or not ref['file'] or not isinstance(ref.get('sha256'),str) or len(ref['sha256'])!=64:raise ValueError(f'{name}: invalid geometry reference')
+        if 'components' in ref:
+            entry=ref['components']
+            if not isinstance(entry,dict) or not isinstance(entry.get('file'),str) or not entry['file'] or Path(entry['file']).name!=entry['file'] or not isinstance(entry.get('sha256'),str) or len(entry['sha256'])!=64:raise ValueError('Invalid geometry component reference')
     defaults=data.get('defaults',{})
     if not isinstance(defaults,dict) or set(defaults)-{'input','event'}:raise ValueError('Invalid input defaults')
     return data
@@ -103,6 +114,10 @@ def resolve_settings(data,config_path,geometry_root=None,asset_overrides=None):
         path=Path(overrides[name]) if name in overrides else roots[0]/ref['file']
         if not path.is_file():raise ValueError(f'{name}: geometry {ref["file"]} missing. Copy the geometry bundle or supply --geometry-root.')
         if sha256(path)!=ref['sha256']:raise ValueError(f'{name}: geometry hash differs from exported scene; use the identical alignment/surfaces bundle')
+        if 'components' in ref:
+            from .geometry_components import sidecar_path
+            component_file=sidecar_path(path);component_ref=ref['components']
+            if not component_file.is_file() or sha256(component_file)!=component_ref['sha256']:raise ValueError(name+': copy the identical geometry component metadata alongside the asset')
         assets[name]=str(path.resolve())
     # A schematic recipe has no required assets. Keep explicitly supplied local
     # assets available when it is reopened and upgraded to aligned rendering.

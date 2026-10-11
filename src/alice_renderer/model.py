@@ -55,6 +55,9 @@ def validate_event(raw: dict) -> dict:
         if len(track['points'])<2: raise ValueError("A track needs at least two sampled points")
         if 'matching' in track and (not isinstance(track['matching'],bool) or not track.get('matching_basis')):raise ValueError('Matching status requires a boolean and matching_basis')
         track['kinematics'] = kinematics(track.get('kinematics',{}))
+        if 'features' in track:
+            if not isinstance(track['features'],dict):raise ValueError('Track features must be a numeric mapping')
+            track['features']={str(k):v for k,v in track['features'].items() if isinstance(v,(int,float)) and math.isfinite(v)}
         if 'classification' in track and track['classification'] not in ('primary','secondary','unknown'):
             raise ValueError("Unsupported track classification")
         if track.get('classification') in ('primary','secondary') and not track.get('classification_basis'):
@@ -81,6 +84,7 @@ def validate_event(raw: dict) -> dict:
     return annotate_matching(event)
 
 def color_value(obj: dict, mode: str, position: list[float] | None = None) -> float | None:
+    if mode.startswith('feature:'):return obj.get('features',{}).get(mode.removeprefix('feature:'))
     if mode == 'matching':
         from .object_selection import matching_value
         return matching_value(obj)
@@ -96,7 +100,8 @@ def color_value(obj: dict, mode: str, position: list[float] | None = None) -> fl
     return obj.get('kinematics',{}).get(mode)
 
 def capabilities(objects: list[dict]) -> list[str]:
-    return ['solid'] + [m for m in COLOR_FIELDS[1:] if any(color_value(o,m) is not None for o in objects)]
+    extra=sorted({'feature:'+k for o in objects for k,v in o.get('features',{}).items() if isinstance(v,(int,float)) and math.isfinite(v)})
+    return ['solid'] + [m for m in COLOR_FIELDS[1:] if any(color_value(o,m) is not None for o in objects)]+extra
 
 @dataclass
 class RenderSettings:
@@ -155,6 +160,7 @@ class RenderSettings:
     geometry_openings: dict = field(default_factory=dict)
     geometry_opening_directions: dict = field(default_factory=dict)
     geometry_exclusions: dict = field(default_factory=dict)
+    geometry_components: dict = field(default_factory=dict)
     geometry_inner_masks: dict = field(default_factory=dict)
     geometry_opacities: dict = field(default_factory=dict)
     roughness: float = .38
@@ -183,7 +189,7 @@ class RenderSettings:
         if not 64<=self.width<=16384 or not 64<=self.height<=16384: raise ValueError('Resolution must be 64–16384 pixels')
         if not 1<=self.samples<=8192: raise ValueError('Samples must be 1–8192')
         if not 0<=self.geometry_opacity<=1: raise ValueError('Opacity must be between zero and one')
-        if self.track_color_mode not in COLOR_FIELDS or self.cluster_color_mode not in COLOR_FIELDS: raise ValueError('Invalid colour mode')
+        if any(m not in COLOR_FIELDS and not re.fullmatch(r'feature:[a-z][a-z0-9_]*',m) for m in (self.track_color_mode,self.cluster_color_mode)): raise ValueError('Invalid colour mode')
         if self.scale_min is not None and self.scale_max is not None and self.scale_min>=self.scale_max: raise ValueError('Colour minimum must be less than maximum')
         if self.geometry_units not in ('cm','m'): raise ValueError('Geometry units must be cm or m')
         if self.camera not in ('perspective','orthographic'):raise ValueError('Invalid camera type')
@@ -235,6 +241,9 @@ class RenderSettings:
         for name,patterns in self.geometry_exclusions.items():
             if name!='L3':detector(name)
             if not isinstance(patterns,list) or any(not isinstance(p,str) or not p.strip() or len(p)>1024 for p in patterns):raise ValueError('Geometry exclusions must be a list of nonempty name patterns')
+        for name,choices in self.geometry_components.items():
+            if name!='L3':detector(name)
+            if not isinstance(choices,dict) or any(not isinstance(k,str) or not k or not isinstance(v,bool) for k,v in choices.items()):raise ValueError('Invalid detector component visibility choices')
         for name,rule in self.geometry_inner_masks.items():
             if name!='L3':detector(name)
             if not isinstance(rule,dict) or set(rule)-{'patterns','radius_m','front_only'}:raise ValueError('Invalid inner geometry mask')

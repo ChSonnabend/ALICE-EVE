@@ -24,17 +24,21 @@ def main():
         command.add_argument('--blender',default=find_blender());command.add_argument('--backend',default='AUTO',choices=['AUTO','CPU','METAL','HIP','CUDA','OPTIX']);command.add_argument('--device',default='')
         command.add_argument('--quality',default='balanced',choices=['draft','balanced','final','publication']);command.add_argument('--width',type=int);command.add_argument('--height',type=int);command.add_argument('--samples',type=int)
         command.add_argument('--resolution-percent',type=float,help='Linear percentage of the 7680x4320 8K canvas; 25=1080p, 50=4K, 100=8K at 16:9')
+    for command in (sub.choices['index'],sub.choices['render-config'],sub.choices['edit-config']):
+        command.add_argument('--aod-conditions',type=Path,help='AO2D run-to-field conditions JSON (adjacent .renderer.json is automatic)')
+        command.add_argument('--aod-bz-kG',type=float,help='Explicit signed constant solenoid field in kG for AO2D fitted-state projections')
     args=parser.parse_args()
+    aod_options={'conditions':str(args.aod_conditions) if getattr(args,'aod_conditions',None) else None,'bz_kG':getattr(args,'aod_bz_kG',None)}
     try:
         if args.command=='inspect':print(json.dumps(inspect_input(args.input).__dict__,indent=2))
         elif args.command=='demo':print(generate(args.output))
         elif args.command=='devices':print(json.dumps(probe(args.blender),indent=2))
         elif args.command=='index':
             info=inspect_input(args.input);source=args.input
-            if info.format!='events':
+            if info.format not in ('events','aod'):
                 if not args.profile:raise ValueError('TF/CTF requires a configured O2 ingestion profile before collision events can be listed; see docs/O2-INTEGRATION.md')
                 source=run_ingest_profile(source,args.profile,args.cache,progress=print)
-            cat=Catalogue.build(source,args.cache,convert=convert,progress=print)
+            cat=Catalogue.build(source,args.cache,convert=convert,progress=print,aod_options=aod_options)
             print(cat.folder)
             for row in cat.rows():print(json.dumps(row))
         elif args.command in ('render-config','edit-config'):
@@ -48,10 +52,10 @@ def main():
             backend=recommendation['backend'] if args.backend=='AUTO' else args.backend
             cfg=quality_settings(cfg,args.quality,backend=backend,device=args.device,width=args.width,height=args.height,samples=args.samples,resolution_percent=args.resolution_percent)
             info=inspect_input(source)
-            if info.format!='events':
+            if info.format not in ('events','aod'):
                 if not args.profile:raise ValueError('Raw TF/CTF requires --profile for O2 collision extraction; exported events render directly')
                 source=run_ingest_profile(source,args.profile,args.cache,progress=print)
-            cat=Catalogue.build(source,args.cache,convert=convert,progress=print)
+            cat=Catalogue.build(source,args.cache,convert=convert,progress=print,aod_options=aod_options)
             event_path=choose_event(cat,selector)
             print('Recommended: '+recommendation['reason'])
             if args.command=='edit-config':print(launch_editor(args.blender,event_path,cfg,args.output)[0])

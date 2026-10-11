@@ -51,3 +51,21 @@ O2 runs inside the user-provided Virgo allocation **16999956**, on **ccwks0001**
 Only the project and its isolated remote work directory are modified. Original TF/CTF inputs, the old renderer and O2 checkouts remain unchanged. Conditions are checked from the generated workflow and pinned through the public CCDB HTTP cache. This is rendering validation, not certification of a production reconstruction pass.
 
 The user authorized dropping the unreliable helper. Current source inspection and QA are performed directly, without helper-session dependence.
+
+## AO2D and geometry component update
+
+The supplied AO2D on Virgo (job 17012652) was checked directly with loaded O2.
+Its 90 dataframes contain 30,957 collision rows, run 572669. The importer recovered
+all 5,248 associated source fits for collision 0 and all 10 for collision 68; no
+orphan fit was assigned to a collision. Field conditions were retrieved through
+CCDB's official HTTP alternatives (nominal −5 kG). Native O2 numeric checks covered
+100 real barrel states; constant-field propagation agreed within 3.3 micrometres
+over a 5 cm local-X step. AO2D paths remain explicitly approximate fit projections
+without material corrections, measured clusters or forward dipole transport.
+
+Component indices were verified against every original placement in all 16
+run-560067 aligned assets (including L3), without modifying any `.blend`. Qt and
+Blender checks exercise shared ITS layer prototypes, TPC inner walls, mask
+restoration, simplified geometry, AO2D feature colouring and portable export.
+These geometry assets are not presented as run-572669 alignment. See
+[AO2D](AO2D.md) and [components](SCENE-CONFIG.md#detector-component-categories).

@@ -27,7 +27,9 @@ def simplify(objects,collection,name):
         else:
             corners=np.array([tuple(obj.matrix_world@__import__('mathutils').Vector(c)) for c in obj.bound_box])
             positions.append((obj,None,corners,None))
-    if not positions:raise ValueError(name+': no visible geometry to simplify')
+    if not positions:
+        for obj in objects:obj.hide_render=True;obj.hide_set(True)
+        return [],{'approximate':True,'cells':0,'source_instances':0}
     global_positions=[a@np.array(o.matrix_world)[:3,:3].T+np.array(o.matrix_world)[:3,3] if po is not None else a for o,po,a,_ in positions]
     zmin=min(float(a[:,2].min()) for a in global_positions);zmax=max(float(a[:,2].max()) for a in global_positions)
     rmax=max(float(np.hypot(a[:,0],a[:,1]).max()) for a in global_positions)

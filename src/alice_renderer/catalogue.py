@@ -56,8 +56,11 @@ class Catalogue:
         if not self.db.is_file(): raise ValueError('No completed event catalogue')
 
     @classmethod
-    def build(cls, source: Path, cache: Path, *, convert=None, progress=lambda s:None, cancelled=lambda:False):
+    def build(cls, source: Path, cache: Path, *, convert=None, progress=lambda s:None, cancelled=lambda:False,aod_options=None):
         source,cache = Path(source),Path(cache)
+        if source.suffix.lower()=='.root':
+            from .aod import build_catalogue
+            return build_catalogue(source,cache,options=aod_options,progress=progress,cancelled=cancelled)
         if source.is_dir() and (source/'manifest.json').is_file():
             manifest=json.loads((source/'manifest.json').read_text())
             name=manifest.get('events_file','events.jsonl')
@@ -103,6 +106,7 @@ class Catalogue:
         with sqlite3.connect(self.db) as db:
             db.row_factory=sqlite3.Row
             rows=[dict(row) for row in db.execute('SELECT * FROM events ORDER BY ordinal')]
+            if db.execute("SELECT value FROM metadata WHERE key='aod_version'").fetchone():return rows
         # Older catalogues lack the new matching capability. Inspect only a small
         # track prefix, preserving the already validated payloads and index.
         from .object_selection import matching_value
@@ -127,11 +131,15 @@ class Catalogue:
                     if count>=7:break
         return rows
 
-    def event_path(self, ordinal: int) -> Path:
+    def event_path(self, ordinal: int,*,progress=lambda s:None,cancelled=lambda:False) -> Path:
         with sqlite3.connect(self.db) as db:
             row=db.execute('SELECT filename FROM events WHERE ordinal=?',(int(ordinal),)).fetchone()
             if not row: raise KeyError(ordinal)
-            return self.folder/row[0]
+            path=self.folder/row[0]
+            if db.execute("SELECT value FROM metadata WHERE key='aod_version'").fetchone():
+                from .aod import materialize
+                return materialize(self,int(ordinal),progress=progress,cancelled=cancelled)
+            return path
 
     def load(self, ordinal: int) -> dict:
         return load_event(self.event_path(ordinal))

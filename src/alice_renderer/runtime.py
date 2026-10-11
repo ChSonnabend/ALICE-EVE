@@ -75,6 +75,16 @@ def preflight(settings: RenderSettings, events, devices: dict, output: Path) -> 
             asset=settings.geometry_assets.get(name,'')
             if not asset or not Path(asset).is_file(): errors.append(f'{name}: provide detector geometry (.glb, .gltf, .obj, .blend), or explicitly select schematic envelopes')
             elif Path(asset).suffix.lower() not in ('.glb','.gltf','.obj','.blend'): errors.append(f'{name}: unsupported geometry format')
+    from .geometry_components import load_components
+    for name,choices in settings.geometry_components.items():
+        if not choices or name not in settings.geometry+(['L3'] if settings.magnet else []):continue
+        try:
+            if is_schematic(values,name):raise ValueError('Component choices require aligned full/simplified geometry')
+            metadata=load_components(settings.geometry_assets.get(name,''))
+            if not metadata:raise ValueError('Detector hierarchy metadata is missing')
+            unknown=set(choices)-set(metadata['components'])
+            if unknown:raise ValueError('Unknown components: '+', '.join(sorted(unknown)))
+        except (OSError,ValueError) as exc:errors.append(name+': '+str(exc))
     output=Path(output)
     try:
         output.mkdir(parents=True,exist_ok=True)

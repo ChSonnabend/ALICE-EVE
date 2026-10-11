@@ -21,7 +21,10 @@ PATTERNS={
 def main():
     p=argparse.ArgumentParser();p.add_argument('--input',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
     p.add_argument('--converter',type=Path,required=True);p.add_argument('--detail',choices=['surfaces','leaves'],default='surfaces');p.add_argument('--run',type=int,required=True)
+    p.add_argument('--components-only',action='store_true',help='Write compact placement component indices instead of full surface JSON')
     a=p.parse_args();sys.path.insert(0,str(a.converter.resolve()))
+    sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src'))
+    from alice_renderer.geometry_components import tags_for,index_from_export
     import ROOT
     from ROOTshapes import convertTGeo2Param
     from ROOThelpers import from_tgeomatrix
@@ -46,7 +49,8 @@ def main():
             if key not in groups[detector]:
                 groups[detector][key]=dict(shape=serialized,positions=[],name=volume.GetName())
             position=from_tgeomatrix(matrix)
-            groups[detector][key]['positions'].append(dict(translation=asdict(position.tra),rotation=asdict(position.rot)))
+            translation=asdict(position.tra)
+            groups[detector][key]['positions'].append(dict(translation=translation,rotation=asdict(position.rot),source_path=path,component_tags=tags_for(detector,path,volume.GetName(),translation)))
             counts[detector]+=1
             return
         if volume.GetNodes():
@@ -72,6 +76,13 @@ def main():
                   coordinates='ALICE global XYZ',units='cm',detail=a.detail,detectors={})
     for detector,items in groups.items():
         data={f'{item["name"]}-{i}':dict(shape=item['shape'],positions=item['positions'],num_instances=len(item['positions'])) for i,item in enumerate(items.values())}
+        if a.components_only:
+            import gzip
+            component_index=index_from_export(data,detector,digest)
+            with gzip.open(a.output/(detector+'.component-index.json.gz'),'wt') as file:
+                json.dump(component_index,file,separators=(',',':'))
+            print(detector+': component ancestry indexed',flush=True)
+            continue
         path=a.output/(detector+'.json');path.write_text(json.dumps(data,separators=(',',':'),allow_nan=False))
         digest_json=hashlib.sha256()
         with path.open('rb') as stream:

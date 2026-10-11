@@ -68,7 +68,7 @@ def test_ctf_header_is_not_collision_count(tmp_path):
 
 def test_unreadable_root_fails_before_processing(tmp_path):
     path=tmp_path/'bad.root';path.write_bytes(b'incomplete')
-    with pytest.raises(ValueError,match='Cannot read CTF header'):inspect_input(path)
+    with pytest.raises(ValueError,match='Cannot inspect ROOT input'):inspect_input(path)
 
 def test_backend_and_geometry_preflight(tmp_path):
     cfg=RenderSettings(detectors=['TPC'],backend='HIP',geometry=['TPC'])

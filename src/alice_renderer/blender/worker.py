@@ -223,7 +223,10 @@ def imported_geometry(name,path,settings,bounds_only=False):
     path=Path(path);before=set(bpy.data.objects)
     collection_name=name+' — clipping bounds' if bounds_only else name
     if path.suffix=='.blend':
-        with bpy.data.libraries.load(str(path),link=False) as (source,target):target.objects=source.objects
+        with bpy.data.libraries.load(str(path),link=False) as (source,target):
+            source_names=list(source.objects);target.objects=list(source_names)
+        for original,obj in zip(source_names,target.objects):
+            if obj:obj['alice_source_name']=original
         coll=collection(collection_name)
         for obj in target.objects:
             if obj:coll.objects.link(obj)
@@ -269,31 +272,36 @@ def imported_geometry(name,path,settings,bounds_only=False):
     inner_removed={}
     excluded=[]
     for obj in objects:
-        obj['alice_geometry_excluded']=any(fnmatchcase(obj.name,p) for p in patterns)
+        obj['alice_geometry_excluded']=any(fnmatchcase(obj.get('alice_source_name',obj.name),p) for p in patterns)
         if obj['alice_geometry_excluded']:
             excluded.append(obj.name);obj.hide_render=True;obj.hide_set(True)
     # Instancer groups can contain both inner and outer cage placements. Mask
     # by global placement origin; never discard an entire mixed-radius group.
-    inner_keep={}
+    from components import apply_components,set_selection
+    choices=settings.get('geometry_components',{}).get(name,{})
+    coll['alice_components']=json.dumps(choices,sort_keys=True)
+    inner_keep,component_overrides,component_info=apply_components(objects,path,choices)
     phi=math.radians(settings.get('geometry_opening_directions',{}).get(name,-90.))
     coll['alice_inner_direction']=math.degrees(phi)
     toward=Vector((math.cos(phi),math.sin(phi),0))
     for obj in objects:
-        if 'num_instances' not in obj or obj.hide_render or not any(fnmatchcase(obj.name,p) for p in inner_rule.get('patterns',[])):continue
+        if 'num_instances' not in obj or obj.hide_render or not any(fnmatchcase(obj.get('alice_source_name',obj.name),p) for p in inner_rule.get('patterns',[])):continue
         group=obj.modifiers['GeometryNodes'].node_group
         instance=next(n for n in group.nodes if n.bl_idname=='GeometryNodeInstanceOnPoints')
         points_object=instance.inputs['Points'].links[0].from_node.inputs['Object'].default_value
         points=points_object.data
         keep=[]
-        for point in points.vertices:
+        allowed_mask=inner_keep.get(obj.name);explicit_mask=component_overrides.get(obj.name)
+        for i,point in enumerate(points.vertices):
             global_origin=obj.matrix_world@point.co
             inner=math.hypot(global_origin.x,global_origin.y)<inner_rule['radius_m']
             front=not inner_rule.get('front_only',True) or global_origin.dot(toward)>0
-            keep.append(not (inner and front))
+            allowed=allowed_mask[i] if allowed_mask is not None else True
+            explicit=explicit_mask[i] if explicit_mask is not None else False
+            keep.append(allowed and (explicit or not (inner and front)))
         inner_keep[obj.name]=keep;inner_removed[obj.name]=len(keep)-sum(keep)
-        attribute=points.attributes.new('alice_inner_mask_keep','BOOLEAN','POINT');attribute.data.foreach_set('value',keep)
-        selection=group.nodes.new('GeometryNodeInputNamedAttribute');selection.data_type='BOOLEAN';selection.inputs['Name'].default_value='alice_inner_mask_keep'
-        group.links.new(selection.outputs['Attribute'],instance.inputs['Selection'])
+    for obj in objects:
+        if obj.name in inner_keep:set_selection(obj,inner_keep[obj.name])
     lod={}
     detail=settings.get('geometry_lods',{}).get(name,settings.get('geometry_lod','full'))
     style=settings.get('geometry_display',{}).get(name,'surfaces')
@@ -303,7 +311,7 @@ def imported_geometry(name,path,settings,bounds_only=False):
     if detail=='simplified' or style!='surfaces':
         from simplified import simplify
         objects,lod=simplify(objects,coll,name);meshes=objects
-    if style!='surfaces':
+    if style!='surfaces' and objects:
         from geometry_display import display_geometry
         objects,display_info=display_geometry(objects,coll,name,style);lod.update(display_info);meshes=objects
     mat=materials(name,settings.get('colors_linear',{}).get('magnet' if name=='L3' else name,rgb(settings['colors']['magnet' if name=='L3' else name])),settings.get('geometry_opacities',{}).get(name,settings['geometry_opacity']),settings=settings)
@@ -367,7 +375,7 @@ def imported_geometry(name,path,settings,bounds_only=False):
             from mathutils import Matrix
             mesh=obj.data.copy();clip_mesh(mesh,obj.matrix_world)
             obj.data=mesh;obj.parent=None;obj.matrix_world=Matrix.Identity(4)
-    return {'lod':detail,'requested_detail':detail,'display':style,**lod,'track_region':track_region,'meshes':len(meshes),'excluded_objects':excluded,'exclusion_patterns':patterns,'inner_mask':inner_rule,'inner_masked_instances':inner_removed,'opening_direction_degrees':opening_direction,'cutaway_crossing_instances':crossing_count,
+    return {'lod':detail,'requested_detail':detail,'display':style,**lod,'track_region':track_region,'meshes':len(meshes),'excluded_objects':excluded,'exclusion_patterns':patterns,'components':component_info,'inner_mask':inner_rule,'inner_masked_instances':inner_removed,'opening_direction_degrees':opening_direction,'cutaway_crossing_instances':crossing_count,
             'cutaway_discarded_instances':discarded_count,
             'cutaway_method':('ALICE global Y>=0 mesh clipping' if opening_direction==-90 else 'ALICE global oriented plane clipping') if physical_cut else 'shader wedge' if name in settings.get('geometry_openings',{}) else 'none'}
 

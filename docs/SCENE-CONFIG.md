@@ -113,3 +113,58 @@ Full and simplified aligned rendering honour the selection. Metadata records
 the rules and removed placement counts; original detector bounds still govern
 track clipping. Generic merged meshes lack individual placements, so this
 control applies to instanced assets.
+
+## Detector component categories
+
+Desktop **Components** has a detector selector and a checkable hierarchy. In
+Blender, expand **Detector components**, choose Layers, Structures, Modules or
+Named elements, and use the search field for fine-grained elements. Clicking a
+component applies its surface selection immediately. More than 200 named
+entries require a filter to keep the sidebar manageable. A mixed parent click
+shows all its children; clicking an enabled parent hides them. Reset component
+choices in the desktop restores the recipe's legacy masks.
+
+ITS exposes layers 0–6, sensors, supports, cooling, electronics, cage and services.
+TPC exposes inner/outer walls and shields, inner/outer field-cage rods/rings,
+readout chambers, central electrode and supports. Other systems expose their
+available named elements and hierarchy-derived modules/sectors/chambers; MFT
+has disks 0–4. Layer/module membership comes from original TGeo ancestry.
+Structural labels group native element names; the complete native named-element
+category remains available when a coarser label is unsuitable. TPC inner/outer
+rods are separated by their aligned placement radius. An object prototype shared
+across several layers never forces those layers to share a visibility setting.
+
+Recipes store `geometry_components`, for example:
+
+```json
+{"geometry_components":{"ITS":{"layers/layer_4":false},"TPC":{"structures/inner_wall":false,"structures/supports":false}}}
+```
+
+A false ancestor vetoes descendants. A parent toggle clears older child choices.
+Explicit true restores the requested placements even if older object-name or
+inner-placement masks hid them; angular openings still apply. Component choices
+change displayed surfaces, not detector data availability or complete aligned
+track-clipping bounds. Full and simplified aligned views, final physical cutaways
+and exported recipes all honour the same placement selection. Schematics have
+no real detector subcomponents and cannot apply these choices.
+
+A geometry bundle now includes `<detector>.blend.components.json.gz` beside each
+asset. The sidecar is bound to the asset SHA-256 and each instancer's ordered
+float32 positions. Portable recipes include its hash; transfer it alongside the
+asset. Missing, changed or incompatible metadata stops before rendering.
+Existing configs without component choices/references continue to load.
+
+New aligned exports retain TGeo hierarchy tags, and `tools/build_geometry_asset.py`
+automatically builds sidecars. For an existing asset, re-export the original
+aligned ROOT hierarchy with `tools/export_aligned_geometry.py --components-only`
+and the normal input/output/converter/run arguments, then verify bindings without
+changing the `.blend`:
+
+```sh
+blender -b --factory-startup --python-exit-code 1 \
+  --python tools/bind_geometry_components.py -- \
+  --indices /local/component-indices --assets /local/aligned-bundle
+```
+
+A previously merged GLB/OBJ with no hierarchy cannot supply independent original
+layers; re-export the original TGeo hierarchy as instanced assets first.

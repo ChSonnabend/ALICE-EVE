@@ -21,7 +21,7 @@ def main():
     cpus=str(cpu_count);root=config['work_directory'].rstrip('/')
     token=uuid.uuid4().hex;remote_request=f'{root}/runs/request-{token}.json'
     remote_worker=f'{root}/src/o2_remote_worker.py'
-    data={'environment':root+'/environment.json','argv':argv,'cwd':args.cwd or f'{root}/runs/job-{token}'}
+    data={'environment':config.get('environment',root+'/environment.json'),'argv':argv,'cwd':args.cwd or f'{root}/runs/job-{token}'}
     args.log.parent.mkdir(parents=True,exist_ok=True)
     args.log.unlink(missing_ok=True)
     connection=['ssh','-o','BatchMode=yes',host]

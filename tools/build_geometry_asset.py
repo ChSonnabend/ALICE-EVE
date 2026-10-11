@@ -11,6 +11,7 @@ def main():
     p.add_argument('--output',type=Path,required=True);p.add_argument('--detector',required=True)
     p.add_argument('--converter',type=Path,required=True)
     a=p.parse_args(sys.argv[sys.argv.index('--')+1:])
+    sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src'))
     sys.path.insert(0,str(a.converter.resolve()))
     import bpy
     from mathutils import Euler, Matrix, Vector
@@ -113,6 +114,11 @@ def main():
                 max_rotation_error=max_rotation_error,source_sha256=hashlib.sha256(a.input.read_bytes()).hexdigest(),
                 generator_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
     a.output.with_suffix('.qa.json').write_text(json.dumps(report,indent=2))
+    if all('component_tags' in placement for item in data.values() for placement in item['positions']):
+        from alice_renderer.geometry_components import index_from_export,sidecar_path
+        component_index=index_from_export(data,a.detector,report['source_sha256'])
+        component_index['asset_sha256']=hashlib.sha256(a.output.read_bytes()).hexdigest()
+        with gzip.open(sidecar_path(a.output),'wt') as stream:json.dump(component_index,stream,separators=(',',':'))
     print(json.dumps(report))
 
 if __name__=='__main__':main()

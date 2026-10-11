@@ -34,8 +34,14 @@ def inspect_input(path: Path, *, cancelled=lambda:False) -> InputInfo:
     try:
         import uproot
         with uproot.open(path,object_cache=None,array_cache=None) as file:
+            if any(k.startswith('DF_') for k in file.keys(cycle=False,recursive=False)):
+                from .aod import inspect
+                records=inspect(path)
+                after=path.stat()
+                if (before.st_size,before.st_mtime_ns)!=(after.st_size,after.st_mtime_ns):raise ValueError('AO2D is still changing; wait for copying to finish')
+                return InputInfo(str(path),'aod',None,[],['AO2D dataframes are containers, not hardware timeframes. Collision tables define events. Track-attached space-point arrays are not stored.'],records)
             matches=[k for k in file.keys(cycle=False) if k.lower()=='ctf']
-            if not matches: raise ValueError('ROOT file does not contain a CTF tree; export reconstructed data to event JSON instead')
+            if not matches: raise ValueError('ROOT file contains neither AO2D collision tables nor a CTF tree')
             tree=file[matches[0]]
             branches=tree.keys(recursive=False)
             detectors=sorted({d for d in DETECTORS if any(k.startswith(d+'_') or k.rstrip('.')==d for k in branches)})
@@ -52,7 +58,7 @@ def inspect_input(path: Path, *, cancelled=lambda:False) -> InputInfo:
             result.warnings.append('CTF entries are timeframes; reconstructed primary vertices define collision events.')
             if not detectors: result.warnings.append('Detector branches not recognized; O2 must inspect the detector mask.')
     except Exception as exc:
-        raise ValueError(f'Cannot read CTF header. File may be incomplete, corrupt or unsupported: {exc}') from exc
+        raise ValueError(f'Cannot inspect ROOT input. File may be incomplete, corrupt or unsupported: {exc}') from exc
     after=path.stat()
     if (before.st_size,before.st_mtime_ns)!=(after.st_size,after.st_mtime_ns): raise ValueError('Input is still changing; wait for the download/copy to finish')
     return result

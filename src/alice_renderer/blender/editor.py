@@ -34,7 +34,7 @@ def current_settings():
     cfg['geometry']=[];cfg['magnet']=False;cfg['detectors']=[]
     cfg['detector_modes']={};cfg['geometry_display']={};cfg['geometry_openings']={};cfg['geometry_opacities']={};cfg['colors_linear']={};cfg['geometry_assets']={}
     cfg['geometry_opening_directions']={};cfg['geometry_exclusions']={}
-    cfg['geometry_inner_masks']={}
+    cfg['geometry_inner_masks']={};cfg['geometry_components']={}
     for item in ui.detectors:
         if item.asset_path:cfg['geometry_assets'][item.name]=bpy.path.abspath(item.asset_path)
         if item.data and item.data_available:cfg['detectors'].append(item.name)
@@ -46,6 +46,8 @@ def current_settings():
         cfg['geometry_openings'][item.name]=item.opening
         cfg['geometry_opening_directions'][item.name]=item.opening_direction
         cfg['geometry_exclusions'][item.name]=[p.strip() for p in item.exclusions.split(',') if p.strip()]
+        choices={c.identifier:c.enabled for c in item.components if c.explicit}
+        if choices:cfg['geometry_components'][item.name]=choices
         if item.inner_mask_radius>0:
             cfg['geometry_inner_masks'][item.name]={'radius_m':item.inner_mask_radius,'patterns':[p.strip() for p in item.inner_mask_patterns.split(',') if p.strip()],'front_only':item.inner_mask_front}
         cfg['geometry_opacities'][item.name]=item.opacity
@@ -179,7 +181,50 @@ def appearance_update(self,context):
                     if emphasis and ui.highlight_override or mode=='solid':
                         bsdf.inputs['Base Color'].default_value=(*color,1);bsdf.inputs['Emission Color'].default_value=(*color,1)
 
+def populate_components(item,requested=None):
+    from alice_renderer.geometry_components import load_components,component_visibility
+    data=load_components(bpy.path.abspath(item.asset_path),verify=False) if item.asset_path else None
+    if not data:return
+    if requested is None:requested={c.identifier:c.enabled for c in item.components if c.explicit} if item.components else (JOB or {}).get('settings',{}).get('geometry_components',{}).get(item.name,{})
+    visibility=component_visibility(data,requested,[p.strip() for p in item.exclusions.split(',') if p.strip()])
+    item.components.clear()
+    for identifier,entry in sorted(data['components'].items()):
+        component=item.components.add();component.identifier=identifier;component.label=entry['label']+(' (mixed)' if visibility[identifier] is None else '');component.count=entry['count']
+        component.enabled=requested.get(identifier,visibility[identifier] is True)
+        component.explicit=identifier in requested
+
+class GeometryComponent(bpy.types.PropertyGroup):
+    identifier: StringProperty()
+    label: StringProperty()
+    count: IntProperty()
+    enabled: BoolProperty(default=True)
+    explicit: BoolProperty(default=False)
+
+class ToggleComponent(bpy.types.Operator):
+    bl_idname='alice_eve.toggle_component';bl_label='Toggle detector component'
+    bl_description='Show or hide this aligned geometry component; apply geometry to update the scene'
+    detector: StringProperty()
+    identifier: StringProperty()
+    def execute(self,context):
+        item=context.scene.alice_eve.detectors[self.detector];component=next(c for c in item.components if c.identifier==self.identifier)
+        component.enabled=not component.enabled;component.explicit=True
+        for child in item.components:
+            if child.identifier.startswith(self.identifier+'/'):child.enabled=component.enabled;child.explicit=False
+        return bpy.ops.alice_eve.apply_geometry()
+
+class RefreshComponents(bpy.types.Operator):
+    bl_idname='alice_eve.refresh_components';bl_label='Refresh components'
+    bl_description='Read layer, wall, support and named element choices from the selected aligned asset'
+    detector: StringProperty()
+    def execute(self,context):
+        try:populate_components(context.scene.alice_eve.detectors[self.detector]);return {'FINISHED'}
+        except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
+
 class DetectorSettings(bpy.types.PropertyGroup):
+    components: CollectionProperty(type=GeometryComponent)
+    show_components: BoolProperty(name='Detector components',default=False)
+    component_filter: StringProperty(name='Filter components')
+    component_category: EnumProperty(name='Category',items=[(k,k.title(),'') for k in ('layers','structures','modules','parts')],default='structures')
     data_available: BoolProperty(default=False)
     geometry_available: BoolProperty(default=False)
     asset_path: StringProperty(name='Aligned geometry asset',subtype='FILE_PATH',update=surface_update)
@@ -214,8 +259,8 @@ class SceneSettings(bpy.types.PropertyGroup):
     highlight_cluster_color: FloatVectorProperty(name='Linked clusters',subtype='COLOR',size=3,min=0,max=1,update=appearance_update)
     picking_active: BoolProperty(default=False)
     clip_tracks: BoolProperty(name='Clip tracks to selected detectors',default=True,update=selection_update)
-    track_mode: EnumProperty(name='Track coding',items=COLOR_ITEMS)
-    cluster_mode: EnumProperty(name='Cluster coding',items=COLOR_ITEMS)
+    track_mode: EnumProperty(name='Track coding',items=lambda self,context:COLOR_ITEMS)
+    cluster_mode: EnumProperty(name='Cluster coding',items=lambda self,context:COLOR_ITEMS)
     palette: EnumProperty(name='Palette',items=lambda self,context:PALETTE_ITEMS)
     track_min: FloatProperty(name='Minimum');track_max: FloatProperty(name='Maximum',default=1)
     cluster_min: FloatProperty(name='Minimum');cluster_max: FloatProperty(name='Maximum',default=1)
@@ -283,8 +328,9 @@ class ApplyGeometry(bpy.types.Operator):
                 same_exclusions=old and old.get('alice_exclusions','[]')==json.dumps(cfg['geometry_exclusions'].get(item.name,[]))
                 inner_rule=cfg['geometry_inner_masks'].get(item.name,{})
                 same_direction=not inner_rule or not inner_rule.get('front_only',True) or old and abs(old.get('alice_inner_direction',-90.)-item.opening_direction)<1.e-5
+                same_components=old and old.get('alice_components','{}')==json.dumps(cfg.get('geometry_components',{}).get(item.name,{}),sort_keys=True)
                 same_inner=old and old.get('alice_inner_mask','{}')==json.dumps(inner_rule,sort_keys=True) and same_direction
-                if old and same_asset and same_exclusions and same_inner and old.get('alice_display')==item.display and old.get('alice_geometry_lod')==cfg['geometry_lods'].get(item.name,cfg['geometry_lod']) and old.get('alice_schematic',False)==is_schematic(cfg,item.name):continue
+                if old and same_asset and same_exclusions and same_components and same_inner and old.get('alice_display')==item.display and old.get('alice_geometry_lod')==cfg['geometry_lods'].get(item.name,cfg['geometry_lod']) and old.get('alice_schematic',False)==is_schematic(cfg,item.name):continue
                 changed_regions|=bool(old and (not same_asset or old.get('alice_schematic',False)!=is_schematic(cfg,item.name)))
                 if old:remove_owned_collection(old)
                 if is_schematic(cfg,item.name):envelope(item.name,cfg)
@@ -293,6 +339,7 @@ class ApplyGeometry(bpy.types.Operator):
                     if not asset:raise ValueError(item.name+': provide aligned geometry before selecting full/simplified surfaces')
                     info=imported_geometry(item.name,asset,cfg)
                     if info.get('track_region'):JOB['track_regions'][item.name]=info['track_region']
+                    populate_components(item,cfg.get('geometry_components',{}).get(item.name,{}))
             if changed_regions and bpy.ops.alice_eve.apply_data()!={'FINISHED'}:return {'CANCELLED'}
             appearance_update(self,context)
             self.report({'INFO'},'Geometry appearance applied; shell/outline are approximate outer hulls')
@@ -561,6 +608,18 @@ class EVEPanel(bpy.types.Panel):
                 kind='aligned' if item.detail!='inherit' else 'schematic' if is_schematic(JOB['settings'],item.name) else 'aligned'
                 box.label(text='Geometry source: '+kind)
                 box.prop(item,'detail');box.prop(item,'display');box.prop(item,'opening');box.prop(item,'opening_direction');box.prop(item,'exclusions');box.prop(item,'color');box.prop(item,'opacity')
+                box.prop(item,'show_components')
+                if item.show_components:
+                    box.operator('alice_eve.refresh_components').detector=item.name;box.prop(item,'component_category');box.prop(item,'component_filter')
+                    displayed=0;component_enabled=not is_schematic(current_settings().to_dict(),item.name)
+                    for component in item.components:
+                        if component.identifier.split('/')[0]!=item.component_category:continue
+                        if item.component_filter and item.component_filter.lower() not in (component.identifier+' '+component.label).lower():continue
+                        displayed+=1
+                        if displayed>200:box.label(text='Filter to show more than 200 named elements');break
+                        row=box.row();row.enabled=component_enabled
+                        op=row.operator('alice_eve.toggle_component',text=('  '*component.identifier.count('/'))+component.label+' ('+str(component.count)+')',icon='CHECKBOX_HLT' if component.enabled else 'CHECKBOX_DEHLT',depress=component.enabled);op.detector=item.name;op.identifier=component.identifier
+                    if not item.components:box.label(text='No hierarchy metadata for this asset')
                 box.prop(item,'inner_mask_radius')
                 if item.inner_mask_radius>0:box.prop(item,'inner_mask_patterns');box.prop(item,'inner_mask_front')
         layout.prop(ui,'background');layout.prop(ui,'world_strength');layout.prop(ui,'view_transform');layout.prop(ui,'exposure');layout.prop(ui,'track_emission');layout.prop(ui,'cluster_emission');layout.prop(ui,'roughness');layout.prop(ui,'metallic');layout.prop(ui,'shading')
@@ -569,7 +628,7 @@ class EVEPanel(bpy.types.Panel):
         layout.prop(ui,'export_path');layout.prop(ui,'include_defaults')
         row=layout.row();row.operator('alice_eve.export');row.operator('alice_eve.render_full')
 
-CLASSES=(DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,ExportConfig,RenderFull,EVEPanel)
+CLASSES=(GeometryComponent,ToggleComponent,RefreshComponents,DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,ExportConfig,RenderFull,EVEPanel)
 
 def start_editor(job,event,metadata):
     global JOB,EVENT,DEVICES,RECOMMENDATION,PALETTES
@@ -579,7 +638,12 @@ def start_editor(job,event,metadata):
         PALETTES={name:[list(scale_color(i/255,0,1,name)) for i in range(256)] for name in ('viridis','coolwarm','hsv')}
     if job['settings'].get('palette_lut'):PALETTES[job['settings']['palette']]=job['settings']['palette_lut']
     PALETTE_ITEMS[:]=[(name,name,'') for name in sorted(PALETTES)]
-    EVENT=event;DEVICES=job['blender'];RECOMMENDATION=recommended_quality(DEVICES)
+    JOB=None;EVENT=event;DEVICES=job['blender'];RECOMMENDATION=recommended_quality(DEVICES)
+    from alice_renderer.model import capabilities
+    extra=set(capabilities(event['tracks']))|set(capabilities(event['clusters']))
+    extra|={job['settings']['track_color_mode'],job['settings']['cluster_color_mode']}
+    for name in sorted(extra):
+        if not any(i[0]==name for i in COLOR_ITEMS):COLOR_ITEMS.append((name,name,'Numeric input track feature'))
     for cls in CLASSES:bpy.utils.register_class(cls)
     bpy.types.Scene.alice_eve=bpy.props.PointerProperty(type=SceneSettings)
     scene=bpy.context.scene;ui=scene.alice_eve;settings=job['settings']
@@ -602,6 +666,7 @@ def start_editor(job,event,metadata):
         item.event_track_count=track_counts.get(name,0);item.event_cluster_count=cluster_counts.get(name,0)
         item.opening=settings['geometry_openings'].get(name,180 if settings['cutaway'] else 0);item.opacity=settings['geometry_opacities'].get(name,settings['geometry_opacity']);item.color=settings.get('colors_linear',{}).get('magnet' if name=='L3' else name,rgb(settings['colors'].get('magnet' if name=='L3' else name,'#243a82')))
         item.opening_direction=settings.get('geometry_opening_directions',{}).get(name,-90.);item.exclusions=', '.join(settings.get('geometry_exclusions',{}).get(name,[]))
+        populate_components(item,settings.get('geometry_components',{}).get(name,{}))
         inner=settings.get('geometry_inner_masks',{}).get(name,{});item.inner_mask_radius=inner.get('radius_m',0);item.inner_mask_patterns=', '.join(inner.get('patterns',[]));item.inner_mask_front=inner.get('front_only',True)
     settings['palette_lut']=PALETTES[settings['palette']]
     locked=recipe(RenderSettings(**settings),event)['scene']['color_ranges']

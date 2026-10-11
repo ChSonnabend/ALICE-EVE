@@ -4,7 +4,7 @@ import json, threading, sqlite3, math
 from pathlib import Path
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QThread, Signal, QTimer
 from PySide6.QtGui import QColor, QPixmap
-from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QFormLayout,QLabel,QPushButton,QLineEdit,QCheckBox,QComboBox,QSpinBox,QDoubleSpinBox,QTabWidget,QScrollArea,QSplitter,QTableView,QFileDialog,QMessageBox,QPlainTextEdit,QHeaderView,QDialog,QDialogButtonBox,QSizePolicy,QInputDialog,QSlider,QListWidget,QListWidgetItem)
+from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QFormLayout,QLabel,QPushButton,QLineEdit,QCheckBox,QComboBox,QSpinBox,QDoubleSpinBox,QTabWidget,QScrollArea,QSplitter,QTableView,QFileDialog,QMessageBox,QPlainTextEdit,QHeaderView,QDialog,QDialogButtonBox,QSizePolicy,QInputDialog,QSlider,QListWidget,QListWidgetItem,QTreeWidget,QTreeWidgetItem)
 from .catalogue import Catalogue
 from .converters import convert
 from .demo import generate
@@ -31,7 +31,7 @@ class Task(QThread):
 
 class EventsModel(QAbstractTableModel):
     changed=Signal()
-    columns=('Render','Event','Grouping','Run','TF','Tracks','Clusters','Detectors','PV contributors')
+    columns=('Render','Event','Grouping','Run','TF / AO2D frame','Tracks','Clusters','Detectors','PV contributors')
     def __init__(self):super().__init__();self.rows=[];self.selected=set()
     def rowCount(self,parent=QModelIndex()):return 0 if parent.isValid() else len(self.rows)
     def columnCount(self,parent=QModelIndex()):return len(self.columns)
@@ -78,7 +78,7 @@ class Window(QMainWindow):
             except Exception:self.saved={}
         else:self.saved={}
         self.scene_detector_selection=set(self.base.detectors)
-        self.scene_overrides={key:getattr(self.base,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_opening_directions','geometry_exclusions','geometry_inner_masks','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
+        self.scene_overrides={key:getattr(self.base,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_opening_directions','geometry_exclusions','geometry_inner_masks','geometry_components','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
         central=QWidget();self.setCentralWidget(central);layout=QVBoxLayout(central)
         title=QLabel('ALICE  /  EVENT RENDERER');title.setObjectName('title');layout.addWidget(title)
         self.summary=QLabel('Choose an input, select events and detectors, then preview or render.');layout.addWidget(self.summary)
@@ -98,7 +98,7 @@ class Window(QMainWindow):
         split=QSplitter();layout.addWidget(split,1)
         self.tabs=QTabWidget();split.addWidget(self.tabs)
         self.detector_modes={};self.data_checks={};self.geometry_checks={};self.asset_fields={};self.color_buttons={};self.detector_labels={}
-        self.build_detectors();self.build_appearance();self.build_render();self.build_runtime();self.build_library()
+        self.build_detectors();self.build_components();self.build_appearance();self.build_render();self.build_runtime();self.build_library()
         right=QWidget();right_layout=QVBoxLayout(right);split.addWidget(right);split.setSizes([540,840])
         tools=QHBoxLayout();right_layout.addLayout(tools)
         self.all_button=QPushButton('Select all');self.none_button=QPushButton('Select none');tools.addWidget(self.all_button);tools.addWidget(self.none_button)
@@ -120,6 +120,8 @@ class Window(QMainWindow):
         self.render_button=QPushButton('Render selected events');self.render_button.setObjectName('primary');self.render_button.clicked.connect(lambda:self.start_render(False));bottom.addWidget(self.render_button)
         self.update_availability()
         self.library.discover(Path(self.output.text()));self.refresh_library()
+        for field in self.asset_fields.values():field.editingFinished.connect(self.refresh_components)
+        self.refresh_components()
         self.library_timer=QTimer(self);self.library_timer.timeout.connect(self.refresh_library);self.library_timer.start(2000)
         self.setStyleSheet('''QWidget{background:#101724;color:#e2e8f2;font-size:13px;} QLabel#title{font-size:24px;font-weight:700;color:#94e5ff;margin:12px 0;} QLabel#preview{background:#070b14;border:1px solid #25334b;border-radius:8px;} QPushButton{background:#26334b;border:1px solid #40516f;padding:8px 12px;border-radius:5px;} QPushButton:hover{background:#344763;} QPushButton#primary{background:#147b89;border-color:#5ccdde;} QPushButton:disabled,QCheckBox:disabled{color:#586276;} QLineEdit,QSpinBox,QDoubleSpinBox,QComboBox,QPlainTextEdit{background:#182236;border:1px solid #34435d;padding:6px;border-radius:4px;} QHeaderView::section{background:#26334b;padding:5px;border:0;} QTableView{alternate-background-color:#172034;gridline-color:#27344a;} QTabBar::tab{padding:10px;background:#182236;} QTabBar::tab:selected{background:#2b3b55;} QCheckBox{padding:4px;}''')
 
@@ -181,6 +183,7 @@ class Window(QMainWindow):
         widget=self.tab('Appearance');layout=QFormLayout(widget)
         self.defaults_button=QPushButton('Use commissioning defaults');self.defaults_button.clicked.connect(self.use_commissioning_defaults);layout.addRow(self.defaults_button)
         self.track_mode=QComboBox();self.cluster_mode=QComboBox()
+        for combo in (self.track_mode,self.cluster_mode):combo.setMinimumWidth(0);combo.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred)
         for combo in (self.track_mode,self.cluster_mode):
             combo.addItems(COLOR_FIELDS);combo.setItemData(combo.findText('matching'),'0 = standalone fitted source; 1 = composite matched source (e.g. ITS-TPC); grey = unknown',Qt.ToolTipRole)
         self.track_mode.setCurrentText(self.base.track_color_mode);self.cluster_mode.setCurrentText(self.base.cluster_color_mode)
@@ -234,6 +237,11 @@ class Window(QMainWindow):
         self.blender=QLineEdit(self.saved.get('blender',find_blender()));layout.addRow('Blender executable',self.path_field(self.blender))
         default_profile=ROOT/'profiles/virgo4-ingest.json'
         self.profile=QLineEdit(self.saved.get('profile') or (str(default_profile) if default_profile.is_file() else ''));layout.addRow('O2 ingestion profile',self.path_field(self.profile))
+        aod=self.saved.get('aod',{})
+        self.aod_conditions=QLineEdit(aod.get('conditions',''));layout.addRow('AO2D field conditions (optional)',self.path_field(self.aod_conditions))
+        self.aod_use_bz=QCheckBox('Use an explicit signed AO2D Bz (kG)');self.aod_use_bz.setChecked(aod.get('bz_kG') is not None);layout.addRow(self.aod_use_bz)
+        self.aod_bz=number(aod.get('bz_kG') or 0.,-100,100,3);layout.addRow('AO2D Bz (kG)',self.aod_bz)
+        note=QLabel('AO2D tables load without O2. Fitted-state display curves require field conditions or an explicit Bz; adjacent FILE.root.renderer.json is detected automatically. Reload the input after changing these settings. AO2D does not supply track-attached cluster coordinates.');note.setWordWrap(True);layout.addRow(note)
         note=QLabel('Raw TF/CTF inputs require ALICE O2 decoding/reconstruction and complete primary-vertex export. An O2 profile provides the command and prerequisite checks. Exported event JSON renders without O2. See docs/O2-INTEGRATION.md.');note.setWordWrap(True);layout.addRow(note)
         self.geometry_units=QComboBox();self.geometry_units.addItems(['cm','m']);self.geometry_units.setCurrentText(self.base.geometry_units);layout.addRow('Geometry asset units',self.geometry_units)
         note=QLabel('Each asset must contain only the named detector in ALICE global XYZ coordinates. GLB/glTF, OBJ and Blender files are supported. Preserve run/alignment provenance with the assets.');note.setWordWrap(True);layout.addRow(note)
@@ -321,8 +329,10 @@ class Window(QMainWindow):
         cfg.frame_aspect=cfg.width/cfg.height
         return cfg.validate()
     def save_settings(self,cfg):
-        saved={'render':cfg.to_dict(),'blender':self.blender.text(),'profile':self.profile.text(),'output':self.output.text()}
+        saved={'render':cfg.to_dict(),'blender':self.blender.text(),'profile':self.profile.text(),'output':self.output.text(),'aod':self.aod_options()}
         self.settings_file.write_text(json.dumps(saved,indent=2))
+    def aod_options(self):
+        return {'conditions':self.aod_conditions.text(),'bz_kG':self.aod_bz.value() if self.aod_use_bz.isChecked() else None}
     def busy(self,on):
         for w in (self.tabs,self.source,self.open_button,self.browse_button,self.folder_button,self.demo_button,self.table,self.all_button,self.none_button,self.preview_button,self.render_button,self.editor_button,self.export_config_button,self.load_config_button,self.recent_picker,self.favourite_picker,self.reuse_recent_button,self.reuse_favourite_button):w.setEnabled(not on)
         self.cancel_button.setEnabled(on)
@@ -374,19 +384,22 @@ class Window(QMainWindow):
                 name,ok=QInputDialog.getItem(self,'Choose input in folder','TF / CTF file',[p.name for p in candidates],0,False)
                 if not ok:return
                 path=path/name
-        self.source.setText(str(path));profile=self.profile.text()
+        self.source.setText(str(path));profile=self.profile.text();aod_options=self.aod_options()
         def work(progress,cancelled):
             info=inspect_input(path,cancelled=cancelled);progress(f'{info.format}: {info.timeframes if info.timeframes is not None else "exported"} timeframe entries; detectors {", ".join(info.detectors) or "not yet decoded"}')
             for warning in info.warnings:progress(warning)
             source=path
-            if info.format!='events':
+            if info.format not in ('events','aod'):
                 if not profile:raise ValueError('This input requires O2 decoding/reconstruction before collision events can be listed. Set an O2 ingestion profile in Setup. Blender rendering of exported event JSON does not require O2. See docs/O2-INTEGRATION.md.')
                 source=run_ingest_profile(path,Path(profile),ROOT/'cache',progress=progress,cancelled=cancelled)
-            cat=Catalogue.build(source,ROOT/'cache',convert=convert,progress=progress,cancelled=cancelled)
+            cat=Catalogue.build(source,ROOT/'cache',convert=convert,progress=progress,cancelled=cancelled,aod_options=aod_options)
             return cat,info
         def done(result):
             self.loaded_input=self.source.text()
             self.catalogue,info=result;self.model.set_rows(self.catalogue.rows());self.summary.setText(f'{len(self.model.rows)} records loaded · grouping is shown explicitly · {Path(info.path).name}')
+            if info.format=='aod' and event_selector is None:
+                self.model.select_all(False)
+                if self.model.rows:self.model.selected={self.model.rows[0]['ordinal']};self.update_availability()
             with sqlite3.connect(self.catalogue.db) as database:
                 exported_source=Path(database.execute("SELECT value FROM metadata WHERE key='source'").fetchone()[0])
             manifest_path=(exported_source if exported_source.is_dir() else exported_source.parent)/'manifest.json'
@@ -412,8 +425,9 @@ class Window(QMainWindow):
             for d,c in self.data_checks.items():c.setChecked(d in available and (self.scene_detector_selection is None or d in self.scene_detector_selection))
             if self.requested_modes:
                 self.track_mode.setCurrentText(self.requested_modes[0]);self.cluster_mode.setCurrentText(self.requested_modes[1])
-            first=self.catalogue.load(self.model.rows[0]['ordinal'])
-            for warning in first.get('warnings',[]):self.message(warning)
+            if info.format!='aod':
+                first=self.catalogue.load(self.model.rows[0]['ordinal'])
+                for warning in first.get('warnings',[]):self.message(warning)
             self.status.setText('Events ready')
         self.start_task(work,done)
     def update_availability(self):
@@ -427,8 +441,10 @@ class Window(QMainWindow):
             if name not in available:box.setChecked(False)
             elif not was:box.setChecked(self.scene_detector_selection is None or name in self.scene_detector_selection)
         for combo,field in ((self.track_mode,'track_fields'),(self.cluster_mode,'cluster_fields')):
-            supported=set(COLOR_FIELDS)
-            for row in rows:supported&=set(json.loads(row[field]))
+            supported=set(json.loads(rows[0][field])) if rows else {'solid'}
+            for row in rows[1:]:supported&=set(json.loads(row[field]))
+            for mode in sorted(supported):
+                if combo.findText(mode)<0:combo.addItem(mode)
             if not rows:supported={'solid'}
             for i in range(combo.count()):combo.model().item(i).setEnabled(combo.itemText(i) in supported)
             if combo.currentText() not in supported and not self.requested_modes:combo.setCurrentText('solid')
@@ -438,6 +454,43 @@ class Window(QMainWindow):
         def done(info):
             self.device_info=info;self.device_label.setText(info['version_string']+' · '+', '.join(d['name']+' ('+d['type']+')' for d in info['devices']));self.update_devices()
         blender=self.blender.text();self.start_task(lambda p,c:probe(blender),done)
+    def build_components(self):
+        page=QWidget();layout=QVBoxLayout(page)
+        self.component_detector=QComboBox();self.component_detector.addItems([*DETECTORS,'L3']);layout.addWidget(self.component_detector)
+        note=QLabel('Uncheck layers, walls, services or individual elements. These controls affect surfaces, not event data. Explicitly checking a component restores it from legacy name masks.');note.setWordWrap(True);layout.addWidget(note)
+        self.component_tree=QTreeWidget();self.component_tree.setHeaderLabels(['Detector component','Placements']);layout.addWidget(self.component_tree,1)
+        buttons=QHBoxLayout();layout.addLayout(buttons)
+        reset=QPushButton('Reset component choices');reset.clicked.connect(self.reset_components);buttons.addWidget(reset)
+        refresh=QPushButton('Refresh asset components');refresh.clicked.connect(self.refresh_components);buttons.addWidget(refresh)
+        self.tabs.addTab(page,'Components');self.component_detector.currentTextChanged.connect(self.refresh_components);self.component_tree.itemChanged.connect(self.component_changed)
+        self.refresh_components()
+    def refresh_components(self,*_):
+        from .geometry_components import load_components,component_visibility
+        name=self.component_detector.currentText();field=self.asset_fields.get(name);path=field.text().strip() if field else ''
+        self.component_tree.blockSignals(True);self.component_tree.clear()
+        try:
+            data=load_components(path,verify=False) if path and Path(path).is_file() else None
+            if not data:
+                QTreeWidgetItem(self.component_tree,['No component metadata for this asset','']);return
+            choices=self.scene_overrides.get('geometry_components',{}).get(name,{})
+            visibility=component_visibility(data,choices,self.scene_overrides.get('geometry_exclusions',{}).get(name,[]))
+            nodes={}
+            for identifier,entry in sorted(data['components'].items(),key=lambda kv:(kv[0].count('/'),kv[0])):
+                parent=nodes.get(entry['parent'],self.component_tree);item=QTreeWidgetItem(parent,[entry['label'],str(entry['count'])]);item.setData(0,Qt.UserRole,identifier)
+                item.setFlags(item.flags()|Qt.ItemIsUserCheckable);item.setCheckState(0,Qt.PartiallyChecked if visibility[identifier] is None else Qt.Checked if visibility[identifier] else Qt.Unchecked);nodes[identifier]=item
+            self.component_tree.expandToDepth(0)
+        except Exception as exc:QTreeWidgetItem(self.component_tree,[str(exc),''])
+        finally:self.component_tree.blockSignals(False)
+    def component_changed(self,item,column):
+        identifier=item.data(0,Qt.UserRole)
+        if not identifier:return
+        choices=self.scene_overrides.setdefault('geometry_components',{}).setdefault(self.component_detector.currentText(),{})
+        # A parent toggle resets its descendants so checking Layers restores all.
+        for key in list(choices):
+            if key.startswith(identifier+'/'):del choices[key]
+        choices[identifier]=item.checkState(0)==Qt.Checked;self.refresh_components()
+    def reset_components(self):
+        self.scene_overrides.setdefault('geometry_components',{}).pop(self.component_detector.currentText(),None);self.refresh_components()
     def update_devices(self):
         if not self.device_info:return
         self.device.clear();self.device.addItem('All devices in selected backend','')
@@ -446,10 +499,14 @@ class Window(QMainWindow):
         for i in range(self.backend.count()):self.backend.model().item(i).setEnabled(any(d['type']==self.backend.itemText(i) for d in self.device_info['devices']))
     def export_scene(self):
         try:
-            cfg=self.settings();event=load_event(self.catalogue.event_path(min(self.model.selected))) if self.catalogue and self.model.selected else None
+            cfg=self.settings();catalogue=self.catalogue;ordinal=min(self.model.selected) if catalogue and self.model.selected else None
             path=QFileDialog.getSaveFileName(self,'Export portable scene','scene-config.json','Scene config (*.json)')[0]
-            if path:
-                save_config(path,recipe(cfg,event));self.register_scene(path,'export',cfg);self.message('Portable scene exported: '+path)
+            if not path:return
+            def work(progress,cancelled):
+                event=load_event(catalogue.event_path(ordinal,progress=progress,cancelled=cancelled)) if ordinal is not None else None
+                save_config(path,recipe(cfg,event));return path
+            def done(result):self.register_scene(result,'export',cfg);self.message('Portable scene exported: '+result)
+            self.start_task(work,done)
         except Exception as exc:self.failure(str(exc))
     def import_scene(self):
         path=QFileDialog.getOpenFileName(self,'Load portable scene','','Scene config (*.json)')[0]
@@ -466,7 +523,9 @@ class Window(QMainWindow):
     def apply_scene(self,cfg):
         self.scene_detector_selection=set(cfg.detectors);self.requested_modes=(cfg.track_color_mode,cfg.cluster_color_mode)
         if self.palette.findText(cfg.palette)<0:self.palette.addItem(cfg.palette)
-        self.scene_overrides={key:getattr(cfg,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_opening_directions','geometry_exclusions','geometry_inner_masks','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
+        for combo,mode in ((self.track_mode,cfg.track_color_mode),(self.cluster_mode,cfg.cluster_color_mode)):
+            if combo.findText(mode)<0:combo.addItem(mode)
+        self.scene_overrides={key:getattr(cfg,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_opening_directions','geometry_exclusions','geometry_inner_masks','geometry_components','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
         for name,box in self.data_checks.items():box.setChecked(name in cfg.detectors)
         for name,combo in self.detector_modes.items():combo.setCurrentText(cfg.detector_modes.get(name,cfg.mode))
         for name,box in self.geometry_checks.items():box.setChecked(name in cfg.geometry)
@@ -493,6 +552,8 @@ class Window(QMainWindow):
         self.scene_overrides['geometry_opening_directions']=cfg.geometry_opening_directions
         self.scene_overrides['geometry_exclusions']=cfg.geometry_exclusions
         self.scene_overrides['geometry_inner_masks']=cfg.geometry_inner_masks
+        self.scene_overrides['geometry_components']=cfg.geometry_components
+        self.refresh_components()
         self.refresh_opening_summary()
     def use_commissioning_defaults(self):
         cfg=commissioning_settings({k:v.text() for k,v in self.asset_fields.items() if v.text()},self.geometry_units.currentText())
@@ -502,11 +563,12 @@ class Window(QMainWindow):
     def open_editor(self):
         if not self.catalogue or not self.model.selected:return
         if self.source.text()!=self.loaded_input:self.failure('The input path has changed. Press Enter or Load input, then select its event before opening the editor.');return
-        try:cfg=self.settings();event=self.catalogue.event_path(min(self.model.selected))
+        try:cfg=self.settings();ordinal=min(self.model.selected)
         except Exception as exc:self.failure(str(exc));return
         def launched(result):
             self.refresh_library();self.message('Interactive Blender scene started. Open the ALICE EVE sidebar; export or render from there. Log: '+str(result[0]/'editor.log'))
-        self.start_task(lambda p,c:launch_editor(self.blender.text(),event,cfg,Path(self.output.text()),library_path=self.library.path),launched)
+        blender=self.blender.text();output=Path(self.output.text())
+        self.start_task(lambda p,c:launch_editor(blender,self.catalogue.event_path(ordinal,progress=p,cancelled=c),cfg,output,library_path=self.library.path),launched)
     def render_quality_dialog(self,cfg,devices):
         rec=recommended_quality(devices);dialog=QDialog(self);dialog.setWindowTitle('Full render quality');form=QFormLayout(dialog)
         note=QLabel(rec['reason']);note.setWordWrap(True);form.addRow(note)
@@ -544,9 +606,9 @@ class Window(QMainWindow):
         except Exception as exc:self.failure(str(exc));return
         ids=sorted(self.model.selected)
         if preview:ids=ids[:1]
-        paths=[self.catalogue.event_path(i) for i in ids];blender=self.blender.text();output=Path(self.output.text())
+        blender=self.blender.text();output=Path(self.output.text())
         def run(chosen):
-            if chosen is not None:self.start_task(lambda p,c:render_events(blender,paths,chosen,output,preview=preview,progress=p,cancelled=c,library_path=self.library.path),lambda batch:(self.refresh_library(),self.message(f'Completed: {batch}')))
+            if chosen is not None:self.start_task(lambda p,c:render_events(blender,[self.catalogue.event_path(i,progress=p,cancelled=c) for i in ids],chosen,output,preview=preview,progress=p,cancelled=c,library_path=self.library.path),lambda batch:(self.refresh_library(),self.message(f'Completed: {batch}')))
         if preview:run(cfg)
         else:
             def ready(info):
