@@ -30,14 +30,20 @@ These are subjective critic ratings, not measured reconstruction accuracy.
 
 ## Exact tested settings
 
+The exact historical second-batch recipe is archived locally as
+`renders/reference-camera002/scene.json`, alongside the image and alignment
+mapping described below. It contains the tested camera, structural choices and
+asset hashes; use fresh coordinate-version-3 event data when reusing its style.
+
 [`commissioning-interior.json`](../src/alice_renderer/presets/commissioning-interior.json)
-is the portable tested recipe. It includes the actual rendered camera matrix,
-complete structural rules and hash-checked alignment assets, with no local
-input/event or hardware/quality defaults. Its settings supersede the withdrawn
-first-batch preset. Fresh desktop installations use this reviewed second-batch
-style. Saved local preferences take priority; **Appearance → Use commissioning
-defaults** applies it for the current input/event and local assets. Exact recipe
-loading enforces the original asset hashes; the defaults button clones the style
+is now an updated startup preset: it retains that camera but uses only TPC
+readout sectors/inner wall and adds ten surround lights. Its geometry and
+lighting differ from the historical 6.5/10 render. Saved local preferences take
+priority. **Appearance → Use commissioning defaults** applies the updated style
+and resets the camera to its preset pose. To retain a customised camera, use
+**TPC sectors + inner wall**, **Add lights around detector** and **Show scene
+lighting** in the editor, or load the updated recipe saved for that scene. Exact
+recipe loading enforces its asset hashes; the defaults button clones the style
 onto the current local alignment bundle. General programmatic `RenderSettings()`
 continues to default to tracks only.
 
