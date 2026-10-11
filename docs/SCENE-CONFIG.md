@@ -43,6 +43,12 @@ Recipes remain platform-independent. The history database (`scene-library.local.
 
 ## Track extents
 
+**Large surfaces (cached, fast)** provides ITS stave panels and reduced TPC
+walls/sectors without importing full assets on every load. Use **Use fast
+ITS/TPC surfaces** in the editor, or select `structural` detail. It keeps the
+aligned clipping bounds and supported layer/wall switches. See
+[preparation, limitations and measured timings](LARGE-SURFACES.md).
+
 **Clip tracks to selected detectors** is enabled by default. The renderer selects eligible fitted tracks by their source detectors, then trims sampled polylines to the selected sources' outer envelopes. When detector surfaces are shown, that surface selection restricts the eligible clipping detectors; otherwise it uses the data selection. L3 does not define a track limit. Intersections between sampled points are interpolated, and disconnected pieces remain separate.
 
 For real data, extent planes come from the actual aligned prototype vertices and every global instance transform: 64 azimuth support planes plus global Z bounds. They describe a conservative outer envelope, rather than active detector material or a hit-association test. Internal holes and gaps within one detector are not a display veto. No source points, fitted kinematics or input data are modified. Approximate dimension-based bounds are used only for explicitly schematic geometry or synthetic demos.

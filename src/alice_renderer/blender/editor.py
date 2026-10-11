@@ -141,7 +141,7 @@ def appearance_update(self,context):
         if bsdf:bsdf.inputs['Roughness'].default_value=ui.roughness;bsdf.inputs['Metallic'].default_value=ui.metallic
     for obj in context.scene.objects:
         if obj.type=='MESH':
-            for p in obj.data.polygons:p.use_smooth=ui.shading=='smooth' and 'alice_lod' not in obj
+            for p in obj.data.polygons:p.use_smooth=ui.shading=='smooth' and ('alice_lod' not in obj or obj.get('alice_structural_smooth',False))
     for item in ui.detectors:
         coll=bpy.data.collections.get(item.name)
         if coll:
@@ -237,7 +237,7 @@ class DetectorSettings(bpy.types.PropertyGroup):
     data: BoolProperty(name='Event data',default=True,update=selection_update)
     mode: EnumProperty(name='Objects',items=[(v,v,'') for v in ('tracks','clusters','both')],update=selection_update)
     visible: BoolProperty(name='Surface',default=True,update=surface_update)
-    detail: EnumProperty(name='Geometry detail',items=[('inherit','Use scene detail','Use the Geometry detail control above'),('full','Full geometry','Keep aligned detector surfaces'),('simplified','Simplified geometry','Use approximate coarse spatial cells')],default='inherit')
+    detail: EnumProperty(name='Geometry detail',items=[('inherit','Use scene detail','Use the Geometry detail control above'),('full','Full geometry','Keep aligned detector surfaces'),('structural','Large surfaces (cached, fast)','ITS stave panels and TPC walls/sectors; fine details omitted'),('simplified','Simplified geometry','Use approximate coarse spatial cells')],default='inherit')
     opening: FloatProperty(name='Opening (degrees)',min=0,max=360,default=0,update=appearance_update)
     opening_direction: FloatProperty(name='Opening direction (degrees)',description='Wedge centre in ALICE XY: 0 is +X, 90 is +Y, −90 is −Y',min=-360,max=360,default=-90,update=appearance_update)
     exclusions: StringProperty(name='Hide component names',description='Comma-separated object-name patterns, e.g. ITSServices*, CageCover*. Apply geometry appearance to update. Recorded in the recipe; data and clipping bounds remain unchanged')
@@ -270,7 +270,7 @@ def viewport_renderer_update(self,context):
 class SceneSettings(bpy.types.PropertyGroup):
     viewport_renderer: EnumProperty(name='Viewport renderer',items=[('BLENDER_EEVEE','Fast (Eevee)','Responsive preview; transparency and lighting are approximate'),('CYCLES','Accurate (Cycles)','Progressive preview using the final renderer; slower on CPU')],default='CYCLES',update=viewport_renderer_update)
     detectors: CollectionProperty(type=DetectorSettings)
-    geometry_lod: EnumProperty(name='Geometry detail',items=[('full','Full aligned surfaces','Preserve the actual detector geometry'),('simplified','Coarse cells','Reduce complexity; approximate bounding cells')])
+    geometry_lod: EnumProperty(name='Geometry detail',items=[('full','Full aligned surfaces','Preserve the actual detector geometry'),('structural','Large surfaces (cached, fast)','Prebuilt ITS/TPC display surfaces; no heavy source import'),('simplified','Coarse cells','Reduce complexity; approximate bounding cells')])
     mode: EnumProperty(name='Set all object modes',items=[(v,v,'') for v in ('tracks','clusters','both')],update=set_all_modes)
     track_width_cm: FloatProperty(name='Track linewidth (cm)',min=.002,max=20,default=.24,precision=3,update=appearance_update)
     cluster_radius_cm: FloatProperty(name='Cluster radius (cm)',min=.001,max=20,default=.35,update=selection_update)
@@ -479,6 +479,19 @@ class SurroundLighting(bpy.types.Operator):
         use_scene_lighting()
         return {'FINISHED'}
 
+class FastStructuralSurfaces(bpy.types.Operator):
+    bl_idname='alice_eve.fast_surfaces';bl_label='Use fast ITS/TPC surfaces'
+    bl_description='Load prebuilt ITS stave panels and large TPC walls/sectors; retain camera, colours, openings and supported component choices. Fine details are omitted'
+    def execute(self,context):
+        from alice_renderer.structural_geometry import load
+        selected=[i for i in context.scene.alice_eve.detectors if i.name in ('ITS','TPC') and i.visible and i.geometry_available]
+        try:
+            if not selected:raise ValueError('Select ITS or TPC Surface first')
+            for item in selected:load(bpy.path.abspath(item.asset_path),JOB['settings']['geometry_units'])
+            for item in selected:item.detail='structural';item.display='surfaces';item.inner_mask_radius=0
+            return bpy.ops.alice_eve.apply_geometry()
+        except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
+
 class ShowSceneLighting(bpy.types.Operator):
     bl_idname='alice_eve.show_scene_lighting';bl_label='Show scene lighting'
     bl_description='Use rendered shading and the exported scene lights/world instead of Solid or studio/HDRI preview lighting'
@@ -541,7 +554,7 @@ class ExportConfig(bpy.types.Operator):
             self.report({'INFO'},'Portable scene exported');return {'FINISHED'}
         except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
 
-DETAIL_ITEMS=[('current','Keep current scene','Preserve the current geometry type, detail and appearance'),('full','Full aligned surfaces','Load the actual aligned geometry; overrides schematic/outline/coarse-cell modes'),('simplified','Simplified aligned cells','Coarse cells derived from actual aligned geometry; requires its asset'),('schematic','Schematic envelope','Approximate detector envelope; does not load aligned geometry')]
+DETAIL_ITEMS=[('current','Keep current scene','Preserve the current geometry type, detail and appearance'),('full','Full aligned surfaces','Load the actual aligned geometry; overrides schematic/outline/coarse-cell modes'),('structural','Large surfaces (cached, fast)','ITS/TPC display approximation; requires its prebuilt cache'),('simplified','Simplified aligned cells','Coarse cells derived from actual aligned geometry; requires its asset'),('schematic','Schematic envelope','Approximate detector envelope; does not load aligned geometry')]
 
 class RenderGeometryDetail(bpy.types.PropertyGroup):
     detail: EnumProperty(name='Geometry detail',items=DETAIL_ITEMS,default='current')
@@ -692,7 +705,7 @@ class EVEPanel(bpy.types.Panel):
         layout=self.layout;ui=context.scene.alice_eve
         cfg=current_settings().to_dict()
         layout.label(text='Detector surfaces')
-        layout.operator('alice_eve.solid_surfaces');layout.operator('alice_eve.light_transparent_surfaces');layout.operator('alice_eve.restore_surface_exclusions');layout.operator('alice_eve.tpc_sectors_inner_wall');layout.operator('alice_eve.surround_lighting');layout.prop(ui,'viewport_renderer');layout.prop(ui,'viewport_samples')
+        layout.operator('alice_eve.solid_surfaces');layout.operator('alice_eve.light_transparent_surfaces');layout.operator('alice_eve.restore_surface_exclusions');layout.operator('alice_eve.tpc_sectors_inner_wall');layout.operator('alice_eve.fast_surfaces');layout.operator('alice_eve.surround_lighting');layout.prop(ui,'viewport_renderer');layout.prop(ui,'viewport_samples')
         layout.prop(ui,'geometry_lod');layout.operator('alice_eve.full_geometry')
         layout.operator('alice_eve.select_no_detectors');layout.operator('alice_eve.complete_geometry')
         layout.label(text='Outer shell / outline are approximate hulls.')
@@ -726,17 +739,21 @@ class EVEPanel(bpy.types.Panel):
             if item.geometry_available:
                 kind=geometry_description(cfg,item.name)
                 box.label(text='Geometry source: '+kind)
+                if cfg['geometry_lods'].get(item.name,cfg['geometry_lod'])=='structural':box.label(text='Fine parts omitted; layers / walls / sectors retained')
                 box.prop(item,'detail');box.prop(item,'display');box.prop(item,'opening');box.prop(item,'opening_direction');box.prop(item,'exclusions');box.prop(item,'color');box.prop(item,'opacity')
                 box.prop(item,'show_components')
                 if item.show_components:
                     box.operator('alice_eve.refresh_components').detector=item.name;box.prop(item,'component_category');box.prop(item,'component_filter')
                     displayed=0;component_enabled=not is_schematic(current_settings().to_dict(),item.name)
+                    coll=bpy.data.collections.get(item.name)
+                    supported=set(json.loads(coll.get('alice_structural_components','[]'))) if coll else set()
+                    large=cfg['geometry_lods'].get(item.name,cfg['geometry_lod'])=='structural'
                     for component in item.components:
                         if component.identifier.split('/')[0]!=item.component_category:continue
                         if item.component_filter and item.component_filter.lower() not in (component.identifier+' '+component.label).lower():continue
                         displayed+=1
                         if displayed>200:box.label(text='Filter to show more than 200 named elements');break
-                        row=box.row();row.enabled=component_enabled
+                        row=box.row();row.enabled=component_enabled and (not large or component.identifier in supported)
                         op=row.operator('alice_eve.toggle_component',text=('  '*component.identifier.count('/'))+component.label+' ('+str(component.count)+')',icon='CHECKBOX_HLT' if component.enabled else 'CHECKBOX_DEHLT',depress=component.enabled);op.detector=item.name;op.identifier=component.identifier
                     if not item.components:box.label(text='No hierarchy metadata for this asset')
                 box.prop(item,'inner_mask_radius')
@@ -749,7 +766,7 @@ class EVEPanel(bpy.types.Panel):
         layout.prop(ui,'export_path');layout.prop(ui,'include_defaults')
         row=layout.row();row.operator('alice_eve.export');row.operator('alice_eve.render_full')
 
-CLASSES=(GeometryComponent,ToggleComponent,RefreshComponents,DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,SolidDetectorSurfaces,LightTransparentSurfaces,RestoreSurfaceExclusions,TPCSectorsInnerWall,SurroundLighting,ShowSceneLighting,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,ExportConfig,RenderFull,EVEPanel)
+CLASSES=(GeometryComponent,ToggleComponent,RefreshComponents,DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,SolidDetectorSurfaces,LightTransparentSurfaces,RestoreSurfaceExclusions,TPCSectorsInnerWall,SurroundLighting,FastStructuralSurfaces,ShowSceneLighting,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,ExportConfig,RenderFull,EVEPanel)
 
 def start_editor(job,event,metadata):
     global JOB,EVENT,DEVICES,RECOMMENDATION,PALETTES

@@ -120,6 +120,7 @@ class Window(QMainWindow):
         self.render_button=QPushButton('Render selected events');self.render_button.setObjectName('primary');self.render_button.clicked.connect(lambda:self.start_render(False));bottom.addWidget(self.render_button)
         self.update_availability()
         self.library.discover(Path(self.output.text()));self.refresh_library()
+        self.geometry_lod.currentTextChanged.connect(self.refresh_components)
         for field in self.asset_fields.values():field.editingFinished.connect(self.refresh_components)
         self.refresh_components()
         self.library_timer=QTimer(self);self.library_timer.timeout.connect(self.refresh_library);self.library_timer.start(2000)
@@ -149,7 +150,7 @@ class Window(QMainWindow):
         self.cutaway=QCheckBox('Half cutaway (global Y plane)');self.cutaway.setChecked(self.base.cutaway);self.cutaway.toggled.connect(self.change_cutaway);layout.addWidget(self.cutaway)
         opening_note=QLabel('Opening direction is configurable per detector in the interactive editor: 0° is +X, 90° is +Y, −90° is −Y. The half-cutaway shortcut uses −Y. Show complete detectors resets opening angles.');opening_note.setWordWrap(True);layout.addWidget(opening_note)
         self.geometry_opening_label=QLabel();self.geometry_opening_label.setWordWrap(True);layout.addWidget(self.geometry_opening_label);self.refresh_opening_summary()
-        self.geometry_lod=QComboBox();self.geometry_lod.addItems(['full','simplified']);self.geometry_lod.setCurrentText(self.base.geometry_lod);layout.addWidget(QLabel('Geometry detail'));layout.addWidget(self.geometry_lod)
+        self.geometry_lod=QComboBox();self.geometry_lod.addItems(['full','structural','simplified']);self.geometry_lod.setCurrentText(self.base.geometry_lod);layout.addWidget(QLabel('Geometry detail (structural = cached large surfaces)'));layout.addWidget(self.geometry_lod)
         self.opacity=number(self.base.geometry_opacity,0,1,2);form=QFormLayout();form.addRow('Geometry opacity',self.opacity);layout.addLayout(form);layout.addStretch()
     def set_all_detector_modes(self,mode):
         for combo in self.detector_modes.values():combo.setCurrentText(mode)
@@ -475,11 +476,18 @@ class Window(QMainWindow):
             if not data:
                 QTreeWidgetItem(self.component_tree,['No component metadata for this asset','']);return
             choices=self.scene_overrides.get('geometry_components',{}).get(name,{})
+            large=self.scene_overrides.get('geometry_lods',{}).get(name,self.geometry_lod.currentText())=='structural'
+            supported=None
+            if large:
+                from .structural_geometry import load,supported_components
+                supported=supported_components(load(path,self.geometry_units.currentText()))
             visibility=component_visibility(data,choices,self.scene_overrides.get('geometry_exclusions',{}).get(name,[]))
             nodes={}
             for identifier,entry in sorted(data['components'].items(),key=lambda kv:(kv[0].count('/'),kv[0])):
                 parent=nodes.get(entry['parent'],self.component_tree);item=QTreeWidgetItem(parent,[entry['label'],str(entry['count'])]);item.setData(0,Qt.UserRole,identifier)
                 item.setFlags(item.flags()|Qt.ItemIsUserCheckable);item.setCheckState(0,Qt.PartiallyChecked if visibility[identifier] is None else Qt.Checked if visibility[identifier] else Qt.Unchecked);nodes[identifier]=item
+                if supported is not None and identifier not in supported:
+                    item.setFlags(item.flags()&~Qt.ItemIsEnabled);item.setToolTip(0,'Fine component omitted from large-surface geometry; choose full detail to display it')
             self.component_tree.expandToDepth(0)
         except Exception as exc:QTreeWidgetItem(self.component_tree,[str(exc),''])
         finally:self.component_tree.blockSignals(False)
@@ -598,7 +606,9 @@ class Window(QMainWindow):
         geometry_details={}
         for name in cfg.geometry+(['L3'] if cfg.magnet else []):
             from .geometry_selection import description
-            combo=QComboBox();combo.addItem('Keep current: '+description(cfg.to_dict(),name),'current');combo.addItem('Full aligned surfaces','full');combo.addItem('Simplified aligned cells','simplified');combo.addItem('Schematic envelope','schematic');geometry_details[name]=combo;form.addRow(name+' geometry detail',combo)
+            combo=QComboBox();combo.addItem('Keep current: '+description(cfg.to_dict(),name),'current');combo.addItem('Full aligned surfaces','full')
+            if name in ('ITS','TPC'):combo.addItem('Large surfaces (cached, fast)','structural')
+            combo.addItem('Simplified aligned cells','simplified');combo.addItem('Schematic envelope','schematic');geometry_details[name]=combo;form.addRow(name+' geometry detail',combo)
         if geometry_details:
             note=QLabel('Explicit geometry choices override the preview type and appearance. Full and simplified aligned geometry require their assets.');note.setWordWrap(True);form.addRow(note)
         def toggle():

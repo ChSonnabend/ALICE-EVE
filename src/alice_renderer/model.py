@@ -220,10 +220,10 @@ class RenderSettings:
         for color in (self.highlight_track_color,self.highlight_cluster_color):
             if not re.fullmatch(r'#[0-9a-fA-F]{6}',color):raise ValueError('Invalid highlight colour')
         if not isinstance(self.highlight_override_color,bool):raise ValueError('Highlight colour override must be boolean')
-        if self.geometry_lod not in ('full','simplified'):raise ValueError('Invalid geometry detail')
+        if self.geometry_lod not in ('full','simplified','structural'):raise ValueError('Invalid geometry detail')
         for name,lod in self.geometry_lods.items():
             if name!='L3':detector(name)
-            if lod not in ('full','simplified'):raise ValueError('Invalid per-detector geometry detail')
+            if lod not in ('full','simplified','structural'):raise ValueError('Invalid per-detector geometry detail')
         for name,approximate in self.geometry_schematics.items():
             if name!='L3':detector(name)
             if not isinstance(approximate,bool):raise ValueError('Per-detector schematic choice must be boolean')

@@ -230,6 +230,10 @@ def envelope(name,settings):
     obj.data.materials.append(materials(name, settings.get('colors_linear',{}).get(key,rgb(settings['colors'][key])),settings.get('geometry_opacities',{}).get(name,settings['geometry_opacity']),settings=settings))
 
 def imported_geometry(name,path,settings,bounds_only=False):
+    if settings.get('geometry_lods',{}).get(name,settings.get('geometry_lod','full'))=='structural':
+        if settings.get('geometry_display',{}).get(name,'surfaces')!='surfaces':raise ValueError('Large surfaces use their built shapes; choose Existing surfaces')
+        from structural import imported
+        return imported(name,path,settings,bounds_only)
     path=Path(path);before=set(bpy.data.objects)
     collection_name=name+' — clipping bounds' if bounds_only else name
     if path.suffix=='.blend':

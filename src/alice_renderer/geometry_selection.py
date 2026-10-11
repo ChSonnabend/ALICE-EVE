@@ -9,6 +9,7 @@ def detail(settings,name):
 
 def description(settings,name):
     if is_schematic(settings,name):return 'schematic envelope'
+    if detail(settings,name)=='structural':return 'large surfaces (cached display approximation)'
     style=settings.get('geometry_display',{}).get(name,'surfaces')
     if style!='surfaces':return style+' (approximate aligned outer hull)'
     return 'full aligned surfaces' if detail(settings,name)=='full' else 'simplified aligned cells'
@@ -19,7 +20,7 @@ def render_choices(cfg,choices):
     for name,choice in choices.items():
         if name not in selected:continue
         if choice=='current':continue
-        if choice not in ('full','simplified','schematic'):raise ValueError('Invalid render geometry choice')
+        if choice not in ('full','simplified','structural','schematic'):raise ValueError('Invalid render geometry choice')
         schematics[name]=choice=='schematic'
         if choice!='schematic':lods[name]=choice
         styles[name]='surfaces'

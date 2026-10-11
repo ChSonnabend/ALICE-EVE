@@ -78,6 +78,16 @@ def preflight(settings: RenderSettings, events, devices: dict, output: Path) -> 
             asset=settings.geometry_assets.get(name,'')
             if not asset or not Path(asset).is_file(): errors.append(f'{name}: provide detector geometry (.glb, .gltf, .obj, .blend), or explicitly select schematic envelopes')
             elif Path(asset).suffix.lower() not in ('.glb','.gltf','.obj','.blend'): errors.append(f'{name}: unsupported geometry format')
+    for name in set(settings.geometry+(['L3'] if settings.magnet else []))|clip_assets:
+        if not is_schematic(values,name) and detail(values,name)=='structural':
+            try:
+                from .structural_geometry import load,SUPPORTED
+                if name not in SUPPORTED:raise ValueError('Large surfaces support ITS/TPC; choose full or coarse-cell geometry for this detector')
+                cache=load(settings.geometry_assets.get(name,''),settings.geometry_units)
+                if cache['detector']!=name:raise ValueError('Large-surface cache detector differs from selected asset')
+                if settings.geometry_inner_masks.get(name):raise ValueError('Clear inner-placement masks; merged large surfaces use component choices/openings')
+                if settings.geometry_display.get(name,'surfaces')!='surfaces':raise ValueError('Choose Existing surfaces for cached large surfaces')
+            except (OSError,ValueError,KeyError) as exc:errors.append(name+': '+str(exc))
     from .geometry_components import load_components
     for name,choices in settings.geometry_components.items():
         if not choices or name not in settings.geometry+(['L3'] if settings.magnet else []):continue

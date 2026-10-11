@@ -74,6 +74,12 @@ def recipe(settings, event=None, *, default_input=None, default_event=None):
             unknown=set(settings.geometry_components.get(name,{}))-set(component_data['components'])
             if unknown:raise ValueError(name+': unknown geometry components: '+', '.join(sorted(unknown)))
         elif settings.geometry_components.get(name):raise ValueError(name+': component metadata is missing')
+        from .geometry_selection import detail
+        if detail(values,name)=='structural':
+            from .structural_geometry import load,sidecar_path
+            load(value,settings.geometry_units)
+            cache_file=sidecar_path(value)
+            refs[name]['structural']={'file':cache_file.name,'sha256':sha256(cache_file)}
     defaults={}
     if default_input is not None:defaults['input']=str(default_input)
     if default_event is not None:defaults['event']=str(default_event)
@@ -118,6 +124,10 @@ def resolve_settings(data,config_path,geometry_root=None,asset_overrides=None):
             from .geometry_components import sidecar_path
             component_file=sidecar_path(path);component_ref=ref['components']
             if not component_file.is_file() or sha256(component_file)!=component_ref['sha256']:raise ValueError(name+': copy the identical geometry component metadata alongside the asset')
+        if 'structural' in ref:
+            from .structural_geometry import sidecar_path
+            cache_file=sidecar_path(path)
+            if not cache_file.is_file() or sha256(cache_file)!=ref['structural']['sha256']:raise ValueError(name+': copy the identical large-surface cache alongside the asset')
         assets[name]=str(path.resolve())
     # A schematic recipe has no required assets. Keep explicitly supplied local
     # assets available when it is reopened and upgraded to aligned rendering.
@@ -135,6 +145,8 @@ def resolve_settings(data,config_path,geometry_root=None,asset_overrides=None):
     required=cfg.geometry+(['L3'] if cfg.magnet else [])
     from .geometry_selection import is_schematic
     if any(name not in data.get('geometry',{}) and not is_schematic(cfg.to_dict(),name) for name in required):raise ValueError('Scene is missing selected geometry references')
+    from .geometry_selection import detail
+    if any(detail(cfg.to_dict(),name)=='structural' and not is_schematic(cfg.to_dict(),name) and 'structural' not in ref for name,ref in data['geometry'].items()):raise ValueError('Scene is missing the large-surface cache reference; export the scene again')
     return cfg.validate()
 
 def choose_event(cat,selector):

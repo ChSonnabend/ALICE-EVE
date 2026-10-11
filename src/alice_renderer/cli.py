@@ -15,6 +15,8 @@ def main():
     demo=sub.add_parser('demo');demo.add_argument('--output',type=Path,default=Path('examples/synthetic-events.jsonl'))
     index=sub.add_parser('index');index.add_argument('input',type=Path);index.add_argument('--profile',type=Path);index.add_argument('--cache',type=Path,default=Path('cache'))
     devices=sub.add_parser('devices');devices.add_argument('--blender',default=find_blender())
+    prepare=sub.add_parser('prepare-geometry',help='Bake fast ITS/TPC large-surface caches once')
+    prepare.add_argument('--geometry-root',type=Path,required=True);prepare.add_argument('--detectors',default='ITS,TPC');prepare.add_argument('--units',choices=['m','cm'],default='m');prepare.add_argument('--blender',default=find_blender())
     render=sub.add_parser('render');render.add_argument('catalogue',type=Path);render.add_argument('--events',default='all');render.add_argument('--settings',type=Path);render.add_argument('--blender',default=find_blender());render.add_argument('--output',type=Path,default=Path('renders'));render.add_argument('--preview',action='store_true')
     for name in ('render-config','edit-config'):
         command=sub.add_parser(name,help='Render or interactively edit a portable scene')
@@ -33,6 +35,13 @@ def main():
         if args.command=='inspect':print(json.dumps(inspect_input(args.input).__dict__,indent=2))
         elif args.command=='demo':print(generate(args.output))
         elif args.command=='devices':print(json.dumps(probe(args.blender),indent=2))
+        elif args.command=='prepare-geometry':
+            import subprocess
+            if not args.blender:raise ValueError('Blender is required to prepare geometry; install it or provide --blender')
+            script=Path(__file__).with_name('blender')/'structural_builder.py'
+            result=subprocess.run([args.blender,'--background','--factory-startup','--python-exit-code','1','--python',str(script),'--','--geometry-root',str(args.geometry_root.resolve()),'--detectors',args.detectors,'--units',args.units],capture_output=True,text=True)
+            if result.returncode:raise ValueError('Large-surface preparation failed:\n'+result.stdout+'\n'+result.stderr)
+            print(result.stdout)
         elif args.command=='index':
             info=inspect_input(args.input);source=args.input
             if info.format not in ('events','aod'):
