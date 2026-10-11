@@ -26,7 +26,7 @@ All checks use run **560067**, TF counter **2619419**, first orbit **212036032**
 - All **15 detector systems plus L3** were built as aligned assets, covering **1,418,318 physical surface instances**. Every translation passed at stored precision; maximum rotation-matrix entry error was **2.07 × 10⁻⁷**. All surface hashes match the exact geometry manager captured during the final raw and CTF reconstructions.
 - Actual real-data CPU preview and Apple Metal renders passed. Separate selected events have independent PNG/configuration/log/Blender outputs. A global-Y cutaway clips geometry rather than relying on long transparent ray chains. The camera uses ALICE +Y as up.
 - Actual GUI import, selection, geometry auto-fill, scalar availability and Preview-button execution passed. No MC truth is fabricated.
-- **148 automated tests passed**, including atomic caches, complete enumeration, flow control and private socket namespaces. Python source compilation and native exporter compilation passed.
+- **150 automated tests passed**, including atomic caches, complete enumeration, flow control, private socket namespaces and the native-component TPC preset. Python source compilation and native exporter compilation passed.
 
 Those earlier datasets passed enumeration checks but have superseded TPC coordinates; do not use them for new TPC renders. Coordinate-version-3 exports and their full audits replace them. Their manifests, enumeration reports, object audits and geometry reports retain the evidence. Earlier exports remain available for comparison. Current assets are under `geometry/run-560067`; real render evidence is under `renders/qa/real-data`.
 
@@ -78,3 +78,14 @@ Blender checks exercise shared ITS layer prototypes, TPC inner walls, mask
 restoration, simplified geometry, AO2D feature colouring and portable export.
 These geometry assets are not presented as run-572669 alignment. See
 [AO2D](AO2D.md) and [components](SCENE-CONFIG.md#detector-component-categories).
+
+The TPC sectors/inner-wall preset retains exactly 254 native placements (216
+readout-sector chambers and 38 inner-wall/shield placements), removing 10,062
+other placements without changing data or clipping bounds. A surround-light rig
+adds eight side and two end area lights while retaining existing lights. Native
+Blender QA verifies light aim, repeated-button idempotence, camera preservation
+and component/light export. It also verifies that newly orbit-built cameras
+record their updated world transform, avoiding stale identity rotation in render
+history. A separate exterior CPU render confirms coherent, illuminated blue TPC
+surfaces against a black background; this is visual validation, not a physics
+check.

@@ -469,12 +469,15 @@ def render(job_path,interactive=False):
         from camera_pose import restore
         camera.data.type='ORTHO' if settings['camera']=='orthographic' else 'PERSP'
         restore(camera,settings['camera_pose'])
+    # Flush the newly assigned camera transform before recording its world pose.
+    # Otherwise an orbit-built camera can export a stale identity rotation.
+    bpy.context.view_layer.update()
     metadata['camera_up']=list(camera.rotation_euler.to_matrix() @ Vector((0,1,0)))
     from camera_pose import snapshot
     metadata['camera']=snapshot(camera)
     scene.camera=camera
     for i,light in enumerate(settings['lights']):
-        bpy.ops.object.light_add(type='AREA',location=light['position_m']);lamp=bpy.context.object;lamp.name='ALICE light '+str(i+1)
+        bpy.ops.object.light_add(type='AREA',location=light['position_m']);lamp=bpy.context.object;lamp.name=light.get('name','ALICE light '+str(i+1))
         lamp.data.energy=light['energy'];lamp.data.shape='DISK';lamp.data.size=light['size_m'];lamp.data.color=light.get('color_linear',rgb(light['color']))
         lamp.rotation_euler=light.get('rotation') or (target-lamp.location).to_track_quat('-Z','Y').to_euler()
     scene.view_settings.view_transform=settings.get('view_transform','AgX')

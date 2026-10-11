@@ -67,7 +67,7 @@ def current_settings():
     cfg['mode']=ui.mode;cfg['track_color_mode']=ui.track_mode;cfg['cluster_color_mode']=ui.cluster_mode;cfg['palette']=ui.palette;cfg['palette_lut']=PALETTES.get(ui.palette,JOB['settings'].get('palette_lut',[]))
     cfg['color_ranges']={'tracks':[ui.track_min,ui.track_max],'clusters':[ui.cluster_min,ui.cluster_max]}
     cfg['scale_min']=None;cfg['scale_max']=None
-    cfg['lights']=[{'position_m':list(o.location),'rotation':list(o.rotation_euler),'energy':o.data.energy,'size_m':o.data.size,'color':hex_color(o.data.color),'color_linear':list(o.data.color)} for o in scene.objects if o.type=='LIGHT' and o.data.type=='AREA']
+    cfg['lights']=[{'name':o.name,'position_m':list(o.location),'rotation':list(o.rotation_euler),'energy':o.data.energy,'size_m':o.data.size,'color':hex_color(o.data.color),'color_linear':list(o.data.color)} for o in scene.objects if o.type=='LIGHT' and o.data.type=='AREA']
     return RenderSettings(**cfg).validate()
 
 def track_signature(ui):
@@ -431,6 +431,42 @@ class RestoreSurfaceExclusions(bpy.types.Operator):
                 item.exclusions='';item.inner_mask_radius=0
         return bpy.ops.alice_eve.apply_geometry()
 
+class TPCSectorsInnerWall(bpy.types.Operator):
+    bl_idname='alice_eve.tpc_sectors_inner_wall';bl_label='TPC sectors + inner wall'
+    bl_description='Keep only aligned TPC readout-sector chambers and inner wall/shields; hide rods, supports, outer wall and central electrode; retain camera, materials and event data'
+    def execute(self,context):
+        from alice_renderer.geometry_components import load_components
+        from alice_renderer.scene_presets import tpc_sectors_and_inner_wall
+        item=context.scene.alice_eve.detectors.get('TPC')
+        try:
+            if item is None or not item.asset_path:raise ValueError('Choose the aligned TPC asset first')
+            choices=tpc_sectors_and_inner_wall(load_components(bpy.path.abspath(item.asset_path)))
+            populate_components(item)
+            for component in item.components:
+                component.explicit=component.identifier in choices
+                component.enabled=choices.get(component.identifier,True)
+            item.detail='full';item.display='surfaces';item.exclusions='';item.inner_mask_radius=0;item.visible=True
+            return bpy.ops.alice_eve.apply_geometry()
+        except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
+
+class SurroundLighting(bpy.types.Operator):
+    bl_idname='alice_eve.surround_lighting';bl_label='Add lights around detector'
+    bl_description='Add eight broad side lights and two end lights; retain existing lights, camera and colours. Repeating replaces only this light rig'
+    def execute(self,context):
+        from alice_renderer.scene_presets import surround_lights,SURROUND_LIGHT_PREFIX
+        from mathutils import Vector
+        for lamp in list(context.scene.objects):
+            if lamp.type=='LIGHT' and lamp.name.startswith(SURROUND_LIGHT_PREFIX):
+                data=lamp.data;bpy.data.objects.remove(lamp,do_unlink=True)
+                if data.users==0:bpy.data.lights.remove(data)
+        target=Vector(tuple(v*.01 for v in JOB['settings']['target_cm']))
+        for light in surround_lights(target):
+            data=bpy.data.lights.new(light['name'],'AREA');data.energy=light['energy'];data.shape='DISK';data.size=light['size_m']
+            lamp=bpy.data.objects.new(light['name'],data);context.scene.collection.objects.link(lamp)
+            lamp.location=light['position_m'];lamp.rotation_euler=(target-lamp.location).to_track_quat('-Z','Y').to_euler()
+        self.report({'INFO'},'Surround lighting added; each light remains adjustable and exports with the scene')
+        return {'FINISHED'}
+
 class CameraFromView(bpy.types.Operator):
     bl_idname='alice_eve.camera_from_view';bl_label='Use current view as camera'
     bl_description='Capture this viewport as the render camera; an existing camera view is already captured'
@@ -637,7 +673,7 @@ class EVEPanel(bpy.types.Panel):
         layout=self.layout;ui=context.scene.alice_eve
         cfg=current_settings().to_dict()
         layout.label(text='Detector surfaces')
-        layout.operator('alice_eve.solid_surfaces');layout.operator('alice_eve.light_transparent_surfaces');layout.operator('alice_eve.restore_surface_exclusions');layout.prop(ui,'viewport_renderer');layout.prop(ui,'viewport_samples')
+        layout.operator('alice_eve.solid_surfaces');layout.operator('alice_eve.light_transparent_surfaces');layout.operator('alice_eve.restore_surface_exclusions');layout.operator('alice_eve.tpc_sectors_inner_wall');layout.operator('alice_eve.surround_lighting');layout.prop(ui,'viewport_renderer');layout.prop(ui,'viewport_samples')
         layout.prop(ui,'geometry_lod');layout.operator('alice_eve.full_geometry')
         layout.operator('alice_eve.select_no_detectors');layout.operator('alice_eve.complete_geometry')
         layout.label(text='Outer shell / outline are approximate hulls.')
@@ -692,7 +728,7 @@ class EVEPanel(bpy.types.Panel):
         layout.prop(ui,'export_path');layout.prop(ui,'include_defaults')
         row=layout.row();row.operator('alice_eve.export');row.operator('alice_eve.render_full')
 
-CLASSES=(GeometryComponent,ToggleComponent,RefreshComponents,DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,SolidDetectorSurfaces,LightTransparentSurfaces,RestoreSurfaceExclusions,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,ExportConfig,RenderFull,EVEPanel)
+CLASSES=(GeometryComponent,ToggleComponent,RefreshComponents,DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,SolidDetectorSurfaces,LightTransparentSurfaces,RestoreSurfaceExclusions,TPCSectorsInnerWall,SurroundLighting,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,ExportConfig,RenderFull,EVEPanel)
 
 def start_editor(job,event,metadata):
     global JOB,EVENT,DEVICES,RECOMMENDATION,PALETTES

@@ -134,6 +134,24 @@ category remains available when a coarser label is unsuitable. TPC inner/outer
 rods are separated by their aligned placement radius. An object prototype shared
 across several layers never forces those layers to share a visibility setting.
 
+**TPC sectors + inner wall** selects only the asset's native readout-sector
+chambers and inner wall/shields. It hides the outer wall, rods/rings, central
+electrode and supports, clears old TPC name/radius masks, and keeps the camera,
+opening angle, colours, opacity and event data. The component checkboxes remain
+available for further changes. With the run-560067 asset this keeps 216 readout
+and 38 inner-wall placements out of 10,316 TPC placements; these are full aligned
+surfaces, not a schematic envelope. Track clipping still uses the complete
+aligned detector bounds.
+
+**Add lights around detector** keeps existing lights and adds eight broad white
+area lights at two longitudinal positions around the sides plus one at each
+end. The side lights use 200 W, a 6 m radial distance and 4 m size; the end lights
+use 150 W, an 8 m distance and 4 m size. All point at the saved scene target.
+Repeating the button replaces its own rig without accumulating duplicate lights.
+Each light's position, direction, power, size and colour can be edited in the
+sidebar and travels in the exported recipe. The black background stays black;
+surface illumination does not depend on making the background brighter.
+
 Recipes store `geometry_components`, for example:
 
 ```json

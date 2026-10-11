@@ -18,6 +18,10 @@ with tempfile.TemporaryDirectory(prefix='alice-geometry-qa-') as tmp:
     cfg=RenderSettings(detectors=['TPC'],geometry=[],geometry_assets={'TPC':str(a.asset.resolve())},geometry_units='m',geometry_opacity=1.,geometry_lod='full',geometry_openings={'TPC':180},cutaway=False)
     job=root/'job.json';job.write_text(json.dumps({'event':str(event),'output':str(root),'settings':cfg.to_dict(),'blender':{'version':list(bpy.app.version),'devices':[{'type':'CPU'}]}}))
     worker.render(job,True);ui=bpy.context.scene.alice_eve;item=ui.detectors.get('TPC')
+    recorded=json.loads((root/'metadata.json').read_text())['camera']['matrix_world']
+    actual=bpy.context.scene.camera.matrix_world
+    assert max(abs(recorded[r][c]-actual[r][c]) for r in range(4) for c in range(4))<1.e-6
+    assert abs(recorded[0][2])+abs(recorded[1][2])>0.1
     assert ui.viewport_renderer=='CYCLES' and bpy.context.scene.cycles.preview_samples==128
     assert item.geometry_available and not item.visible
     assert bpy.data.collections.get('TPC') is None
@@ -39,6 +43,28 @@ with tempfile.TemporaryDirectory(prefix='alice-geometry-qa-') as tmp:
     item.exclusions='TPC_IFC*';item.inner_mask_radius=1.
     assert bpy.ops.alice_eve.restore_surface_exclusions()=={'FINISHED'}
     assert item.exclusions=='' and item.inner_mask_radius==0 and camera.matrix_world==camera_pose
+    assert bpy.ops.alice_eve.tpc_sectors_inner_wall()=={'FINISHED'}
+    from editor import current_settings
+    choices=current_settings().geometry_components['TPC']
+    assert choices['parts/TPC_ICVM'] and choices['parts/TPC_IROCB']
+    assert not choices['parts/TPC_OCV'] and not choices['parts/TPC_ring']
+    assert camera.matrix_world==camera_pose
+    light_count=len([o for o in bpy.context.scene.objects if o.type=='LIGHT'])
+    assert bpy.ops.alice_eve.surround_lighting()=={'FINISHED'}
+    assert bpy.ops.alice_eve.surround_lighting()=={'FINISHED'}
+    assert len([o for o in bpy.context.scene.objects if o.type=='LIGHT'])==light_count+10
+    from alice_renderer.scene_presets import SURROUND_LIGHT_PREFIX
+    from mathutils import Vector
+    target=Vector(tuple(v*.01 for v in cfg.target_cm))
+    rig=[o for o in bpy.context.scene.objects if o.name.startswith(SURROUND_LIGHT_PREFIX)]
+    assert len(rig)==10 and camera.matrix_world==camera_pose
+    for light in rig:
+        direction=light.rotation_euler.to_matrix() @ Vector((0,0,-1))
+        assert direction.dot((target-light.location).normalized())>.99999
+    ui.export_path=str(root/'surround.json');assert bpy.ops.alice_eve.export()=={'FINISHED'}
+    exported=json.loads(Path(ui.export_path).read_text())['scene']
+    assert sum(light.get('name','').startswith(SURROUND_LIGHT_PREFIX) for light in exported['lights'])==10
+    assert exported['geometry_components']['TPC']==choices
     ui.viewport_samples=192
     assert bpy.context.scene.cycles.preview_samples==192 and bpy.context.scene.cycles.use_preview_denoising
     assert bpy.context.scene.eevee.taa_samples==192
