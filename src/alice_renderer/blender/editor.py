@@ -46,6 +46,7 @@ def current_settings():
     cfg['track_radius_cm']=ui.track_width_cm/2;cfg['cluster_radius_cm']=ui.cluster_radius_cm;cfg['clip_tracks']=ui.clip_tracks
     cfg['highlight_track_ids']=parse_track_ids(ui.highlight_ids);cfg['highlight_track_radius_cm']=ui.highlight_width_cm/2;cfg['highlight_cluster_radius_cm']=ui.highlight_cluster_radius_cm;cfg['highlight_override_color']=ui.highlight_override;cfg['highlight_track_color']=hex_color(ui.highlight_track_color);cfg['highlight_cluster_color']=hex_color(ui.highlight_cluster_color)
     cfg['geometry_lod']=ui.geometry_lod
+    cfg['geometry_lods']={i.name:i.detail for i in ui.detectors if i.detail!='inherit'}
     cfg['world_strength']=ui.world_strength;cfg['roughness']=ui.roughness;cfg['metallic']=ui.metallic;cfg['shading']=ui.shading
     cfg['mode']=ui.mode;cfg['track_color_mode']=ui.track_mode;cfg['cluster_color_mode']=ui.cluster_mode;cfg['palette']=ui.palette;cfg['palette_lut']=PALETTES.get(ui.palette,JOB['settings'].get('palette_lut',[]))
     cfg['color_ranges']={'tracks':[ui.track_min,ui.track_max],'clusters':[ui.cluster_min,ui.cluster_max]}
@@ -133,6 +134,7 @@ class DetectorSettings(bpy.types.PropertyGroup):
     data: BoolProperty(name='Event data',default=True,update=selection_update)
     mode: EnumProperty(name='Objects',items=[(v,v,'') for v in ('tracks','clusters','both')],update=selection_update)
     visible: BoolProperty(name='Surface',default=True,update=appearance_update)
+    detail: EnumProperty(name='Geometry detail',items=[('inherit','Use scene detail','Use the Geometry detail control above'),('full','Full geometry','Keep aligned detector surfaces'),('simplified','Simplified geometry','Use approximate coarse spatial cells')],default='inherit')
     opening: FloatProperty(name='Opening (degrees)',min=0,max=360,default=0,update=appearance_update)
     opacity: FloatProperty(name='Opacity',min=0,max=1,default=.18,update=appearance_update)
     display: EnumProperty(name='Appearance',items=[('surfaces','Existing surfaces','Keep the current aligned surfaces or simplified cells'),('shell','Outer shell','Approximate outer hull; removes internal structures and openings'),('outline','Outline','Edges of the approximate outer hull')])
@@ -208,7 +210,7 @@ class ApplyGeometry(bpy.types.Operator):
             for item in context.scene.alice_eve.detectors:
                 if not item.geometry_available:continue
                 old=bpy.data.collections.get(item.name)
-                if old and old.get('alice_display')==item.display and old.get('alice_geometry_lod')==cfg['geometry_lod']:continue
+                if old and old.get('alice_display')==item.display and old.get('alice_geometry_lod')==cfg['geometry_lods'].get(item.name,cfg['geometry_lod']):continue
                 if old:remove_owned_collection(old)
                 if cfg['schematic']:envelope(item.name,cfg)
                 else:imported_geometry(item.name,cfg['geometry_assets'][item.name],cfg)
@@ -233,7 +235,7 @@ class FullAlignedGeometry(bpy.types.Operator):
     bl_idname='alice_eve.full_geometry';bl_label='Full aligned surfaces'
     def execute(self,context):
         ui=context.scene.alice_eve;ui.geometry_lod='full'
-        for item in ui.detectors:item.display='surfaces'
+        for item in ui.detectors:item.display='surfaces';item.detail='inherit'
         return bpy.ops.alice_eve.apply_geometry()
 
 class OpaqueGeometry(bpy.types.Operator):
@@ -265,8 +267,26 @@ class ExportConfig(bpy.types.Operator):
             self.report({'INFO'},'Portable scene exported');return {'FINISHED'}
         except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
 
+DETAIL_ITEMS=[('full','Full geometry','Keep the aligned detector surfaces'),('simplified','Simplified geometry','Approximate coarse spatial cells; less geometry to render')]
+
+class RenderGeometryDetail(bpy.types.PropertyGroup):
+    detail: EnumProperty(name='Geometry detail',items=DETAIL_ITEMS,default='full')
+
+def initialize_render_geometry(operator,cfg):
+    operator.geometry_details.clear()
+    for name in cfg.geometry+(['L3'] if cfg.magnet else []):
+        item=operator.geometry_details.add();item.name=name;item.detail=cfg.geometry_lods.get(name,cfg.geometry_lod)
+
+def render_geometry_settings(cfg,items):
+    from dataclasses import replace
+    selected=set(cfg.geometry+(['L3'] if cfg.magnet else []))
+    overrides={**cfg.geometry_lods,**{i.name:i.detail for i in items if i.name in selected}}
+    return replace(cfg,geometry_lods=overrides).validate()
+
 class RenderFull(bpy.types.Operator):
     bl_idname='alice_eve.render_full';bl_label='Render full'
+    bl_description='Choose image quality and geometry detail for each selected detector and L3, then start a full render'
+    geometry_details: CollectionProperty(type=RenderGeometryDetail)
     quality: EnumProperty(name='Quality',items=[(v,v.title(),'') for v in ('draft','balanced','final','publication','custom')])
     backend: EnumProperty(name='Backend',items=[('AUTO','Recommended','')]+[(v,v,'') for v in ('CPU','METAL','HIP','CUDA','OPTIX')])
     width: IntProperty(name='Width',default=1920,min=64,max=16384)
@@ -274,23 +294,34 @@ class RenderFull(bpy.types.Operator):
     output: StringProperty(name='Output folder',subtype='DIR_PATH')
     def invoke(self,context,event):
         self.quality=RECOMMENDATION['quality'];self.output=JOB['render_output']
+        initialize_render_geometry(self,current_settings())
         return context.window_manager.invoke_props_dialog(self,width=480)
     def draw(self,context):
         layout=self.layout;layout.label(text=RECOMMENDATION['reason']);layout.prop(self,'quality');layout.prop(self,'backend')
         if self.quality=='custom':layout.prop(self,'width');layout.prop(self,'samples')
-        layout.prop(self,'output');layout.label(text='Same scene surfaces; quality changes only image size and samples.')
+        box=layout.box();box.label(text='Geometry detail for this render')
+        for item in self.geometry_details:box.prop(item,'detail',text=item.name)
+        if not self.geometry_details:box.label(text='No detector surfaces or magnet selected')
+        box.label(text='Full preserves surfaces; simplified uses coarse cells.')
+        box.label(text='Chosen shell/outline appearance is preserved.')
+        layout.prop(self,'output')
     def execute(self,context):
         try:
-            ui=context.scene.alice_eve;path=Path(bpy.path.abspath(ui.export_path)).resolve()
+            ui=context.scene.alice_eve
             if ExportConfig.execute(self,context)!={'FINISHED'}:return {'CANCELLED'}
             backend=RECOMMENDATION['backend'] if self.backend=='AUTO' else self.backend
             if not any(d['type']==backend for d in DEVICES['devices']):raise ValueError(f'{backend} is unavailable. Choose an available backend before rendering.')
             from alice_renderer.runtime import preflight
             from alice_renderer.scene_config import quality_settings
             check=quality_settings(current_settings(),'balanced' if self.quality=='custom' else self.quality,backend=backend,width=self.width if self.quality=='custom' else None,samples=self.samples if self.quality=='custom' else None)
+            check=render_geometry_settings(check,self.geometry_details)
             errors=preflight(check,[EVENT],DEVICES,Path(bpy.path.abspath(self.output)))
             if errors:raise ValueError('\n'.join(errors))
-            root=Path(JOB['output']);asset_map=root/'render-assets.local.json';asset_map.write_text(json.dumps(JOB['settings']['geometry_assets']))
+            root=Path(JOB['output']);path=root/'full-render-config.json'
+            data=recipe(check)
+            if ui.include_defaults:data['defaults']={'input':JOB['event'],'event':str(EVENT['id'])}
+            save_config(path,data)
+            asset_map=root/'render-assets.local.json';asset_map.write_text(json.dumps(JOB['settings']['geometry_assets']))
             command=[JOB['python'],'-m','alice_renderer.cli','render-config',str(path),'--input',JOB['event'],'--event',str(EVENT['id']),'--assets',str(asset_map),'--blender',bpy.app.binary_path,'--backend',backend,'--quality','balanced' if self.quality=='custom' else self.quality,'--output',bpy.path.abspath(self.output)]
             if self.quality=='custom':command+=['--width',str(self.width),'--samples',str(self.samples)]
             with (root/'full-render.log').open('w') as log:subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
@@ -328,6 +359,12 @@ def pick_displayed_track(area,region,mouse):
 
 class PickTracks(bpy.types.Operator):
     bl_idname='alice_eve.pick_tracks';bl_label='Pick tracks with mouse'
+    bl_description='Start or stop mouse picking of displayed tracks; Ctrl-click adds, Shift-click toggles, and Esc stops'
+    @classmethod
+    def description(cls,context,properties):
+        if hasattr(context.scene,'alice_eve') and context.scene.alice_eve.picking_active:
+            return 'Stop selecting tracks with the mouse and return to normal viewport controls (Esc also stops)'
+        return 'Click a displayed track to select its ID; Ctrl-click adds, Shift-click toggles, and Esc stops'
     def invoke(self,context,event):
         ui=context.scene.alice_eve
         if ui.picking_active:ui.picking_active=False;return {'FINISHED'}
@@ -354,6 +391,15 @@ class PickTracks(bpy.types.Operator):
             return {'RUNNING_MODAL'}
         return {'PASS_THROUGH'}
 
+class StopPicking(bpy.types.Operator):
+    bl_idname='alice_eve.stop_picking';bl_label='Stop picking'
+    bl_description='Stop mouse selection of tracks and restore normal viewport controls; Esc also stops picking'
+    def execute(self,context):
+        context.scene.alice_eve.picking_active=False
+        if context.window:context.window.cursor_modal_restore()
+        if context.area:context.area.tag_redraw()
+        return {'FINISHED'}
+
 class EVEPanel(bpy.types.Panel):
     bl_label='ALICE-EVE scene';bl_idname='ALICE_PT_scene';bl_space_type='VIEW_3D';bl_region_type='UI';bl_category='ALICE EVE'
     def draw(self,context):
@@ -369,7 +415,10 @@ class EVEPanel(bpy.types.Panel):
         layout.prop(context.scene.camera.data,'type');layout.prop(context.scene.camera.data,'lens');layout.prop(context.scene.camera.data,'ortho_scale')
         layout.operator('alice_eve.opaque_geometry');layout.operator('alice_eve.apply_geometry')
         layout.prop(ui,'mode');layout.prop(ui,'track_width_cm');layout.prop(ui,'cluster_radius_cm');layout.prop(ui,'clip_tracks');layout.prop(ui,'track_color');layout.prop(ui,'cluster_color')
-        box=layout.box();box.label(text='Track emphasis / decay chain');box.prop(ui,'highlight_ids');box.operator('alice_eve.pick_tracks',text='Stop picking (Esc)' if ui.picking_active else 'Pick tracks with mouse');box.prop(ui,'highlight_width_cm');box.prop(ui,'highlight_cluster_radius_cm');box.prop(ui,'highlight_override');box.prop(ui,'highlight_track_color');box.prop(ui,'highlight_cluster_color')
+        box=layout.box();box.label(text='Track emphasis / decay chain');box.prop(ui,'highlight_ids')
+        if ui.picking_active:box.operator('alice_eve.stop_picking',text='Stop picking (Esc)')
+        else:box.operator('alice_eve.pick_tracks')
+        box.prop(ui,'highlight_width_cm');box.prop(ui,'highlight_cluster_radius_cm');box.prop(ui,'highlight_override');box.prop(ui,'highlight_track_color');box.prop(ui,'highlight_cluster_color')
         for kind in ('track','cluster'):
             box=layout.box();box.prop(ui,kind+'_mode');row=box.row();row.prop(ui,kind+'_min');row.prop(ui,kind+'_max')
         layout.prop(ui,'palette');layout.operator('alice_eve.apply_data')
@@ -378,14 +427,14 @@ class EVEPanel(bpy.types.Panel):
             row=box.row();row.enabled=item.data_available;row.prop(item,'data');row.prop(item,'mode')
             row=box.row();row.enabled=item.geometry_available;row.prop(item,'visible')
             if item.geometry_available:
-                box.prop(item,'display');box.prop(item,'opening');box.prop(item,'color');box.prop(item,'opacity')
+                box.prop(item,'detail');box.prop(item,'display');box.prop(item,'opening');box.prop(item,'color');box.prop(item,'opacity')
         layout.prop(ui,'background');layout.prop(ui,'world_strength');layout.prop(ui,'roughness');layout.prop(ui,'metallic');layout.prop(ui,'shading')
         for lamp in (o for o in context.scene.objects if o.type=='LIGHT'):
             box=layout.box();box.label(text=lamp.name);box.prop(lamp,'location');box.prop(lamp,'rotation_euler');box.prop(lamp.data,'energy');box.prop(lamp.data,'size');box.prop(lamp.data,'color')
         layout.prop(ui,'export_path');layout.prop(ui,'include_defaults')
         row=layout.row();row.operator('alice_eve.export');row.operator('alice_eve.render_full')
 
-CLASSES=(DetectorSettings,SceneSettings,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,CameraFromView,RollCamera,PickTracks,ExportConfig,RenderFull,EVEPanel)
+CLASSES=(DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,CameraFromView,RollCamera,PickTracks,StopPicking,ExportConfig,RenderFull,EVEPanel)
 
 def start_editor(job,event,metadata):
     global JOB,EVENT,DEVICES,RECOMMENDATION,PALETTES
@@ -412,6 +461,7 @@ def start_editor(job,event,metadata):
     for name in (*DETECTORS,'L3'):
         item=ui.detectors.add();item.name=name;item.data_available=name in available;item.data=name in settings['detectors'];item.mode=settings.get('detector_modes',{}).get(name,settings['mode']);item.geometry_available=name in settings['geometry'] or name=='L3' and settings['magnet'];item.visible=item.geometry_available
         item.display=settings.get('geometry_display',{}).get(name,'surfaces')
+        item.detail=settings.get('geometry_lods',{}).get(name,'inherit')
         item.opening=settings['geometry_openings'].get(name,180 if settings['cutaway'] else 0);item.opacity=settings['geometry_opacities'].get(name,settings['geometry_opacity']);item.color=settings.get('colors_linear',{}).get('magnet' if name=='L3' else name,rgb(settings['colors'].get('magnet' if name=='L3' else name,'#243a82')))
     settings['palette_lut']=PALETTES[settings['palette']]
     locked=recipe(RenderSettings(**settings),event)['scene']['color_ranges']

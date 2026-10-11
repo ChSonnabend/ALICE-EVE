@@ -80,3 +80,13 @@ def test_invalid_per_detector_modes_and_highlight_sizes_rejected():
     with pytest.raises(ValueError):RenderSettings(detector_modes={'TPC':'invalid'}).validate()
     with pytest.raises(ValueError):RenderSettings(highlight_cluster_radius_cm=0).validate()
     with pytest.raises(ValueError):RenderSettings(roll=float('nan')).validate()
+
+
+def test_per_detector_and_magnet_geometry_detail_roundtrip(tmp_path):
+    cfg=RenderSettings(geometry_lod='simplified',geometry_lods={'TPC':'full','L3':'simplified'})
+    path=tmp_path/'scene.json';save_config(path,recipe(cfg))
+    restored=resolve_settings(load_config(path),path)
+    assert restored.geometry_lods==cfg.geometry_lods
+    assert restored.geometry_lod=='simplified'
+    with pytest.raises(ValueError):RenderSettings(geometry_lods={'TPC':'unknown'}).validate()
+    with pytest.raises(ValueError):RenderSettings(geometry_lods={'NOPE':'full'}).validate()

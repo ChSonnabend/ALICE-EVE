@@ -147,6 +147,7 @@ class RenderSettings:
     color_ranges: dict = field(default_factory=dict)
     colors_linear: dict = field(default_factory=dict)
     geometry_lod: str = 'full'
+    geometry_lods: dict = field(default_factory=dict)
     geometry_display: dict = field(default_factory=dict)
     geometry_openings: dict = field(default_factory=dict)
     geometry_opacities: dict = field(default_factory=dict)
@@ -195,6 +196,9 @@ class RenderSettings:
             if not re.fullmatch(r'#[0-9a-fA-F]{6}',color):raise ValueError('Invalid highlight colour')
         if not isinstance(self.highlight_override_color,bool):raise ValueError('Highlight colour override must be boolean')
         if self.geometry_lod not in ('full','simplified'):raise ValueError('Invalid geometry detail')
+        for name,lod in self.geometry_lods.items():
+            if name!='L3':detector(name)
+            if lod not in ('full','simplified'):raise ValueError('Invalid per-detector geometry detail')
         if self.shading not in ('smooth','flat'):raise ValueError('Invalid shading')
         for key in ('roughness','metallic'):
             if not math.isfinite(getattr(self,key)) or not 0<=getattr(self,key)<=1:raise ValueError('Invalid '+key)

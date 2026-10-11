@@ -50,4 +50,14 @@ with tempfile.TemporaryDirectory(prefix='alice-geometry-qa-') as tmp:
     ui.export_path=str(root/'none.json');assert bpy.ops.alice_eve.export()=={'FINISHED'}
     data=json.loads(Path(ui.export_path).read_text());assert data['scene']['detectors']==[] and data['scene']['geometry']==[]
     assert data['scene']['track_radius_cm']==.25
+    # Overrides reach actual aligned asset processing in both directions.
+    from worker import imported_geometry,remove_owned_collection
+    for global_lod,override in [('full','simplified'),('simplified','full')]:
+        old=bpy.data.collections.get('TPC')
+        if old:remove_owned_collection(old)
+        settings=cfg.to_dict();settings['geometry_lod']=global_lod;settings['geometry_lods']={'TPC':override}
+        imported_geometry('TPC',str(a.asset.resolve()),settings)
+        coll=bpy.data.collections['TPC'];assert coll['alice_geometry_lod']==override
+        if override=='simplified':assert any(o.get('alice_lod')=='simplified' for o in coll.objects)
+        else:assert any('num_instances' in o for o in coll.objects)
 print('Blender geometry visibility, styles, opacity, data and export QA passed')

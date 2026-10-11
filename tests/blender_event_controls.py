@@ -55,4 +55,30 @@ with tempfile.TemporaryDirectory(prefix='alice-controls-qa-') as tmp:
     assert saved['camera_pose']['matrix_world']==[list(row) for row in camera.matrix_world]
     assert saved['color_ranges']['tracks']==[0.,1.]
     assert bpy.context.preferences.inputs.view_rotate_method=='TRACKBALL'
+    assert 'stop' in bpy.ops.alice_eve.pick_tracks.get_rna_type().description.lower()
+    ui.picking_active=True
+    assert editor.PickTracks.description(bpy.context,None).startswith('Stop selecting')
+    assert 'stop' in bpy.ops.alice_eve.stop_picking.get_rna_type().description.lower()
+    assert bpy.ops.alice_eve.stop_picking()=={'FINISHED'}
+    assert not ui.picking_active
+    assert editor.PickTracks.description(bpy.context,None).startswith('Click a displayed')
+    # Exercise the full-render choices and exact config passed to the subprocess.
+    from unittest.mock import patch
+    bpy.types.Scene.alice_render_detail_qa=bpy.props.CollectionProperty(type=editor.RenderGeometryDetail)
+    for name in ('TPC','L3'):
+        ui.detectors[name].geometry_available=True;ui.detectors[name].visible=True
+    operator=SimpleNamespace(geometry_details=bpy.context.scene.alice_render_detail_qa,quality='draft',backend='CPU',output=str(root/'render-output'),report=lambda *args:None)
+    editor.initialize_render_geometry(operator,editor.current_settings())
+    assert {i.name:i.detail for i in operator.geometry_details}=={'TPC':'full','L3':'full'}
+    operator.geometry_details['TPC'].detail='simplified'
+    editor.JOB['python']=sys.executable
+    original=editor.current_settings().geometry_lods
+    with patch.object(editor.subprocess,'Popen') as spawn:
+        assert bpy.ops.alice_eve.render_full(quality='draft',backend='CPU',output=operator.output,
+            geometry_details=[{'name':i.name,'detail':i.detail} for i in operator.geometry_details])=={'FINISHED'}
+        command=spawn.call_args.args[0]
+        rendered=json.loads(Path(command[command.index('render-config')+1]).read_text())['scene']
+    assert rendered['geometry_lods']=={'TPC':'simplified','L3':'full'}
+    assert editor.current_settings().geometry_lods==original
+    del bpy.types.Scene.alice_render_detail_qa
 print('Blender per-detector objects, matching, emphasis, picking, roll and portable export QA passed')

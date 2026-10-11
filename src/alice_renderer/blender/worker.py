@@ -257,11 +257,12 @@ def imported_geometry(name,path,settings,bounds_only=False):
         remove_owned_collection(coll)
         return track_region
     lod={}
+    detail=settings.get('geometry_lods',{}).get(name,settings.get('geometry_lod','full'))
     style=settings.get('geometry_display',{}).get(name,'surfaces')
-    coll['alice_display']=style;coll['alice_geometry_lod']=settings.get('geometry_lod','full')
+    coll['alice_display']=style;coll['alice_geometry_lod']=detail
     if style=='outline' and settings['cutaway'] and name not in settings.get('geometry_openings',{}):
         settings=dict(settings,geometry_openings={**settings.get('geometry_openings',{}),name:180})
-    if settings.get('geometry_lod')=='simplified' or style!='surfaces':
+    if detail=='simplified' or style!='surfaces':
         from simplified import simplify
         objects,lod=simplify(objects,coll,name);meshes=objects
     if style!='surfaces':
@@ -273,7 +274,7 @@ def imported_geometry(name,path,settings,bounds_only=False):
     # that physical cut for full surfaces, as in the reference images, avoiding
     # long chains of invisible negative-Y geometry. Editing retains the shader
     # wedge so opening angles can change without losing the other half.
-    if not settings.get('_interactive') and style=='surfaces' and settings.get('geometry_lod','full')=='full' and settings.get('geometry_openings',{}).get(name)==180:
+    if not settings.get('_interactive') and style=='surfaces' and detail=='full' and settings.get('geometry_openings',{}).get(name)==180:
         physical_cut=True
     for obj in meshes:
         for poly in getattr(obj.data,'polygons',[]):poly.use_smooth=settings.get('shading','smooth')=='smooth' and not lod
