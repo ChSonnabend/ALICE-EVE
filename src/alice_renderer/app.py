@@ -72,6 +72,7 @@ class Window(QMainWindow):
         self.catalogue=None;self.loaded_input=None;self.task=None;self.device_info=None;self.base=startup_settings();self.images=[];self.close_pending=False
         self.scene_overrides={};self.timeframe_source=None;self.collision_source=None;self.showing_timeframes=False;self.collision_mode='tracks'
         self.library=SceneLibrary(ROOT/'scene-library.local.sqlite');self.library_signature=None;self.scene_detector_selection=None;self.requested_modes=None
+        self.library.ensure_default_favourites(ROOT)
         self.settings_file=ROOT/'settings.local.json'
         if self.settings_file.exists():
             try:

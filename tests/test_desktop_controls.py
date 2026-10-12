@@ -182,8 +182,8 @@ def test_recent_clone_retains_new_input_and_event_and_favourites_picker(window):
     cfg=RenderSettings(schematic=True,geometry=['TPC'],roll=39,highlight_track_ids=['old-id'],geometry_openings={'TPC':215})
     path=root/'saved.json';save_config(path,recipe(cfg));w.library.register(path,input_path='missing-old-file',event='old-event')
     entry=w.library.entries()[0];w.library.favourite(entry,title='Reference view');w.refresh_library()
-    assert w.recent_picker.count()==2 and w.favourite_picker.count()==2
-    assert w.library_lists[True].count()==1
+    assert w.recent_picker.count()==2 and w.favourite_picker.count()==4
+    assert w.library_lists[True].count()==3
     original_path=w.source.text();original_selected=w.model.selected.copy()
     w.use_library_entry(w.favourite_picker.itemData(1),True)
     assert w.source.text()==original_path and w.model.selected==original_selected
@@ -222,10 +222,26 @@ def test_library_tab_buttons_accept_qt_clicked_argument(window,monkeypatch):
     use.click();assert w.settings().roll==28
     monkeypatch.setattr(QInputDialog,'getText',lambda *args,**kwargs:('Pinned scene',True))
     add=next(b for b in recent_tab.findChildren(QPushButton) if b.text()=='Add to favourites…')
-    add.click();assert w.favourite_picker.count()==2 and w.library.entries(True)[0]['title']=='Pinned scene'
+    add.click();assert w.favourite_picker.count()==4 and w.library.entries(True)[0]['title']=='Pinned scene'
     w.library_lists[True].setCurrentRow(0)
     remove=next(b for b in w.library_lists[True].parentWidget().findChildren(QPushButton) if b.text()=='Remove favourite')
-    remove.click();assert w.favourite_picker.count()==1
+    remove.click();assert w.favourite_picker.count()==3
+
+def test_installed_favourites_visible_and_apply_to_selected_event(window):
+    from alice_renderer.scene_config import load_config
+    w,application,root=window;generate(root/'events.jsonl');w.load_input(root/'events.jsonl');settle(w,application)
+    w.model.selected={1};w.update_availability()
+    entries={e['title']:e for e in w.library.entries(True)}
+    assert set(entries)=={'ITS-TPC','ALICE general'}
+    assert w.favourite_picker.count()==3 and w.library_lists[True].count()==2
+    before=w.loaded_input
+    for entry in entries.values():
+        w.use_library_entry(entry,True)
+        scene=load_config(entry['config'])['scene'];actual=w.settings()
+        assert actual.camera_pose==scene['camera_pose']
+        assert set(actual.geometry)==set(scene['geometry'])
+        assert all(actual.colors[name]==value for name,value in scene['colors'].items())
+        assert w.model.selected=={1} and w.loaded_input==before
 
 
 def test_changed_unloaded_input_does_not_render_previous_event(window,monkeypatch):

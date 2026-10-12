@@ -11,6 +11,11 @@ from .scene_config import load_config, recipe, save_config, resolve_settings
 
 def default_path():return Path(__file__).resolve().parents[2]/'scene-library.local.sqlite'
 
+DEFAULT_FAVOURITES=(
+    ('builtin:its-tpc','ITS-TPC','favourite-its-tpc.json'),
+    ('builtin:alice-general','ALICE general','favourite-alice-general.json'),
+)
+
 class SceneLibrary:
     def __init__(self,path=None):
         self.path=Path(path or default_path());self.path.parent.mkdir(parents=True,exist_ok=True)
@@ -18,8 +23,38 @@ class SceneLibrary:
             db.execute('CREATE TABLE IF NOT EXISTS recent_inputs (path TEXT PRIMARY KEY, updated REAL)')
             db.execute('CREATE TABLE IF NOT EXISTS scenes (id TEXT PRIMARY KEY, config TEXT, title TEXT, kind TEXT, input TEXT, event TEXT, assets TEXT, updated REAL)')
             db.execute('CREATE TABLE IF NOT EXISTS favourites (id TEXT PRIMARY KEY, config TEXT, title TEXT, kind TEXT, input TEXT, event TEXT, assets TEXT, updated REAL)')
+            db.execute('CREATE TABLE IF NOT EXISTS seeded_favourites (id TEXT PRIMARY KEY)')
     def connect(self):
         db=sqlite3.connect(self.path,timeout=10);db.row_factory=sqlite3.Row;return db
+    def ensure_default_favourites(self,project_root=None):
+        """Install portable starter snapshots once; respect later removals/edits.
+
+        Only local geometry references are refreshed on subsequent launches, so
+        installing a bundle later also makes the starters usable. No event or
+        hardware selection comes from the machine where the recipes were saved.
+        """
+        root=Path(project_root) if project_root is not None else self.path.parent
+        from .model import DETECTORS
+        assets={p.stem:str(p.resolve()) for p in (root/'geometry/run-560067').glob('*.blend') if p.stem in (*DETECTORS,'L3')}
+        added=[]
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            for identity,title,filename in DEFAULT_FAVOURITES:
+                if db.execute('SELECT 1 FROM seeded_favourites WHERE id=?',(identity,)).fetchone():
+                    db.execute('UPDATE favourites SET assets=? WHERE id=? AND kind=?',(json.dumps(assets),identity,'builtin'))
+                    continue
+                # Preserve an existing favourite saved under the same name.
+                exists=db.execute('SELECT 1 FROM favourites WHERE id=? OR lower(title)=lower(?)',(identity,title)).fetchone()
+                if not exists:
+                    data=load_config(Path(__file__).with_name('presets')/filename)
+                    data['defaults']={}
+                    target=self.path.parent/'scene-library'/'favourites'/filename
+                    save_config(target,data)
+                    db.execute('INSERT INTO favourites VALUES (?,?,?,?,?,?,?,?)',
+                               (identity,str(target.resolve()),title,'builtin','','',json.dumps(assets),time.time()))
+                    added.append(title)
+                db.execute('INSERT INTO seeded_favourites VALUES (?)',(identity,))
+        return added
     def recent_inputs(self):
         with self.connect() as db:
             return [r['path'] for r in db.execute('SELECT path FROM recent_inputs ORDER BY updated DESC, path LIMIT 12')]

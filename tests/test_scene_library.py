@@ -5,6 +5,39 @@ from alice_renderer.model import RenderSettings
 from alice_renderer.scene_config import recipe,save_config,load_config
 from alice_renderer.scene_library import SceneLibrary
 
+def test_default_favourites_seed_once_preserve_edits_and_removals(tmp_path):
+    lib=SceneLibrary(tmp_path/'history.sqlite')
+    assert set(lib.ensure_default_favourites())=={'ITS-TPC','ALICE general'}
+    entries={e['title']:e for e in lib.entries(True)}
+    assert len(entries)==2 and not lib.entries()
+    for entry in entries.values():
+        assert entry['input']==entry['event']==''
+        assert load_config(entry['config'])['defaults']=={}
+    closeup=entries['ITS-TPC'];data=load_config(closeup['config'])
+    data['scene']['roll']=57;save_config(closeup['config'],data)
+    lib.unfavourite(entries['ALICE general'])
+    # A restart never restores a removed starter or overwrites a local snapshot.
+    lib=SceneLibrary(tmp_path/'history.sqlite')
+    assert lib.ensure_default_favourites()==[]
+    assert [e['title'] for e in lib.entries(True)]==['ITS-TPC']
+    assert lib.settings(lib.entries(True)[0],reuse=True).roll==57
+
+def test_default_favourites_geometry_installed_later_uses_local_paths(tmp_path):
+    lib=SceneLibrary(tmp_path/'history.sqlite');lib.ensure_default_favourites()
+    assert all(e['assets']=={} for e in lib.entries(True))
+    asset=tmp_path/'geometry/run-560067/ITS.blend';asset.parent.mkdir(parents=True);asset.touch()
+    lib.ensure_default_favourites()
+    assert all(e['assets']=={'ITS':str(asset)} for e in lib.entries(True))
+
+def test_default_favourites_do_not_replace_same_named_user_favourite(tmp_path):
+    lib=SceneLibrary(tmp_path/'history.sqlite');path=tmp_path/'custom.json'
+    save_config(path,recipe(RenderSettings(roll=83)))
+    lib.register(path);lib.favourite(lib.entries()[0],title='ITS-TPC')
+    assert lib.ensure_default_favourites()==['ALICE general']
+    entries={e['title']:e for e in lib.entries(True)}
+    assert len(entries)==2
+    assert lib.settings(entries['ITS-TPC']).roll==83
+
 def test_favourites_are_frozen_while_interactive_history_updates(tmp_path):
     lib=SceneLibrary(tmp_path/'history.sqlite');path=tmp_path/'scene.json'
     cfg=RenderSettings(schematic=True,geometry=['TPC'],roll=31)
