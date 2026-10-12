@@ -1,0 +1,12 @@
+{
+  "detector": "MCH",
+  "asset": "MCH.blend",
+  "units": "m",
+  "axes": "ALICE global XYZ",
+  "shapes": 128,
+  "instances": 16660,
+  "max_translation_error_m": 0.0,
+  "max_rotation_error": 1.1827136665127844e-07,
+  "source_sha256": "09125dfc2d8d4f4f27b6c50f601bd7f93d2831598625da0a3c76bf7a0a4cad4f",
+  "generator_sha256": "770dba786199d53280d852496ec13e8b69e512826af5f729977abbccdf3c5f0e"
+}

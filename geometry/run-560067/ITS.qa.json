@@ -1,0 +1,12 @@
+{
+  "detector": "ITS",
+  "asset": "ITS.blend",
+  "units": "m",
+  "axes": "ALICE global XYZ",
+  "shapes": 181,
+  "instances": 118587,
+  "max_translation_error_m": 0.0,
+  "max_rotation_error": 1.9255901700931943e-07,
+  "source_sha256": "5dbfbd0ee084410b679ad2a2855b6d1a86095ec2c259270fd499c4194644e7b9",
+  "generator_sha256": "770dba786199d53280d852496ec13e8b69e512826af5f729977abbccdf3c5f0e"
+}

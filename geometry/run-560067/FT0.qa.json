@@ -1,0 +1,12 @@
+{
+  "detector": "FT0",
+  "asset": "FT0.blend",
+  "units": "m",
+  "axes": "ALICE global XYZ",
+  "shapes": 16,
+  "instances": 1649,
+  "max_translation_error_m": 0.0,
+  "max_rotation_error": 1.1907695779411753e-07,
+  "source_sha256": "349174a21a0a5b24135d861ca7028a06a8834846a2995a88ba3be4139328b014",
+  "generator_sha256": "770dba786199d53280d852496ec13e8b69e512826af5f729977abbccdf3c5f0e"
+}

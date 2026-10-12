@@ -1,0 +1,12 @@
+{
+  "detector": "EMC",
+  "asset": "EMC.blend",
+  "units": "m",
+  "axes": "ALICE global XYZ",
+  "shapes": 1,
+  "instances": 4416,
+  "max_translation_error_m": 0.0,
+  "max_rotation_error": 2.069115603298144e-07,
+  "source_sha256": "c91ae094ef1af95ee57b4806ed590a49dc6f60061b027bf365508efeea401882",
+  "generator_sha256": "770dba786199d53280d852496ec13e8b69e512826af5f729977abbccdf3c5f0e"
+}

@@ -1,0 +1,12 @@
+{
+  "detector": "FDD",
+  "asset": "FDD.blend",
+  "units": "m",
+  "axes": "ALICE global XYZ",
+  "shapes": 5,
+  "instances": 48,
+  "max_translation_error_m": 0.0,
+  "max_rotation_error": 8.742277669594054e-08,
+  "source_sha256": "dc3e9e2201fad98a06060137c85682303ea92030169dc014aa96f38eabf4e4ef",
+  "generator_sha256": "770dba786199d53280d852496ec13e8b69e512826af5f729977abbccdf3c5f0e"
+}

@@ -9,7 +9,6 @@ data/
 old/
 settings.local.json
 native/generated-exporter/
-geometry/
 examples/*.jsonl
 profiles/virgo4-runtime.json
 profiles/virgo4-ingest.json
@@ -24,3 +23,8 @@ profiles/run-560067-raw.json
 configs/
 scene-library.local.sqlite*
 scene-library/
+
+# Version the prepared detector geometry and metadata.
+!geometry/**/*.blend
+geometry/**/*.blend1
+geometry/**/*.build.log

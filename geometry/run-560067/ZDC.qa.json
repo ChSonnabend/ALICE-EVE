@@ -1,0 +1,12 @@
+{
+  "detector": "ZDC",
+  "asset": "ZDC.blend",
+  "units": "m",
+  "axes": "ALICE global XYZ",
+  "shapes": 4,
+  "instances": 7444,
+  "max_translation_error_m": 0.0,
+  "max_rotation_error": 8.742277657347586e-08,
+  "source_sha256": "15da4c7c9b521444d7afce73c7be7b4af5b70723f438c68d3ffa259898a735ff",
+  "generator_sha256": "770dba786199d53280d852496ec13e8b69e512826af5f729977abbccdf3c5f0e"
+}

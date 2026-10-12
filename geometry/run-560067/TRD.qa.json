@@ -1,0 +1,12 @@
+{
+  "detector": "TRD",
+  "asset": "TRD.blend",
+  "units": "m",
+  "axes": "ALICE global XYZ",
+  "shapes": 14,
+  "instances": 1962,
+  "max_translation_error_m": 0.0,
+  "max_rotation_error": 1.1563341362707223e-07,
+  "source_sha256": "a8a1cd5a88a58d77f07814d7cd4d2103ec001b593134d574d2cbfac090d59db0",
+  "generator_sha256": "770dba786199d53280d852496ec13e8b69e512826af5f729977abbccdf3c5f0e"
+}

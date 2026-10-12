@@ -1,0 +1,12 @@
+{
+  "detector": "TPC",
+  "asset": "TPC.blend",
+  "units": "m",
+  "axes": "ALICE global XYZ",
+  "shapes": 81,
+  "instances": 10316,
+  "max_translation_error_m": 0.0,
+  "max_rotation_error": 1.201197823708089e-07,
+  "source_sha256": "b7ed1299f791a8b3d005f012050dd3a0e83f5d181f1066b0ba86786e5f13a242",
+  "generator_sha256": "770dba786199d53280d852496ec13e8b69e512826af5f729977abbccdf3c5f0e"
+}

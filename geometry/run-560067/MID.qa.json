@@ -1,0 +1,12 @@
+{
+  "detector": "MID",
+  "asset": "MID.blend",
+  "units": "m",
+  "axes": "ALICE global XYZ",
+  "shapes": 104,
+  "instances": 1544,
+  "max_translation_error_m": 0.0,
+  "max_rotation_error": 8.742277657347586e-08,
+  "source_sha256": "dd95fd1ad546f84b47cd472f6ab4a25f8e5d84d82e748b6edc550e0c75b3cfee",
+  "generator_sha256": "770dba786199d53280d852496ec13e8b69e512826af5f729977abbccdf3c5f0e"
+}

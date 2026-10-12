@@ -1,0 +1,21 @@
+{
+  "geometry_assets": {
+    "L3": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/L3.blend",
+    "TRD": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/TRD.blend",
+    "TOF": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/TOF.blend",
+    "TPC": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/TPC.blend",
+    "ITS": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/ITS.blend",
+    "MFT": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/MFT.blend",
+    "EMC": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/EMC.blend",
+    "PHS": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/PHS.blend",
+    "CPV": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/CPV.blend",
+    "FT0": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/FT0.blend",
+    "FV0": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/FV0.blend",
+    "HMP": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/HMP.blend",
+    "FDD": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/FDD.blend",
+    "ZDC": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/ZDC.blend",
+    "MCH": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/MCH.blend",
+    "MID": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/MID.blend"
+  },
+  "geometry_units": "m"
+}

@@ -1,0 +1,12 @@
+{
+  "detector": "CPV",
+  "asset": "CPV.blend",
+  "units": "m",
+  "axes": "ALICE global XYZ",
+  "shapes": 4,
+  "instances": 216,
+  "max_translation_error_m": 0.0,
+  "max_rotation_error": 2.827427325602372e-08,
+  "source_sha256": "9e7c428c964aaf6c2a98c342903524411cd2ee126db7fa5374018631af8c077b",
+  "generator_sha256": "770dba786199d53280d852496ec13e8b69e512826af5f729977abbccdf3c5f0e"
+}

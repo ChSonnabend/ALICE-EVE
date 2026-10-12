@@ -1,0 +1,12 @@
+{
+  "detector": "MFT",
+  "asset": "MFT.blend",
+  "units": "m",
+  "axes": "ALICE global XYZ",
+  "shapes": 367,
+  "instances": 42208,
+  "max_translation_error_m": 0.0,
+  "max_rotation_error": 9.799752137406735e-08,
+  "source_sha256": "007d32b2484ab30a8bdf79632a331986a3e973c12daf2f0dbe8fecab6667b7a0",
+  "generator_sha256": "770dba786199d53280d852496ec13e8b69e512826af5f729977abbccdf3c5f0e"
+}

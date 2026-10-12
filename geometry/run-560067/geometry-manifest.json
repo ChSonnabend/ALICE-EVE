@@ -1,0 +1,311 @@
+{
+  "schema_version": 1,
+  "run": 560067,
+  "source": "/lustre/alice/users/csonnab/ALICE-event-renderer-work/geometry/GLO/Config/GeometryAligned/snapshot.root",
+  "source_sha256": "08aa70efb4c4907ea219d7887c21a4d6d6f9658bdd993367cc5a568170055034",
+  "coordinates": "ALICE global XYZ",
+  "units": "cm",
+  "detail": "surfaces",
+  "detectors": {
+    "L3": {
+      "json": "L3.json",
+      "roots": [
+        "/cave_1/barrel_1/L3MO_1"
+      ],
+      "shapes": 10,
+      "instances": 516,
+      "json_sha256": "ddc3708619ec91ffe4c056ae4ea0a9bc6acdac695f17044f73eeba5103a47beb"
+    },
+    "TRD": {
+      "json": "TRD.json",
+      "roots": [
+        "/cave_1/barrel_1/B077_1/BSEGMO13_1/BTRD13_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO14_1/BTRD14_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO15_1/BTRD15_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO16_1/BTRD16_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO17_1/BTRD17_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO0_1/BTRD0_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO1_1/BTRD1_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO2_1/BTRD2_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO3_1/BTRD3_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO4_1/BTRD4_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO5_1/BTRD5_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO6_1/BTRD6_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO7_1/BTRD7_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO8_1/BTRD8_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO9_1/BTRD9_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO10_1/BTRD10_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO11_1/BTRD11_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO12_1/BTRD12_1"
+      ],
+      "shapes": 14,
+      "instances": 1962,
+      "json_sha256": "a8a1cd5a88a58d77f07814d7cd4d2103ec001b593134d574d2cbfac090d59db0"
+    },
+    "TOF": {
+      "json": "TOF.json",
+      "roots": [
+        "/cave_1/barrel_1/B077_1/BSEGMO13_1/BTOF13_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO14_1/BTOF14_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO15_1/BTOF15_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO16_1/BTOF16_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO17_1/BTOF17_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO0_1/BTOF0_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO1_1/BTOF1_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO2_1/BTOF2_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO3_1/BTOF3_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO4_1/BTOF4_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO5_1/BTOF5_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO6_1/BTOF6_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO7_1/BTOF7_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO8_1/BTOF8_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO9_1/BTOF9_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO10_1/BTOF10_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO11_1/BTOF11_1",
+        "/cave_1/barrel_1/B077_1/BSEGMO12_1/BTOF12_1"
+      ],
+      "shapes": 34,
+      "instances": 74322,
+      "json_sha256": "8f23072d3b57a8a2982e683584758cfc88dcd49efe9fe09a74047502eda9b094"
+    },
+    "TPC": {
+      "json": "TPC.json",
+      "roots": [
+        "/cave_1/barrel_1/TPC_M_1"
+      ],
+      "shapes": 81,
+      "instances": 10316,
+      "json_sha256": "b7ed1299f791a8b3d005f012050dd3a0e83f5d181f1066b0ba86786e5f13a242"
+    },
+    "ITS": {
+      "json": "ITS.json",
+      "roots": [
+        "/cave_1/barrel_1/ITSV_2",
+        "/cave_1/barrel_1/ITSServicesCarbonIB_1",
+        "/cave_1/barrel_1/ITSServicesCarbonOB_1",
+        "/cave_1/barrel_1/CageCover_1",
+        "/cave_1/barrel_1/CageCover_2",
+        "/cave_1/barrel_1/CageCoverRib_1",
+        "/cave_1/barrel_1/CageCoverRib_2",
+        "/cave_1/barrel_1/CageCoverRib_3",
+        "/cave_1/barrel_1/CageCoverRib_4",
+        "/cave_1/barrel_1/CageCover_3",
+        "/cave_1/barrel_1/CageCover_4",
+        "/cave_1/barrel_1/CageCover_5",
+        "/cave_1/barrel_1/CageCover_6",
+        "/cave_1/barrel_1/CageSidePanel_1",
+        "/cave_1/barrel_1/CageSidePanel_2",
+        "/cave_1/barrel_1/CageClosingCross_1",
+        "/cave_1/barrel_1/CageClosingCross_2",
+        "/cave_1/barrel_1/CageEndCap_1",
+        "/cave_1/barrel_1/CageCoverRib_5",
+        "/cave_1/barrel_1/CageCoverRib_6",
+        "/cave_1/barrel_1/CageBeamPipeSupport_1"
+      ],
+      "shapes": 181,
+      "instances": 118587,
+      "json_sha256": "5dbfbd0ee084410b679ad2a2855b6d1a86095ec2c259270fd499c4194644e7b9"
+    },
+    "MFT": {
+      "json": "MFT.json",
+      "roots": [
+        "/cave_1/barrel_1/MFTRailPairInsideCage_1",
+        "/cave_1/barrel_1/MFTRailPairInsideCage_2",
+        "/cave_1/barrel_1/MFTRailPairInsideCage_3",
+        "/cave_1/barrel_1/MFTRailPairInsideCage_4",
+        "/cave_1/barrel_1/MFTRailHingeInsideCage_1",
+        "/cave_1/barrel_1/MFTRailHingeInsideCage_2",
+        "/cave_1/barrel_1/MFTRailHingeInsideCage_3",
+        "/cave_1/barrel_1/MFTRailHingeInsideCage_4",
+        "/cave_1/barrel_1/MFTRailHingeInsideCage_5",
+        "/cave_1/barrel_1/MFTRailHingeInsideCage_6",
+        "/cave_1/barrel_1/MFTRailHingeInsideCage_7",
+        "/cave_1/barrel_1/MFTRailHingeInsideCage_8",
+        "/cave_1/barrel_1/MFT_0"
+      ],
+      "shapes": 367,
+      "instances": 42208,
+      "json_sha256": "007d32b2484ab30a8bdf79632a331986a3e973c12daf2f0dbe8fecab6667b7a0"
+    },
+    "EMC": {
+      "json": "EMC.json",
+      "roots": [
+        "/cave_1/barrel_1/SMOD_1",
+        "/cave_1/barrel_1/SMOD_2",
+        "/cave_1/barrel_1/SMOD_3",
+        "/cave_1/barrel_1/SMOD_4",
+        "/cave_1/barrel_1/SMOD_5",
+        "/cave_1/barrel_1/SMOD_6",
+        "/cave_1/barrel_1/SMOD_7",
+        "/cave_1/barrel_1/SMOD_8",
+        "/cave_1/barrel_1/SMOD_9",
+        "/cave_1/barrel_1/SMOD_10",
+        "/cave_1/barrel_1/SM3rd_1",
+        "/cave_1/barrel_1/SM3rd_2",
+        "/cave_1/barrel_1/DCSM_1",
+        "/cave_1/barrel_1/DCSM_2",
+        "/cave_1/barrel_1/DCSM_3",
+        "/cave_1/barrel_1/DCSM_4",
+        "/cave_1/barrel_1/DCSM_5",
+        "/cave_1/barrel_1/DCSM_6",
+        "/cave_1/barrel_1/DCEXT_1",
+        "/cave_1/barrel_1/DCEXT_2"
+      ],
+      "shapes": 1,
+      "instances": 4416,
+      "json_sha256": "c91ae094ef1af95ee57b4806ed590a49dc6f60061b027bf365508efeea401882"
+    },
+    "PHS": {
+      "json": "PHS.json",
+      "roots": [
+        "/cave_1/barrel_1/PHOH_1",
+        "/cave_1/barrel_1/PHOS_2",
+        "/cave_1/barrel_1/PHOS_3",
+        "/cave_1/barrel_1/PHOS_4"
+      ],
+      "shapes": 1,
+      "instances": 4,
+      "json_sha256": "eb139cd09f1894959d7f422f33b445ef234607f5ef5ed8f78c4ef2124c778238"
+    },
+    "CPV": {
+      "json": "CPV.json",
+      "roots": [
+        "/cave_1/barrel_1/CPV_2",
+        "/cave_1/barrel_1/CPV_3",
+        "/cave_1/barrel_1/CPV_4"
+      ],
+      "shapes": 4,
+      "instances": 216,
+      "json_sha256": "9e7c428c964aaf6c2a98c342903524411cd2ee126db7fa5374018631af8c077b"
+    },
+    "FT0": {
+      "json": "FT0.json",
+      "roots": [
+        "/cave_1/barrel_1/FT0A_1",
+        "/cave_1/barrel_1/FT0C_1"
+      ],
+      "shapes": 16,
+      "instances": 1649,
+      "json_sha256": "349174a21a0a5b24135d861ca7028a06a8834846a2995a88ba3be4139328b014"
+    },
+    "FV0": {
+      "json": "FV0.json",
+      "roots": [
+        "/cave_1/barrel_1/FV0_1"
+      ],
+      "shapes": 37,
+      "instances": 270,
+      "json_sha256": "9db03c575557b62af5c957c504c52121d8a99323775ed487101983cede74991e"
+    },
+    "HMP": {
+      "json": "HMP.json",
+      "roots": [
+        "/cave_1/barrel_1/Hmp0_0",
+        "/cave_1/barrel_1/Hmp1_0",
+        "/cave_1/barrel_1/Hcradle_1",
+        "/cave_1/barrel_1/Hmp2_0",
+        "/cave_1/barrel_1/Hmp3_0",
+        "/cave_1/barrel_1/Hcradle_3",
+        "/cave_1/barrel_1/Hmp4_0",
+        "/cave_1/barrel_1/Hmp5_0",
+        "/cave_1/barrel_1/Hcradle_5",
+        "/cave_1/barrel_1/Hmp6_0"
+      ],
+      "shapes": 31,
+      "instances": 1138156,
+      "json_sha256": "75f18b145696e414753365f31302c1db920e07cecf8c74944738270511fe88aa"
+    },
+    "FDD": {
+      "json": "FDD.json",
+      "roots": [
+        "/cave_1/caveRB24_1/FDA_1",
+        "/cave_1/caveRB24_1/FDA_2",
+        "/cave_1/FDC_1",
+        "/cave_1/FDC_2"
+      ],
+      "shapes": 5,
+      "instances": 48,
+      "json_sha256": "dc3e9e2201fad98a06060137c85682303ea92030169dc014aa96f38eabf4e4ef"
+    },
+    "ZDC": {
+      "json": "ZDC.json",
+      "roots": [
+        "/cave_1/caveRB24_1/ZEM_1",
+        "/cave_1/caveRB24_1/ZEM_2",
+        "/cave_1/ZDCA_1/ZNENV_2",
+        "/cave_1/ZDCA_1/ZPENV_2",
+        "/cave_1/ZDCC_1/ZNENV_1",
+        "/cave_1/ZDCC_1/ZPENV_1"
+      ],
+      "shapes": 4,
+      "instances": 7444,
+      "json_sha256": "15da4c7c9b521444d7afce73c7be7b4af5b70723f438c68d3ffa259898a735ff"
+    },
+    "MCH": {
+      "json": "MCH.json",
+      "roots": [
+        "/cave_1/DDIP_1/SC05I_8",
+        "/cave_1/DDIP_1/SC05O_9",
+        "/cave_1/DDIP_1/SC06I_10",
+        "/cave_1/DDIP_1/SC06O_11",
+        "/cave_1/YOUT1_1/SC01I_0",
+        "/cave_1/YOUT1_1/SC01O_1",
+        "/cave_1/YOUT1_1/SC02I_2",
+        "/cave_1/YOUT1_1/SC02O_3",
+        "/cave_1/YOUT1_1/SC03I_4",
+        "/cave_1/YOUT1_1/SC03O_5",
+        "/cave_1/YOUT1_1/SC04I_6",
+        "/cave_1/YOUT1_1/SC04O_7",
+        "/cave_1/YOUT2_1/SC07I_12",
+        "/cave_1/YOUT2_1/SC07O_13",
+        "/cave_1/YOUT2_1/SC08I_14",
+        "/cave_1/YOUT2_1/SC08O_15",
+        "/cave_1/YOUT2_1/SC09I_16",
+        "/cave_1/YOUT2_1/SC09O_17",
+        "/cave_1/YOUT2_1/SC10I_18",
+        "/cave_1/YOUT2_1/SC10O_19"
+      ],
+      "shapes": 128,
+      "instances": 16660,
+      "json_sha256": "09125dfc2d8d4f4f27b6c50f601bd7f93d2831598625da0a3c76bf7a0a4cad4f"
+    },
+    "MID": {
+      "json": "MID.json",
+      "roots": [
+        "/cave_1/YOUT2_1/SC11_1",
+        "/cave_1/YOUT2_1/SC12_1",
+        "/cave_1/YOUT2_1/SC13_1",
+        "/cave_1/YOUT2_1/SC14_1"
+      ],
+      "shapes": 104,
+      "instances": 1544,
+      "json_sha256": "dd95fd1ad546f84b47cd472f6ab4a25f8e5d84d82e748b6edc550e0c75b3cfee"
+    }
+  },
+  "assets": {
+    "L3": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/L3.blend",
+    "TRD": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/TRD.blend",
+    "TOF": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/TOF.blend",
+    "TPC": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/TPC.blend",
+    "ITS": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/ITS.blend",
+    "MFT": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/MFT.blend",
+    "EMC": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/EMC.blend",
+    "PHS": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/PHS.blend",
+    "CPV": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/CPV.blend",
+    "FT0": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/FT0.blend",
+    "FV0": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/FV0.blend",
+    "HMP": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/HMP.blend",
+    "FDD": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/FDD.blend",
+    "ZDC": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/ZDC.blend",
+    "MCH": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/MCH.blend",
+    "MID": "/Users/jarvis/alice/Other/ALICE-event-renderer/geometry/run-560067/MID.blend"
+  },
+  "asset_units": "m",
+  "reconstruction_verification": {
+    "run": 560067,
+    "timeframe": 2619419,
+    "orbit": 212036032,
+    "manager_sha256": "7b25299c742f1790a253f4a6b2f2b2a713e0d402b0b7e7dd1bbb48cb2c375be4",
+    "comparison": "All 16 complete detector surface JSON files exactly match the manager captured from real reconstruction, including every global transform."
+  }
+}
