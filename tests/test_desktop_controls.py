@@ -40,6 +40,24 @@ def test_calorimeter_controls_round_trip_into_exported_scene(window):
     assert w.settings().tower_fixed_height_cm==18 and w.settings().tower_width_scale==.8
     assert w.settings().tower_direction=='outward'
 
+def test_detector_sizes_and_log_controls_round_trip_and_reset_to_inheritance(window):
+    from alice_renderer.scene_config import recipe,resolve_settings
+    w,application,root=window
+    w.cluster_scales['ITS'].setValue(3);w.cluster_scales['TPC'].setValue(.5)
+    w.tower_width_factors['EMC'].setValue(.6);w.tower_fixed_heights['CPV'].setValue(13);w.tower_max_heights['EMC'].setValue(80)
+    w.tower_height_mapping.setCurrentIndex(w.tower_height_mapping.findData('log'))
+    w.tower_mappings['CPV'].setCurrentIndex(w.tower_mappings['CPV'].findData('linear'));w.tower_log_refs['EMC'].setValue(.1)
+    cfg=w.settings();data=recipe(cfg);w.apply_scene(resolve_settings(data,'unused.json',asset_overrides=cfg.geometry_assets))
+    assert w.settings().cluster_size_scales=={'ITS':3,'TPC':.5}
+    assert w.settings().tower_width_scales=={'EMC':.6} and w.settings().tower_max_heights_cm=={'EMC':80}
+    assert w.settings().tower_fixed_heights_cm=={'CPV':13} and w.settings().tower_height_mappings=={'CPV':'linear'}
+    assert w.settings().tower_log_references=={'EMC':.1} and w.settings().tower_height_mapping=='log'
+    size=w.size();w.tabs.setCurrentIndex(next(i for i in range(w.tabs.count()) if w.tabs.tabText(i)=='Data sizes'));application.processEvents()
+    assert w.size()==size
+    w.apply_scene(RenderSettings())
+    for key in ('cluster_size_scales','tower_width_scales','tower_fixed_heights_cm','tower_max_heights_cm','tower_height_mappings','tower_log_references'):assert getattr(w.settings(),key)=={}
+    assert w.settings().tower_height_mapping=='linear'
+
 
 def test_pasted_folder_loaded_by_enter_action_without_file_dialog(window,monkeypatch):
     w,application,root=window;folder=root/'events';generate(folder/'events.jsonl')

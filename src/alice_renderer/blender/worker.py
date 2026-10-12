@@ -189,15 +189,18 @@ def clusters(objects,settings):
     from mathutils import Matrix
     mode=settings.get('tpc_cluster_profile','sphere')
     legend['tpc_profile']=mode;legend['profiled_clusters']=0;legend['missing_tpc_profiles']=0
-    from alice_renderer.calorimeter_towers import tower,report_entry,DEFAULT_SCALES
+    from alice_renderer.calorimeter_towers import tower,report_entry,DEFAULT_SCALES,display_sizes
     legend['calorimeter_towers']={name:dict(report_entry(),display=display,
-        height_scale=settings.get('tower_height_scales',{}).get(name,DEFAULT_SCALES[name]),signal_units={})
+        height_scale=settings.get('tower_height_scales',{}).get(name,DEFAULT_SCALES[name]),signal_units={},**display_sizes(name,settings))
         for name,display in settings.get('calorimeter_display',{}).items() if display!='points'}
+    for info in legend['calorimeter_towers'].values():
+        if info['display']=='fixed towers':info['height_mapping']='fixed'
     legend['tower_direction']=settings.get('tower_direction','inward')
     legend['tower_max_height_cm']=settings.get('tower_max_height_cm',100.)
+    legend['cluster_size_scales']=settings.get('cluster_size_scales',{})
     expanded={}
     for key,group in groups.items():
-        plain=[];shaped=[];tower_vertices=[];tower_faces=[]
+        plain={};shaped=[];tower_vertices=[];tower_faces=[]
         for c in group['items']:
             glyph=tower(c,settings)
             tower_report=legend['calorimeter_towers'].get(c['detector'])
@@ -211,28 +214,30 @@ def clusters(objects,settings):
             axes=profile_axes(c,settings.get('tpc_profile_thickness_cm',.03)) if mode!='sphere' else None
             if axes:shaped.append((c,axes));legend['profiled_clusters']+=1
             else:
-                plain.append(c)
+                plain.setdefault(c['detector'],[]).append(c)
                 if mode!='sphere' and c['detector']=='TPC':legend['missing_tpc_profiles']+=1
         if tower_vertices:
             mesh=bpy.data.meshes.new('Cell towers '+key);mesh.from_pydata(tower_vertices,[],tower_faces);mesh.update()
             obj=bpy.data.objects.new('Cell towers '+key,mesh);coll.objects.link(obj)
             obj['alice_highlighted']=group['highlighted'];obj['alice_towers']=True
             mesh.materials.append(materials('Cluster towers '+key,group['color'],emission=settings.get('cluster_emission',1.),settings=settings))
-        if plain:expanded[key]=dict(group,items=plain)
+        for name,items in plain.items():
+            expanded[key+' '+name]=dict(group,items=items,detector=name,size_scale=settings.get('cluster_size_scales',{}).get(name,1.))
         # Gaussian display approximation: nested 0.5, 1, 1.5, 2, 2.5, 3 sigma
         # translucent shells with exp(-r²/2) weights; not a fitted 3D density.
         for radius in ([.5,1.,1.5,2.,2.5,3.] if mode=='gaussian' else [1.]):
-            if shaped:expanded[key+' profile '+str(radius)]=dict(group,items=[c for c,a in shaped],axes=[a for c,a in shaped],profile_radius=radius)
+            if shaped:expanded[key+' profile '+str(radius)]=dict(group,items=[c for c,a in shaped],detector='TPC',axes=[a for c,a in shaped],profile_radius=radius)
     if mode=='gaussian':legend['profile_basis']='Nested Gaussian-weighted ellipsoidal shells; independent pad/time RMS, display-only radial thickness'
     for key,group in expanded.items():
         mesh=bpy.data.meshes.new('Cluster positions '+key)
         mesh.from_pydata([tuple(v*.01 for v in c['position']) for c in group['items']],[],[]);mesh.update()
         obj=bpy.data.objects.new('Clusters '+key,mesh);coll.objects.link(obj);obj['alice_highlighted']=group['highlighted']
+        obj['alice_detector']=group['detector']
         mat=materials('Cluster '+key,group['color'],emission=settings.get('cluster_emission',1.),settings=settings)
         if 'axes' in group:
             if mode=='gaussian':mat=materials('Cluster '+key,group['color'],opacity=.3*math.exp(-.5*group['profile_radius']**2),emission=settings.get('cluster_emission',1.),settings=settings)
             scales=mesh.attributes.new('profile_scale','FLOAT_VECTOR','POINT');rotations=mesh.attributes.new('profile_rotation','FLOAT_VECTOR','POINT')
-            factor=.01*settings.get('tpc_profile_scale',1.)*group['profile_radius']
+            factor=.01*settings.get('tpc_profile_scale',1.)*group['profile_radius']*settings.get('cluster_size_scales',{}).get('TPC',1.)
             for i,(size,basis) in enumerate(group['axes']):
                 scales.data[i].vector=tuple(v*factor for v in size)
                 rotations.data[i].vector=Matrix(basis).to_euler()
@@ -242,7 +247,7 @@ def clusters(objects,settings):
         nodes.interface.new_socket(name='Geometry',in_out='OUTPUT',socket_type='NodeSocketGeometry')
         n,l=nodes.nodes,nodes.links
         input_=n.new('NodeGroupInput');output=n.new('NodeGroupOutput')
-        ico=n.new('GeometryNodeMeshIcoSphere');ico.inputs['Radius'].default_value=(settings['highlight_cluster_radius_cm'] if group['highlighted'] else settings['cluster_radius_cm'])*.01;ico.inputs['Subdivisions'].default_value=1
+        ico=n.new('GeometryNodeMeshIcoSphere');ico.inputs['Radius'].default_value=(settings['highlight_cluster_radius_cm'] if group['highlighted'] else settings['cluster_radius_cm'])*.01*group.get('size_scale',1.);ico.inputs['Subdivisions'].default_value=1
         material=n.new('GeometryNodeSetMaterial');material.inputs['Material'].default_value=mat
         instance=n.new('GeometryNodeInstanceOnPoints')
         if 'axes' in group:

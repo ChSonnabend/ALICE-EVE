@@ -84,3 +84,35 @@ def test_existing_catalogue_gains_cell_scalars_without_reimport(tmp_path):
     restored=Catalogue.build(source,tmp_path/'cache')
     assert restored.folder==cat.folder and path.stat().st_mtime_ns==before
     assert 'energy' in json.loads(restored.rows()[0]['cluster_fields'])
+
+def test_logarithmic_height_compresses_signals_and_keeps_raw_values():
+    s=settings(tower_height_mapping='log',tower_log_references={'EMC':.1},tower_max_height_cm=10000)
+    c=cell(energy=10);g=tower(c,s)
+    assert g['height_cm']==pytest.approx(20*.1*np.log1p(10/.1))
+    assert g['height_cm']<tower(c,{**s,'tower_height_mapping':'linear'})['height_cm']
+    assert g['signal']==10 and c['energy']==10 and g['height_mapping']=='log'
+    assert tower(cell(energy=1e-9),s)['height_cm']==pytest.approx(20e-9)
+    for v in (0,-1,None):assert tower(cell(energy=v),s) is None
+
+def test_per_detector_tower_sizes_mapping_and_fixed_heights():
+    s=settings(tower_height_mapping='log',tower_height_mappings={'EMC':'linear'},tower_width_scales={'EMC':2},tower_max_heights_cm={'EMC':25},tower_fixed_heights_cm={'PHS':7})
+    g=tower(cell(),s);v=np.array(g['vertices'])*100
+    assert g['height_cm']==25 and g['height_mapping']=='linear' and g['clipped']
+    assert np.ptp(v[:4,1])==pytest.approx(6*.95*2)
+    assert tower(cell('PHS'),s)['height_mapping']=='log'
+    s['calorimeter_display']['PHS']='fixed towers'
+    assert tower(cell('PHS',energy=None),s)['height_cm']==7
+    assert tower(cell('PHS',energy=None),s)['height_mapping']=='fixed'
+
+@pytest.mark.parametrize('change',[{'cluster_size_scales':{'ITS':0}},{'cluster_size_scales':{'L3':1}},{'tower_width_scales':{'EMC':-2}},{'tower_fixed_heights_cm':{'TPC':4}},{'tower_max_heights_cm':{'CPV':float('inf')}},{'tower_log_references':{'EMC':0}},{'tower_height_mapping':'ln'},{'tower_height_mappings':{'EMC':'inherit'}}])
+def test_invalid_detector_sizes_and_log_references_rejected(change):
+    with pytest.raises(ValueError):RenderSettings(**change).validate()
+
+def test_portable_config_and_favourite_keep_detector_sizes_and_log_mapping(tmp_path):
+    from alice_renderer.scene_config import save_config
+    from alice_renderer.scene_library import SceneLibrary
+    cfg=RenderSettings(cluster_size_scales={'ITS':3,'TPC':.5},tower_width_scales={'EMC':.6},tower_fixed_heights_cm={'CPV':13},tower_max_heights_cm={'EMC':80},tower_height_mapping='log',tower_height_mappings={'CPV':'linear'},tower_log_references={'EMC':.1})
+    path=tmp_path/'style.json';save_config(path,recipe(cfg));lib=SceneLibrary(tmp_path/'history.sqlite')
+    lib.register(path);lib.favourite(lib.entries()[0]);restored=lib.settings(lib.entries(True)[0],reuse=True)
+    for name in ('cluster_size_scales','tower_width_scales','tower_fixed_heights_cm','tower_max_heights_cm','tower_height_mapping','tower_height_mappings','tower_log_references'):
+        assert getattr(restored,name)==getattr(cfg,name)

@@ -155,6 +155,7 @@ class RenderSettings:
     highlight_track_color: str = '#ffcc33'
     highlight_cluster_color: str = '#ff6633'
     cluster_radius_cm: float = 0.35
+    cluster_size_scales: dict = field(default_factory=dict)
     tpc_cluster_profile: str = 'sphere'
     tpc_profile_scale: float = 1.
     tpc_profile_thickness_cm: float = .03
@@ -164,6 +165,12 @@ class RenderSettings:
     tower_max_height_cm: float = 100.
     tower_width_scale: float = .95
     tower_direction: str = 'inward'
+    tower_width_scales: dict = field(default_factory=dict)
+    tower_fixed_heights_cm: dict = field(default_factory=dict)
+    tower_max_heights_cm: dict = field(default_factory=dict)
+    tower_height_mapping: str = 'linear'
+    tower_height_mappings: dict = field(default_factory=dict)
+    tower_log_references: dict = field(default_factory=dict)
     camera: str = 'perspective'
     camera_lens_mm: float = 48.
     camera_orbit_axis: str = 'Y'
@@ -210,6 +217,11 @@ class RenderSettings:
             v=getattr(self,key)
             if isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) or v<=0:raise ValueError('Invalid '+key)
         if self.tower_direction not in ('inward','outward'):raise ValueError('Invalid tower direction')
+        for key,allowed in (('cluster_size_scales',DETECTORS),('tower_width_scales',CALORIMETERS),('tower_fixed_heights_cm',CALORIMETERS),('tower_max_heights_cm',CALORIMETERS),('tower_log_references',CALORIMETERS)):
+            values=getattr(self,key)
+            if not isinstance(values,dict) or any(name not in allowed or isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) or v<=0 for name,v in values.items()):raise ValueError(key+' must contain positive finite detector sizes')
+        if self.tower_height_mapping not in ('linear','log'):raise ValueError('Invalid tower height mapping')
+        if not isinstance(self.tower_height_mappings,dict) or any(name not in CALORIMETERS or mode not in ('linear','log') for name,mode in self.tower_height_mappings.items()):raise ValueError('Invalid per-detector tower height mapping')
         if not isinstance(self.data_glow_lighting,bool):raise ValueError('Data glow lighting must be a boolean')
         if not isinstance(self.include_ambiguous_tracks,bool):raise ValueError('Ambiguous-track selection must be a boolean')
         if not isinstance(self.clip_tracks,bool):raise ValueError('Track clipping must be a boolean')

@@ -106,7 +106,7 @@ class Window(QMainWindow):
         split=QSplitter();layout.addWidget(split,1)
         self.tabs=QTabWidget();split.addWidget(self.tabs)
         self.detector_modes={};self.data_checks={};self.geometry_checks={};self.asset_fields={};self.color_buttons={};self.detector_labels={}
-        self.build_detectors();self.build_components();self.build_appearance();self.build_render();self.build_runtime();self.build_library()
+        self.build_detectors();self.build_components();self.build_appearance();self.build_data_sizes();self.build_render();self.build_runtime();self.build_library()
         right=QWidget();right_layout=QVBoxLayout(right);split.addWidget(right);split.setSizes([540,840])
         tools=QHBoxLayout();right_layout.addLayout(tools)
         self.all_button=QPushButton('Select all');self.none_button=QPushButton('Select none');tools.addWidget(self.all_button);tools.addWidget(self.none_button)
@@ -226,6 +226,7 @@ class Window(QMainWindow):
         self.tower_fixed_height=number(self.base.tower_fixed_height_cm,.001,10000,3);layout.addRow('Fixed tower height (cm)',self.tower_fixed_height)
         self.tower_max_height=number(self.base.tower_max_height_cm,.001,10000,3);layout.addRow('Maximum tower height (cm)',self.tower_max_height)
         self.tower_width_scale=number(self.base.tower_width_scale,.001,10,3);layout.addRow('Tower footprint scale',self.tower_width_scale)
+        self.tower_height_mapping=QComboBox();self.tower_height_mapping.addItem('Linear','linear');self.tower_height_mapping.addItem('Logarithmic','log');self.tower_height_mapping.setCurrentIndex(self.tower_height_mapping.findData(self.base.tower_height_mapping));layout.addRow('Tower height mapping',self.tower_height_mapping)
         note=QLabel('Enable clusters or both for tower data. Heights use EMC energy (GeV), PHOS input signal (raw O2 cells: ADC counts; calibrated inputs: GeV), or CPV amplitude. Missing/nonpositive signals remain points. Fixed towers are display glyphs. CPV exports currently contain reconstructed clusters, not individual pads. Older exports use nominal footprints; aligned cell frames are used when supplied.');note.setWordWrap(True);layout.addRow(note)
         self.tpc_profile.setToolTip('Measured pad/time RMS; Gaussian uses weighted translucent shells. Missing widths retain spheres.')
         self.tpc_profile_scale=number(self.base.tpc_profile_scale,.01,100,2);layout.addRow('TPC profile sigma scale',self.tpc_profile_scale)
@@ -348,6 +349,25 @@ class Window(QMainWindow):
             if path:line.setText(path)
         button.clicked.connect(choose);layout.addWidget(button);return widget
 
+    def build_data_sizes(self):
+        widget=self.tab('Data sizes');layout=QFormLayout(widget)
+        note=QLabel('Cluster factors multiply the scene cluster radius, linked-cluster radius and measured TPC profile sizes. A factor of 1 keeps the normal size. These are display sizes; measured positions and signals stay unchanged.');note.setWordWrap(True);layout.addRow(note)
+        self.cluster_scales={}
+        for name in DETECTORS:
+            value=number(self.base.cluster_size_scales.get(name,1.),.001,1000,3);self.cluster_scales[name]=value;layout.addRow(name+' cluster factor',value)
+        from .calorimeter_towers import CALORIMETERS
+        self.tower_width_factors={};self.tower_fixed_heights={};self.tower_max_heights={};self.tower_mappings={};self.tower_log_refs={}
+        note=QLabel('Tower footprint factors multiply the scene footprint scale. Fixed-height and maximum-height values of 0 use the scene setting. Logarithmic mapping compresses large signals; smaller references compress sooner. The reference is in the detector’s input signal units (EMC GeV, PHOS ADC or calibrated GeV, CPV native amplitude).');note.setWordWrap(True);layout.addRow(note)
+        for name in CALORIMETERS:
+            layout.addRow(QLabel(('PHOS' if name=='PHS' else name)+' tower sizes'))
+            width=number(self.base.tower_width_scales.get(name,1.),.001,1000,3);self.tower_width_factors[name]=width;layout.addRow('Footprint factor',width)
+            for key,fields,label in (('tower_fixed_heights_cm',self.tower_fixed_heights,'Fixed height (cm)'),('tower_max_heights_cm',self.tower_max_heights,'Maximum height (cm)')):
+                value=number(getattr(self.base,key).get(name,0.),0,10000,3);value.setSpecialValueText('Use scene');fields[name]=value;layout.addRow(label,value)
+            mapping=QComboBox()
+            for label,value in (('Use scene mapping','inherit'),('Linear','linear'),('Logarithmic','log')):mapping.addItem(label,value)
+            mapping.setCurrentIndex(mapping.findData(self.base.tower_height_mappings.get(name,'inherit')));self.tower_mappings[name]=mapping;layout.addRow('Height mapping',mapping)
+            reference=number(self.base.tower_log_references.get(name,1.),.000001,1000000,6);self.tower_log_refs[name]=reference;layout.addRow('Log reference signal',reference)
+
     def settings(self):
         cfg=RenderSettings(detectors=[d for d,c in self.data_checks.items() if c.isChecked() and c.isEnabled()],geometry=[d for d,c in self.geometry_checks.items() if c.isChecked()],magnet=self.magnet.isChecked(),mode=self.mode.currentText(),track_color_mode=self.track_mode.currentText(),cluster_color_mode=self.cluster_mode.currentText(),colors={k:b.text() for k,b in self.color_buttons.items()},scale_min=None if self.auto_range.isChecked() else self.minimum.value(),scale_max=None if self.auto_range.isChecked() else self.maximum.value(),palette=self.palette.currentText(),geometry_assets={k:v.text() for k,v in self.asset_fields.items() if v.text()},geometry_units=self.geometry_units.currentText(),geometry_opacity=self.opacity.value(),cutaway=self.cutaway.isChecked(),schematic=self.schematic.isChecked(),width=self.width.value(),height=self.height.value(),samples=self.samples.value(),denoise=self.denoise.isChecked(),backend=self.backend.currentText(),device=self.device.currentData() or '',threads=self.threads.value(),track_radius_cm=self.track_radius.value()/2,cluster_radius_cm=self.cluster_radius.value(),camera=self.camera.currentText(),azimuth=self.azimuth.value(),elevation=self.elevation.value(),distance_cm=self.distance.value(),target_cm=[s.value() for s in self.target],save_blend=self.save_blend.isChecked())
         for key,value in self.scene_overrides.items():setattr(cfg,key,value)
@@ -361,6 +381,13 @@ class Window(QMainWindow):
         cfg.calorimeter_display={name:combo.currentText() for name,combo in self.calorimeter_displays.items()}
         cfg.tower_height_scales={name:scale.value() for name,scale in self.tower_scales.items()}
         cfg.tower_fixed_height_cm=self.tower_fixed_height.value();cfg.tower_max_height_cm=self.tower_max_height.value();cfg.tower_width_scale=self.tower_width_scale.value();cfg.tower_direction=self.tower_direction.currentText()
+        cfg.cluster_size_scales={name:field.value() for name,field in self.cluster_scales.items() if field.value()!=1.}
+        cfg.tower_width_scales={name:field.value() for name,field in self.tower_width_factors.items() if field.value()!=1.}
+        cfg.tower_fixed_heights_cm={name:field.value() for name,field in self.tower_fixed_heights.items() if field.value()>0}
+        cfg.tower_max_heights_cm={name:field.value() for name,field in self.tower_max_heights.items() if field.value()>0}
+        cfg.tower_height_mapping=self.tower_height_mapping.currentData()
+        cfg.tower_height_mappings={name:field.currentData() for name,field in self.tower_mappings.items() if field.currentData()!='inherit'}
+        cfg.tower_log_references={name:field.value() for name,field in self.tower_log_refs.items() if field.value()!=1.}
         cfg.data_glow_lighting=self.data_glow_lighting.isChecked()
         cfg.camera_lens_mm=self.camera_lens.value()
         if cfg.camera_pose:cfg.camera_pose={**cfg.camera_pose,'lens':cfg.camera_lens_mm}
@@ -635,6 +662,10 @@ class Window(QMainWindow):
         for name,combo in self.calorimeter_displays.items():
             combo.setCurrentText(cfg.calorimeter_display.get(name,'points'));self.tower_scales[name].setValue(cfg.tower_height_scales.get(name,DEFAULT_SCALES[name]))
         self.tower_direction.setCurrentText(cfg.tower_direction);self.tower_fixed_height.setValue(cfg.tower_fixed_height_cm);self.tower_max_height.setValue(cfg.tower_max_height_cm);self.tower_width_scale.setValue(cfg.tower_width_scale)
+        for fields,key,default in ((self.cluster_scales,'cluster_size_scales',1.),(self.tower_width_factors,'tower_width_scales',1.),(self.tower_fixed_heights,'tower_fixed_heights_cm',0.),(self.tower_max_heights,'tower_max_heights_cm',0.),(self.tower_log_refs,'tower_log_references',1.)):
+            for name,field in fields.items():field.setValue(getattr(cfg,key).get(name,default))
+        self.tower_height_mapping.setCurrentIndex(self.tower_height_mapping.findData(cfg.tower_height_mapping))
+        for name,field in self.tower_mappings.items():field.setCurrentIndex(field.findData(cfg.tower_height_mappings.get(name,'inherit')))
         self.view_transform.setCurrentText(cfg.view_transform);self.exposure.setValue(cfg.exposure);self.track_emission.setValue(cfg.track_emission);self.cluster_emission.setValue(cfg.cluster_emission)
         self.data_glow_lighting.setChecked(cfg.data_glow_lighting)
         self.camera_lens.setValue(cfg.camera_pose.get('lens',cfg.camera_lens_mm))

@@ -16,6 +16,14 @@ DEFAULT_SCALES={'EMC':20.,'PHS':.2,'CPV':.2}
 def dot(a,b):return sum(x*y for x,y in zip(a,b))
 def cross(a,b):return (a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0])
 
+def display_sizes(name,settings):
+    """Resolve detector dimensions against scene defaults for every renderer."""
+    return dict(width_scale=settings.get('tower_width_scale',.95)*settings.get('tower_width_scales',{}).get(name,1.),
+                fixed_height_cm=settings.get('tower_fixed_heights_cm',{}).get(name,settings.get('tower_fixed_height_cm',10.)),
+                max_height_cm=settings.get('tower_max_heights_cm',{}).get(name,settings.get('tower_max_height_cm',100.)),
+                height_mapping=settings.get('tower_height_mappings',{}).get(name,settings.get('tower_height_mapping','linear')),
+                log_reference=settings.get('tower_log_references',{}).get(name,1.))
+
 def validate_cell_geometry(data):
     if not isinstance(data,dict) or not isinstance(data.get('basis'),str) or not data['basis'].strip():raise ValueError('Cell footprint requires an explicit geometry basis')
     vectors=[]
@@ -35,11 +43,20 @@ def tower(cluster,settings):
     from .cluster_colors import value,phos_adc
     field='amplitude' if name=='CPV' or name=='PHS' and (phos_adc(cluster) or value(cluster,'amplitude') is not None) else 'energy'
     signal=value(cluster,field)
-    if mode=='fixed towers':height=settings.get('tower_fixed_height_cm',10.)
+    sizes=display_sizes(name,settings)
+    if mode=='fixed towers':height=sizes['fixed_height_cm']
     elif signal is None:return None
-    else:height=signal*settings.get('tower_height_scales',{}).get(name,DEFAULT_SCALES[name])
+    else:
+        transformed=signal
+        if sizes['height_mapping']=='log':
+            reference=sizes['log_reference'];ratio=signal/reference
+            # h = scale * reference * ln(1 + signal/reference). This is
+            # dimensionally consistent, zero-safe and linear near zero.
+            logarithm=math.log1p(ratio) if math.isfinite(ratio) else math.log(signal)-math.log(reference)
+            transformed=reference*logarithm
+        height=transformed*settings.get('tower_height_scales',{}).get(name,DEFAULT_SCALES[name])
     if height<=0:return None
-    limit=settings.get('tower_max_height_cm',100.);clipped=height>limit;height=min(height,limit)
+    limit=sizes['max_height_cm'];clipped=height>limit;height=min(height,limit)
     position=cluster['position'];geometry=cluster.get('cell_geometry')
     if geometry:
         u,v=validate_cell_geometry(geometry);basis=geometry['basis'];approximate=False
@@ -54,7 +71,7 @@ def tower(cluster,settings):
     if dot(normal,(position[0],position[1],0.))<0:normal=tuple(-x for x in normal)
     direction=-1 if settings.get('tower_direction','inward')=='inward' else 1
     offset=tuple(direction*height*x for x in normal)
-    width_scale=settings.get('tower_width_scale',.95)
+    width_scale=sizes['width_scale']
     vertices=[]
     for layer in (0,1):
         for a,b in ((-1,-1),(1,-1),(1,1),(-1,1)):
@@ -64,6 +81,7 @@ def tower(cluster,settings):
     faces=[(3,2,1,0),(4,5,6,7),(0,1,5,4),(1,2,6,5),(2,3,7,6),(3,0,4,7)]
     if not forward:faces=[tuple(reversed(f)) for f in faces]
     return dict(vertices=vertices,faces=faces,detector=name,height_cm=height,signal_field=field,
+                height_mapping='fixed' if mode=='fixed towers' else sizes['height_mapping'],log_reference=sizes['log_reference'],width_scale=width_scale,
                 signal_unit='fixed display height (cm)' if mode=='fixed towers' else 'GeV' if field=='energy' else 'ADC' if name=='PHS' else 'native amplitude',
                 signal=signal,clipped=clipped,approximate=approximate,basis=basis,
                 measurement_kind=cluster.get('measurement_kind','cluster'))
