@@ -48,7 +48,7 @@ def preflight(settings: RenderSettings, events, devices: dict, output: Path) -> 
             clip_assets.update(d for t in tracks for d in selected_track_detectors(values,t) if not is_schematic(values,d))
         peak_points=max(peak_points,sum(len(t['points']) for t in tracks));peak_clusters=max(peak_clusters,len(clusters))
         for name,mode,objects,active in [('tracks',settings.track_color_mode,tracks,bool(enabled_detectors(settings.to_dict(),'tracks'))),('clusters',settings.cluster_color_mode,clusters,bool(enabled_detectors(settings.to_dict(),'clusters')))]:
-            if active and settings.detectors and (objects or not settings.video_enabled) and mode not in capabilities(objects): errors.append(f'Event {event["id"]}: {mode} is unavailable for selected {name}')
+            if active and settings.detectors and not settings.video_enabled and mode not in capabilities(objects): errors.append(f'Event {event["id"]}: {mode} is unavailable for selected {name}')
         if settings.detectors and not tracks and not clusters and not settings.video_enabled:errors.append(f'Event {event["id"]}: no selected tracks or clusters')
     for name in sorted(clip_assets):
         asset=settings.geometry_assets.get(name,'')
@@ -269,13 +269,14 @@ def prepare_video(settings,paths,devices,output,*,cancelled=lambda:False):
     from .model import color_value
     from .track_clipping import selected_track_detectors
     if len(paths)<2:raise ValueError('Video needs at least two selected collisions')
-    cfg=dataclasses.replace(settings,clip_tracks=True);values=cfg.to_dict();headers=[];required=set();ranges={}
+    cfg=dataclasses.replace(settings,clip_tracks=True);values=cfg.to_dict();headers=[];required=set();ranges={};supported={'tracks':{'solid'},'clusters':{'solid'}}
     def events():
         for path in paths:
             if cancelled():raise InterruptedError('Video preparation cancelled')
             event=load_event(path);headers.append(header(event))
             for track in selected_tracks(event,values):required.update(selected_track_detectors(values,track))
             for kind,objects in (('tracks',selected_tracks(event,values)),('clusters',selected_clusters(event,values))):
+                supported[kind].update(capabilities(objects))
                 mode=values[kind[:-1]+'_color_mode']
                 if mode=='solid' or kind in cfg.color_ranges:continue
                 for obj in objects:
@@ -284,6 +285,9 @@ def prepare_video(settings,paths,devices,output,*,cancelled=lambda:False):
                         lo,hi=ranges.get(kind,(v,v));ranges[kind]=(min(lo,v),max(hi,v))
             yield event
     errors=preflight(cfg,events(),devices,output);plan=schedule(headers,values)
+    for kind in supported:
+        mode=values[kind[:-1]+'_color_mode']
+        if enabled_detectors(values,kind) and mode not in supported[kind]:errors.append(f'{mode} is unavailable for selected {kind} across this video')
     if errors:raise ValueError('\n'.join(errors))
     cfg.color_ranges=dict(cfg.color_ranges)
     for kind,(lo,hi) in ranges.items():

@@ -12,8 +12,11 @@ BUNCH_NS=10e9/400.789e6
 ORBIT_US=3564*BUNCH_NS*.001
 
 def header(event):
-    fields=('id','kind','vertex','run','timeframe','orbit','vertex_time_us','global_bc','collision_time_ns','collision_timestamp_ns','available_detectors')
-    return {k:event[k] for k in fields if k in event}
+    from .model import capabilities
+    from .object_selection import event_counts
+    fields=('id','kind','vertex','run','timeframe','orbit','vertex_time_us','global_bc','collision_time_ns','collision_timestamp_ns','available_detectors','contributors')
+    return {**{k:event[k] for k in fields if k in event},'track_fields':capabilities(event['tracks']),'cluster_fields':capabilities(event['clusters']),
+            'association_flags_available':event_counts(event)['association_flags_available']}
 
 def relative_times(events):
     """Return fine collision times in seconds relative to the first collision."""

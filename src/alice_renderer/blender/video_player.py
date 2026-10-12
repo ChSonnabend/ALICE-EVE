@@ -77,7 +77,11 @@ def growing_tracks(data,settings):
 
 class VideoPlayer:
     def __init__(self,job,settings,regions):
-        self.job=job;self.settings=dict(settings);self.regions=regions;self.plan=job['video_plan'];self.index=-1;self.frame=0;self.age=0.;self.playing=False;self.anchor=0.;self.timer=None;self.pieces=[];self.reports={}
+        self.job=job;self.settings=dict(settings);self.regions=regions;self.plan=job['video_plan'];self.index=-1;self.frame=0;self.age=0.;self.playing=False;self.anchor=0.;self.timer=None;self.pieces=[];self.reports={};self.held_at=None
+    def hold_controls(self,hold):
+        now=time.monotonic()
+        if hold and self.held_at is None:self.held_at=now
+        elif not hold and self.held_at is not None:self.anchor+=now-self.held_at;self.held_at=None
     def set_frame(self,frame):
         self.frame=max(0,min(int(frame),self.plan['frames']-1));index,age=event_at(self.plan,self.frame)
         if index!=self.index:self.load(index)
@@ -115,6 +119,7 @@ class VideoPlayer:
             editor.EVENT=self.event;ui=bpy.context.scene.alice_eve;ui.displayed_tracks=track_legend['visible_tracks'];ui.displayed_clusters=len(data['clusters']);ui.video_status=f'Collision {index+1}/{len(self.plan["entries"])}: {self.event["id"]}'
             from alice_renderer.object_selection import event_counts
             counts=event_counts(self.event)
+            self.job['input_counts']=counts
             for item in ui.detectors:
                 item.event_track_count=counts['tracks_by_detector'].get(item.name,0);item.event_cluster_count=counts['clusters_by_detector'].get(item.name,0)
                 info=cluster_legend.get('calorimeter_towers',{}).get(item.name,{})
@@ -122,11 +127,14 @@ class VideoPlayer:
     def reconfigure(self,settings):
         self.settings=settings.to_dict() if hasattr(settings,'to_dict') else dict(settings);self.settings['clip_tracks']=True
         self.plan=schedule(self.job['video_headers'],self.settings);self.index=-1;self.set_frame(min(self.frame,self.plan['frames']-1));self.anchor=time.monotonic()-self.frame/self.plan['fps']
+        if self.held_at is not None:self.held_at=time.monotonic()
     def play(self):
         self.playing=True;self.anchor=time.monotonic()-self.frame/self.plan['fps'];bpy.context.scene.alice_eve.video_playing=True
+        if self.held_at is not None:self.held_at=time.monotonic()
         if self.timer:return
         def tick():
             if not self.playing:self.timer=None;return None
+            if self.held_at is not None:return 1/self.plan['fps']
             try:
                 frame=int((time.monotonic()-self.anchor)*self.plan['fps'])%self.plan['frames'];target,_=event_at(self.plan,frame)
                 # Slow disk/scene loads must not skip selected collisions.
@@ -176,6 +184,6 @@ def render_movie(job,settings,regions,metadata):
             except subprocess.TimeoutExpired:encoder.kill();encoder.wait()
             raise
     (output/'video.part.mp4').replace(output/'video.mp4');framefile.unlink(missing_ok=True)
-    metadata['video']={**plan,'collision_reports':player.reports,'codec':'H.264','crf':18};(output/'metadata.json').write_text(json.dumps(metadata,indent=2))
+    metadata['video']={**plan,'collision_reports':player.reports,'codec':'H.264','crf':18,'static_geometry_reused':True,'persistent_render_data':scene.render.use_persistent_data};(output/'metadata.json').write_text(json.dumps(metadata,indent=2))
     (output/'video-timeline.json').write_text(json.dumps(metadata['video'],indent=2))
     print('ALICE_STAGE Video saved: '+str(output/'video.mp4'),flush=True)

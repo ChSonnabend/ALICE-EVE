@@ -282,7 +282,8 @@ def use_scene_lighting():
         for area in screen.areas:
             if area.type=='VIEW_3D':
                 shading=area.spaces.active.shading
-                shading.type='RENDERED'
+                ui=getattr(bpy.context.scene,'alice_eve',None)
+                shading.type='SOLID' if ui and ui.viewport_paused and bpy.context.scene.render.engine!='CYCLES' else 'RENDERED'
                 shading.use_scene_lights=True;shading.use_scene_world=True
                 shading.use_scene_lights_render=True;shading.use_scene_world_render=True
 
@@ -294,8 +295,59 @@ def viewport_renderer_update(self,context):
     scene.cycles.preview_samples=self.viewport_samples;scene.cycles.use_preview_adaptive_sampling=True;scene.cycles.preview_adaptive_threshold=.025;scene.cycles.use_preview_denoising=True
     scene.eevee.taa_samples=self.viewport_samples;scene.eevee.use_shadow_jitter_viewport=False
     use_scene_lighting()
+    if self.viewport_paused:pause_viewport(context.scene,True)
+
+def pause_viewport(scene,paused):
+    """Cycles freezes its preview; Eevee uses an inexpensive solid inspection view."""
+    scene.cycles.preview_pause=paused
+    if not JOB:return
+    if paused:
+        saved=JOB.setdefault('paused_viewports',[])
+        for screen in bpy.data.screens:
+            for area in screen.areas:
+                if area.type!='VIEW_3D':continue
+                space=area.spaces.active
+                if not any(s.as_pointer()==space.as_pointer() for s,mode in saved):saved.append((space,space.shading.type))
+                if scene.render.engine!='CYCLES' and space.shading.type=='RENDERED':space.shading.type='SOLID'
+                area.tag_redraw()
+    else:
+        for space,mode in JOB.pop('paused_viewports',[]):
+            try:space.shading.type=mode
+            except ReferenceError:pass
+
+def viewport_pause_update(self,context):pause_viewport(context.scene,self.viewport_paused)
+
+def sidebar_contains(screen,x,y):
+    return any(area.type=='VIEW_3D' and area.spaces.active.show_region_ui and
+               region.type in ('UI','TOOLS') and region.width>1 and
+               region.x<=x<region.x+region.width and region.y<=y<region.y+region.height
+               for area in screen.areas for region in area.regions)
+
+class WatchPlaybackControls(bpy.types.Operator):
+    bl_idname='alice_eve.watch_playback_controls';bl_label='Keep collision controls available'
+    bl_description='Hold playback while editing the sidebar, without consuming mouse or keyboard input'
+    def invoke(self,context,event):
+        if JOB.get('controls_watcher'):return {'CANCELLED'}
+        self.job=JOB;JOB['controls_watcher']=True;context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+    def modal(self,context,event):
+        if JOB is not self.job or not JOB.get('video_player'):return {'FINISHED'}
+        if event.type in ('MOUSEMOVE','LEFTMOUSE','RIGHTMOUSE','WHEELUPMOUSE','WHEELDOWNMOUSE'):
+            ui=context.scene.alice_eve
+            JOB['video_player'].hold_controls(ui.pause_while_editing and sidebar_contains(context.window.screen,event.mouse_x,event.mouse_y))
+        return {'PASS_THROUGH'}
+
+class ToggleViewportPause(bpy.types.Operator):
+    bl_idname='alice_eve.pause_viewport';bl_label='Pause viewport'
+    bl_description='Pause or resume live viewport rendering independently of collision playback; Eevee pauses into solid inspection mode'
+    def execute(self,context):
+        ui=context.scene.alice_eve;ui.viewport_paused=not ui.viewport_paused
+        if ui.viewport_paused and context.scene.render.engine!='CYCLES':self.report({'INFO'},'Viewport rendering paused; solid inspection is active until Resume viewport')
+        return {'FINISHED'}
 
 class SceneSettings(bpy.types.PropertyGroup):
+    viewport_paused: BoolProperty(name='Viewport rendering paused',default=False,update=viewport_pause_update)
+    pause_while_editing: BoolProperty(name='Pause collisions while editing sidebar',default=True)
     video_enabled: BoolProperty(name='Render selected collisions as video',default=False)
     video_timing: EnumProperty(name='Collision timing',items=[('fixed','Fixed interval','Keep selected collision order'),('realtime','Scaled collision timestamps','Automatic scale averages one collision per second')],default='fixed',update=selection_update)
     video_interval_s: FloatProperty(name='Event interval / final hold (s)',min=.001,max=3600,default=1.,update=selection_update)
@@ -600,7 +652,7 @@ class ExportConfig(bpy.types.Operator):
             selected=set(cfg.detectors)
             for kind,mode,active in [('tracks',cfg.track_color_mode,bool(enabled_detectors(cfg.to_dict(),'tracks'))),('clusters',cfg.cluster_color_mode,bool(enabled_detectors(cfg.to_dict(),'clusters')))]:
                 objects=selected_tracks(EVENT,cfg.to_dict()) if kind=='tracks' else selected_clusters(EVENT,cfg.to_dict())
-                if active and selected and (objects or not cfg.video_enabled) and mode not in capabilities(objects):raise ValueError(f'{mode} is unavailable for selected {kind}')
+                if active and selected and not cfg.video_enabled and mode not in capabilities(objects):raise ValueError(f'{mode} is unavailable for selected {kind}')
             if bpy.ops.alice_eve.apply_data()!={'FINISHED'}:return {'CANCELLED'}
             if bpy.ops.alice_eve.apply_geometry()!={'FINISHED'}:return {'CANCELLED'}
             data=recipe(cfg)
@@ -719,7 +771,7 @@ class PlayVideo(bpy.types.Operator):
         except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
 
 class StopVideo(bpy.types.Operator):
-    bl_idname='alice_eve.stop_video';bl_label='Stop video';bl_description='Pause collision playback immediately at the current frame'
+    bl_idname='alice_eve.stop_video';bl_label='Pause collisions';bl_description='Pause collision playback immediately at the current frame; Play collisions resumes'
     def execute(self,context):
         player=JOB.get('video_player')
         if player:player.stop()
@@ -777,6 +829,7 @@ class PickTracks(bpy.types.Operator):
         if ui.picking_active:ui.picking_active=False;return {'FINISHED'}
         if not context.area or context.area.type!='VIEW_3D':self.report({'ERROR'},'Use picking from a 3D view');return {'CANCELLED'}
         self.area=context.area;self.region=next(r for r in context.area.regions if r.type=='WINDOW')
+        if JOB.get('video_player'):JOB['video_player'].stop()
         ui.picking_active=True;context.window.cursor_modal_set('CROSSHAIR');context.window_manager.modal_handler_add(self)
         self.report({'INFO'},'Click a track. Ctrl-click adds; Shift-click toggles. Esc stops picking.')
         return {'RUNNING_MODAL'}
@@ -815,9 +868,12 @@ class EVEPanel(bpy.types.Panel):
         layout=self.layout;ui=context.scene.alice_eve
         cfg=current_settings().to_dict()
         layout.label(text='Detector surfaces')
+        layout.operator('alice_eve.pause_viewport',text='Resume viewport' if ui.viewport_paused else 'Pause viewport',icon='PLAY' if ui.viewport_paused else 'PAUSE')
         if len(JOB.get('events',[]))>=2:
             box=layout.box();box.label(text='Collision video');box.label(text=ui.video_status)
             row=box.row();row.operator('alice_eve.play_video');row.operator('alice_eve.stop_video')
+            box.prop(ui,'pause_while_editing')
+            box.label(text='Playback waiting for sidebar editing' if JOB.get('video_player') and JOB['video_player'].held_at is not None else 'Move to the view to continue playback')
             for key in ('video_enabled','video_timing','video_interval_s','video_time_scale','video_speed_m_s','video_tower_rise_s','video_fps'):box.prop(ui,key)
         layout.operator('alice_eve.solid_surfaces');layout.operator('alice_eve.light_transparent_surfaces');layout.operator('alice_eve.restore_surface_exclusions');layout.operator('alice_eve.tpc_sectors_inner_wall');layout.operator('alice_eve.fast_surfaces');layout.operator('alice_eve.surround_lighting');layout.prop(ui,'viewport_renderer');layout.prop(ui,'viewport_samples')
         layout.prop(ui,'geometry_lod');layout.operator('alice_eve.full_geometry')
@@ -828,12 +884,13 @@ class EVEPanel(bpy.types.Panel):
         layout.prop(context.space_data,'lock_camera',text='Navigate render camera')
         row=layout.row();row.operator('alice_eve.roll_camera',text='Roll −15°').angle=-15;row.operator('alice_eve.roll_camera',text='Roll +15°').angle=15
         layout.label(text='Trackball navigation permits arbitrary orientation.')
-        if EVENT.get('contributors') is not None:layout.label(text='Primary vertex contributors: '+str(EVENT['contributors']))
+        if EVENT.get('contributors') is not None or JOB.get('video_player'):layout.label(text='Primary vertex contributors: '+str(EVENT.get('contributors','unavailable')))
         layout.label(text='Detector counts refer to input fitted records.')
         counts=JOB['input_counts']
         layout.label(text=f'Displayed: {ui.displayed_tracks} tracks / {ui.displayed_clusters} clusters')
-        if counts['association_flags_available']:layout.label(text=str(counts['ambiguous_drawable_tracks'])+' input tracks have ambiguous vertex matches')
-        row=layout.row();row.enabled=counts['association_flags_available'];row.prop(ui,'include_ambiguous_tracks')
+        flags=counts['association_flags_available'] or any(h.get('association_flags_available') for h in JOB.get('video_headers',[]))
+        if flags:layout.label(text=str(counts['ambiguous_drawable_tracks'])+' input tracks have ambiguous vertex matches')
+        row=layout.row();row.enabled=flags;row.prop(ui,'include_ambiguous_tracks')
         layout.prop(context.scene.camera.data,'type');layout.prop(context.scene.camera.data,'lens');layout.prop(context.scene.camera.data,'ortho_scale')
         layout.operator('alice_eve.opaque_geometry');layout.operator('alice_eve.apply_geometry')
         layout.label(text=ui.render_status);row=layout.row();row.enabled=False;row.prop(ui,'render_percent',slider=True)
@@ -897,7 +954,7 @@ class EVEPanel(bpy.types.Panel):
         layout.prop(ui,'export_path');layout.prop(ui,'include_defaults')
         row=layout.row();row.operator('alice_eve.export');row.operator('alice_eve.render_full')
 
-CLASSES=(GeometryComponent,ToggleComponent,RefreshComponents,DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,SolidDetectorSurfaces,LightTransparentSurfaces,RestoreSurfaceExclusions,TPCSectorsInnerWall,SurroundLighting,FastStructuralSurfaces,ShowSceneLighting,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,PlayVideo,StopVideo,ExportConfig,RenderFull,EVEPanel)
+CLASSES=(GeometryComponent,ToggleComponent,RefreshComponents,DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,SolidDetectorSurfaces,LightTransparentSurfaces,RestoreSurfaceExclusions,TPCSectorsInnerWall,SurroundLighting,FastStructuralSurfaces,ShowSceneLighting,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,PlayVideo,StopVideo,ToggleViewportPause,WatchPlaybackControls,ExportConfig,RenderFull,EVEPanel)
 
 def start_editor(job,event,metadata):
     global JOB,EVENT,DEVICES,RECOMMENDATION,PALETTES
@@ -910,6 +967,7 @@ def start_editor(job,event,metadata):
     JOB=None;EVENT=event;DEVICES=job['blender'];RECOMMENDATION=recommended_quality(DEVICES)
     from alice_renderer.model import capabilities
     extra=set(capabilities(event['tracks']))|set(capabilities(event['clusters']))
+    for header in job.get('video_headers',[]):extra.update(header.get('track_fields',[]));extra.update(header.get('cluster_fields',[]))
     extra|={job['settings']['track_color_mode'],job['settings']['cluster_color_mode']}
     for name in sorted(extra):
         if not any(i[0]==name for i in COLOR_ITEMS):COLOR_ITEMS.append((name,name,'Numeric input track feature'))
@@ -976,6 +1034,7 @@ def start_editor(job,event,metadata):
     if settings.get('video_enabled') and job.get('events'):
         from video_player import VideoPlayer
         player=VideoPlayer(job,settings,job.get('track_regions',{}));JOB['video_player']=player;player.set_frame(0);player.play()
+        if not bpy.app.background:bpy.ops.alice_eve.watch_playback_controls('INVOKE_DEFAULT')
     bpy.ops.wm.save_as_mainfile(filepath=str(Path(job['output'])/'interactive.blend'))
     if job.get('library_path'):
         save_session();bpy.app.timers.register(save_session,first_interval=2.)

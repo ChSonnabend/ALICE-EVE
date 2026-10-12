@@ -480,6 +480,8 @@ def render(job_path,interactive=False):
     with (gzip.open(path,'rt') if path.suffix=='.gz' else path.open()) as stream:event=annotate_matching(json.load(stream))
     bpy.ops.object.select_all(action='SELECT');bpy.ops.object.delete(use_global=False)
     scene=bpy.context.scene;scene.render.engine=settings.get('render_engine','CYCLES')
+    # Retain unchanged detector/texture render data between movie frames.
+    scene.render.use_persistent_data=bool(settings.get('video_enabled'))
     scene.cycles.samples=settings['samples'];scene.cycles.use_denoising=settings['denoise']
     if scene.render.engine=='BLENDER_EEVEE':
         scene.eevee.taa_render_samples=settings['samples']

@@ -91,3 +91,18 @@ def test_collisions_without_selected_data_still_replace_previous_data(tmp_path):
     cfg=RenderSettings(video_enabled=True,schematic=True,detectors=['TPC'],track_color_mode='pt')
     ready,payload=prepare_video(cfg,paths,{'version':[5,0],'devices':[{'type':'CPU','id':'CPU'}]},tmp_path/'output')
     assert len(payload['video_plan']['entries'])==2 and ready.color_ranges['tracks']==[2,2]
+
+def test_video_features_are_persistent_and_missing_event_values_remain_unknown(tmp_path):
+    paths=[]
+    for i in range(2):
+        e=event(str(i));e.update(schema_version=1,units='cm')
+        e['tracks']=[dict(id='T',detectors=['TPC'],points=[[100,0,0],[150,0,0]])]
+        if i==1:e['tracks'][0]['features']={'late_feature':7}
+        p=tmp_path/(str(i)+'.json');p.write_text(json.dumps(e));paths.append(p)
+    cfg=RenderSettings(video_enabled=True,schematic=True,detectors=['TPC'],track_color_mode='feature:late_feature')
+    ready,payload=prepare_video(cfg,paths,{'version':[5,0],'devices':[{'type':'CPU','id':'CPU'}]},tmp_path/'output')
+    assert ready.color_ranges['tracks']==[7,7]
+    assert 'feature:late_feature' not in payload['video_headers'][0]['track_fields']
+    assert 'feature:late_feature' in payload['video_headers'][1]['track_fields']
+    cfg.track_color_mode='feature:absent'
+    with pytest.raises(ValueError,match='across this video'):prepare_video(cfg,paths,{'version':[5,0],'devices':[{'type':'CPU','id':'CPU'}]},tmp_path/'output')

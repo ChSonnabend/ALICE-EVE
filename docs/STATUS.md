@@ -2,6 +2,18 @@
 
 ## Collision video update
 
+Interactive playback now has independent collision and viewport pause/resume
+controls. Sidebar hover holds the playback clock while dropdowns are being edited;
+track picking pauses the collision. Object modes, enabled detectors and feature
+menus remain available across the selected sequence, with missing values coloured
+as unknown. Detector object/mesh identities remain unchanged across repeated
+collision loops, and movie renders enable Cycles persistent render data. Both
+Cycles preview pause and Eevee solid-inspection pause were checked natively.
+245 Python tests pass; native QA also exercises the sidebar hold/release and a
+detector absent from the second collision. A 16-frame real run-560067 CPU movie
+renders and decodes with geometry reuse enabled. Detector pixels are still shaded
+per frame to retain depth, transparency and shadows.
+
 Multi-collision playback and H.264 MP4 export use the same geometry-node growth
 for tracks, delayed cluster instancing and gradually rising towers. Fixed intervals
 and fine collision-clock schedules are portable settings; automatic scaling averages

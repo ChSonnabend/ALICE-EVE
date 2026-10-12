@@ -7,11 +7,26 @@ opens a looping Blender session; **Preview video** exports a small MP4;
 then writes `video.mp4` in the reported output folder.
 
 The Blender **ALICE EVE → Collision video** box contains **Play collisions** and
-**Stop video**. Stop pauses immediately at the current frame. Play resumes;
+**Pause collisions**. Pause freezes immediately at the current frame. Play resumes;
 reaching the end loops to the first selected collision. Camera, lights, colours,
 detector surfaces and data choices can be edited during playback or while paused.
 **Export config** saves these settings, including video controls. **Render full**
 renders all selected collisions with the exported camera and chosen quality.
+
+**Pause viewport** independently suspends live viewport rendering. Cycles freezes
+its progressive preview; fast Eevee changes to inexpensive solid inspection until
+**Resume viewport** restores rendered shading. Pause both controls to stop collision
+updates and live rendering together. These are local editing controls, so they do
+not pause an exported movie. Starting mouse track selection pauses collisions too,
+keeping the picked track/event stable until you press Play again.
+
+**Pause collisions while editing sidebar** is enabled by default. Hovering the
+sidebar holds the playback clock so dropdowns, object choices and colours remain
+available; moving back into the view resumes without jumping past the held time.
+Colour-feature menus include the whole selected sequence. Detector data/object
+choices stay enabled if available anywhere in that sequence, even when a particular
+collision has no objects for that detector. Chosen modes and colour ranges persist;
+missing feature values in one collision use the configured unknown colour.
 
 ## Timing and growth
 
@@ -91,3 +106,10 @@ The output includes `video.mp4`, a first-collision poster `render.png`, portable
 is a snapshot of the poster frame; re-open the movie through the framework to
 rebuild playback. Frames stream into the encoder; they are not all retained as
 large PNGs. Desktop cancellation stops both Blender and its encoder.
+
+Detector objects and meshes are built once and retained across collisions; only
+particle collections change. Cycles persistent render data is enabled for movies
+to reuse unchanged geometry and textures between frames. This uses some additional
+memory. Detector pixels still participate in each frame's shading, depth,
+transparency and shadows, which preserves correct interaction with the changing
+tracks. Editing detector geometry explicitly rebuilds the changed surfaces.
