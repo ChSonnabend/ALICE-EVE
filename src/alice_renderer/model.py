@@ -118,6 +118,13 @@ def capabilities(objects: list[dict]) -> list[str]:
 
 @dataclass
 class RenderSettings:
+    video_enabled: bool = False
+    video_timing: str = 'fixed'
+    video_interval_s: float = 1.
+    video_time_scale: float = 0.
+    video_speed_m_s: float = 10.
+    video_tower_rise_s: float = .2
+    video_fps: int = 24
     detector_setup: str = "ALICE2"
     detectors: list[str] = field(default_factory=lambda: list(DETECTORS))
     geometry: list[str] = field(default_factory=list)
@@ -210,6 +217,13 @@ class RenderSettings:
         {'position_m':[0.,0.,-10.], 'energy':1000., 'size_m':8., 'color':'#ffffff'}])
 
     def validate(self):
+        if not isinstance(self.video_enabled,bool):raise ValueError('Video mode must be boolean')
+        if self.video_timing not in ('fixed','realtime'):raise ValueError('Invalid video timing mode')
+        if isinstance(self.video_fps,bool) or not isinstance(self.video_fps,int) or not 1<=self.video_fps<=120:raise ValueError('Video frame rate must be 1–120 FPS')
+        for key in ('video_interval_s','video_speed_m_s','video_tower_rise_s'):
+            v=getattr(self,key)
+            if isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) or v<=0:raise ValueError('Invalid '+key)
+        if isinstance(self.video_time_scale,bool) or not isinstance(self.video_time_scale,(int,float)) or not math.isfinite(self.video_time_scale) or self.video_time_scale<0:raise ValueError('Video time scale must be positive, or 0 for automatic scaling')
         from .calorimeter_towers import CALORIMETERS,DISPLAY_MODES
         if not isinstance(self.calorimeter_display,dict) or any(name not in CALORIMETERS or mode not in DISPLAY_MODES for name,mode in self.calorimeter_display.items()):raise ValueError('Invalid calorimeter display choice')
         if not isinstance(self.tower_height_scales,dict) or any(name not in CALORIMETERS or isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) or v<=0 for name,v in self.tower_height_scales.items()):raise ValueError('Tower height scales must be positive and finite')

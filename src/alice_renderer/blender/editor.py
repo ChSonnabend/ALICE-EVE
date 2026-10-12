@@ -28,6 +28,7 @@ def current_settings():
     camera=scene.camera
     cfg['camera']='orthographic' if camera.data.type=='ORTHO' else 'perspective'
     cfg['camera_lens_mm']=camera.data.lens
+    for key in ('video_enabled','video_timing','video_interval_s','video_time_scale','video_speed_m_s','video_tower_rise_s','video_fps'):cfg[key]=getattr(ui,key)
     from camera_pose import snapshot
     cfg['camera_pose']=snapshot(camera)
     cfg['frame_aspect']=scene.render.resolution_x/scene.render.resolution_y
@@ -81,10 +82,12 @@ def current_settings():
     cfg['color_ranges']={'tracks':[ui.track_min,ui.track_max],'clusters':[ui.cluster_min,ui.cluster_max]}
     cfg['scale_min']=None;cfg['scale_max']=None
     cfg['lights']=[{'name':o.name,'position_m':list(o.location),'rotation':list(o.rotation_euler),'energy':o.data.energy,'size_m':o.data.size,'color':hex_color(o.data.color),'color_linear':list(o.data.color)} for o in scene.objects if o.type=='LIGHT' and o.data.type=='AREA']
+    if cfg['video_enabled']:cfg['clip_tracks']=True
     return RenderSettings(**cfg).validate()
 
 def track_signature(ui):
     detector_sizes=tuple((i.name,i.cluster_size_scale,i.tower_width_factor,i.tower_fixed_height_cm,i.tower_max_height_cm,i.tower_mapping,i.tower_log_reference) for i in ui.detectors if i.data and i.data_available)
+    detector_sizes+=(('video',ui.video_timing,ui.video_interval_s,ui.video_time_scale,ui.video_speed_m_s,ui.video_tower_rise_s,ui.video_fps),)
     return (tuple((i.name,i.mode,i.cell_display,i.tower_height_scale) for i in ui.detectors if i.data and i.data_available),tuple(i.name for i in ui.detectors if i.visible and i.geometry_available and i.name!='L3'),ui.track_width_cm,ui.cluster_radius_cm,ui.tpc_cluster_profile,ui.tpc_profile_scale,ui.tpc_profile_thickness_cm,ui.clip_tracks,ui.include_ambiguous_tracks,ui.highlight_ids,ui.highlight_width_cm,ui.highlight_cluster_radius_cm,ui.highlight_override,tuple(ui.highlight_track_color),tuple(ui.highlight_cluster_color),ui.tower_fixed_height_cm,ui.tower_max_height_cm,ui.tower_width_scale,ui.tower_direction,ui.tower_height_mapping,detector_sizes)
 
 def set_all_modes(self,context):
@@ -293,6 +296,15 @@ def viewport_renderer_update(self,context):
     use_scene_lighting()
 
 class SceneSettings(bpy.types.PropertyGroup):
+    video_enabled: BoolProperty(name='Render selected collisions as video',default=False)
+    video_timing: EnumProperty(name='Collision timing',items=[('fixed','Fixed interval','Keep selected collision order'),('realtime','Scaled collision timestamps','Automatic scale averages one collision per second')],default='fixed',update=selection_update)
+    video_interval_s: FloatProperty(name='Event interval / final hold (s)',min=.001,max=3600,default=1.,update=selection_update)
+    video_time_scale: FloatProperty(name='Source-time scale (0 = auto)',description='Video seconds per source second; 0 averages one collision per second',min=0,max=1e12,default=0,update=selection_update)
+    video_speed_m_s: FloatProperty(name='Display propagation (m/s)',description='Metres per VIDEO second; not particle time of flight',min=.001,max=100000,default=10.,update=selection_update)
+    video_tower_rise_s: FloatProperty(name='Tower rise time (s)',min=.001,max=3600,default=.2,update=selection_update)
+    video_fps: IntProperty(name='Video FPS',min=1,max=120,default=24,update=selection_update)
+    video_playing: BoolProperty(default=False)
+    video_status: StringProperty(default='Ready')
     tower_height_mapping: EnumProperty(name='Tower height mapping',items=[('linear','Linear','Height proportional to measured signal'),('log','Logarithmic','Compress large signals; reference configurable per detector')],default='linear',update=selection_update)
     tower_fixed_height_cm: FloatProperty(name='Fixed tower height (cm)',min=.001,max=10000,default=10.,update=selection_update)
     tower_max_height_cm: FloatProperty(name='Maximum tower height (cm)',min=.001,max=10000,default=100.,update=selection_update)
@@ -345,6 +357,8 @@ class ApplyData(bpy.types.Operator):
     bl_idname='alice_eve.apply_data';bl_label='Apply data selection / colour coding'
     def execute(self,context):
         try:
+            if JOB.get('video_player'):
+                JOB['video_player'].reconfigure(current_settings());JOB['applied_track_signature']=track_signature(context.scene.alice_eve);appearance_update(self,context);return {'FINISHED'}
             from worker import tracks,clusters,remove_owned_collection
             cfg=current_settings().to_dict();selected=set(cfg['detectors'])
             cfg['_track_regions']=JOB.get('track_regions',{})
@@ -586,7 +600,7 @@ class ExportConfig(bpy.types.Operator):
             selected=set(cfg.detectors)
             for kind,mode,active in [('tracks',cfg.track_color_mode,bool(enabled_detectors(cfg.to_dict(),'tracks'))),('clusters',cfg.cluster_color_mode,bool(enabled_detectors(cfg.to_dict(),'clusters')))]:
                 objects=selected_tracks(EVENT,cfg.to_dict()) if kind=='tracks' else selected_clusters(EVENT,cfg.to_dict())
-                if active and selected and mode not in capabilities(objects):raise ValueError(f'{mode} is unavailable for selected {kind}')
+                if active and selected and (objects or not cfg.video_enabled) and mode not in capabilities(objects):raise ValueError(f'{mode} is unavailable for selected {kind}')
             if bpy.ops.alice_eve.apply_data()!={'FINISHED'}:return {'CANCELLED'}
             if bpy.ops.alice_eve.apply_geometry()!={'FINISHED'}:return {'CANCELLED'}
             data=recipe(cfg)
@@ -649,6 +663,9 @@ class RenderFull(bpy.types.Operator):
             from alice_renderer.scene_config import quality_settings
             check=quality_settings(current_settings(),'balanced' if self.quality=='custom' else self.quality,backend=backend,samples=self.samples if self.quality=='custom' else None,resolution_percent=self.resolution_percent or PRESET_PERCENT[self.quality])
             check=render_geometry_settings(check,self.geometry_details)
+            if check.video_enabled:
+                from alice_renderer.runtime import prepare_video,check_encoder
+                encoder=check_encoder(JOB.get('ffmpeg'));check,_=prepare_video(check,[Path(p) for p in JOB.get('events',[])],DEVICES,Path(bpy.path.abspath(self.output)))
             errors=preflight(check,[EVENT],DEVICES,Path(bpy.path.abspath(self.output)))
             if errors:raise ValueError('\n'.join(errors))
             root=Path(JOB['output']);path=root/'full-render-config.json'
@@ -662,6 +679,8 @@ class RenderFull(bpy.types.Operator):
             asset_map=root/('render-assets-'+str(time.time_ns())+'.local.json');asset_map.write_text(json.dumps(check.geometry_assets))
             command=[JOB['python'],'-m','alice_renderer.cli','render-config',str(path),'--input',JOB['event'],'--event',str(EVENT['id']),'--assets',str(asset_map),'--blender',bpy.app.binary_path,'--backend',backend,'--quality','balanced' if self.quality=='custom' else self.quality,'--output',bpy.path.abspath(self.output)]
             command+=['--resolution-percent',str(self.resolution_percent or PRESET_PERCENT[self.quality])]
+            if check.video_enabled:
+                event_list=root/('video-events-'+str(time.time_ns())+'.local.json');event_list.write_text(json.dumps(JOB['events']));command+=['--event-files',str(event_list),'--ffmpeg',encoder]
             if self.quality=='custom':command+=['--samples',str(self.samples)]
             log_path=root/('full-render-'+str(time.time_ns())+'.log')
             with log_path.open('w') as log:process=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
@@ -690,6 +709,22 @@ class RenderFull(bpy.types.Operator):
             self.report({'INFO'},'Full render started; progress in '+str(log_path));return {'FINISHED'}
         except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
 
+class PlayVideo(bpy.types.Operator):
+    bl_idname='alice_eve.play_video';bl_label='Play collisions';bl_description='Loop selected collisions using the current timing and propagation controls'
+    def execute(self,context):
+        try:
+            player=JOB.get('video_player')
+            if player is None:raise ValueError('Select at least two collisions in the app and reopen with video enabled')
+            player.reconfigure(current_settings());player.play();return {'FINISHED'}
+        except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
+
+class StopVideo(bpy.types.Operator):
+    bl_idname='alice_eve.stop_video';bl_label='Stop video';bl_description='Pause collision playback immediately at the current frame'
+    def execute(self,context):
+        player=JOB.get('video_player')
+        if player:player.stop()
+        return {'FINISHED'}
+
 class RollCamera(bpy.types.Operator):
     bl_idname='alice_eve.roll_camera';bl_label='Roll camera'
     angle: FloatProperty(name='Roll (degrees)',default=15.)
@@ -706,6 +741,16 @@ def pick_displayed_track(area,region,mouse):
     coll=bpy.data.collections.get('Tracks')
     if not coll:return None
     best=None
+    player=JOB.get('video_player') if JOB else None
+    if player:
+        matrix=np.array(area.spaces.active.region_3d.perspective_matrix)
+        for identity,points in player.visible_paths():
+            coordinates=np.c_[points*.01,np.ones(len(points))]
+            hit=projected_hit(mouse,coordinates,matrix,region.width,region.height)
+            if hit is not None:
+                rank=(round(hit[0],6),hit[1])
+                if best is None or rank<best[0]:best=(rank,identity)
+        return None if best is None else best[1]
     for obj in coll.objects:
         if obj.type!='CURVE' or obj.hide_get() or obj.hide_render:continue
         ids=json.loads(obj.get('alice_track_ids_json','[]'))
@@ -770,6 +815,10 @@ class EVEPanel(bpy.types.Panel):
         layout=self.layout;ui=context.scene.alice_eve
         cfg=current_settings().to_dict()
         layout.label(text='Detector surfaces')
+        if len(JOB.get('events',[]))>=2:
+            box=layout.box();box.label(text='Collision video');box.label(text=ui.video_status)
+            row=box.row();row.operator('alice_eve.play_video');row.operator('alice_eve.stop_video')
+            for key in ('video_enabled','video_timing','video_interval_s','video_time_scale','video_speed_m_s','video_tower_rise_s','video_fps'):box.prop(ui,key)
         layout.operator('alice_eve.solid_surfaces');layout.operator('alice_eve.light_transparent_surfaces');layout.operator('alice_eve.restore_surface_exclusions');layout.operator('alice_eve.tpc_sectors_inner_wall');layout.operator('alice_eve.fast_surfaces');layout.operator('alice_eve.surround_lighting');layout.prop(ui,'viewport_renderer');layout.prop(ui,'viewport_samples')
         layout.prop(ui,'geometry_lod');layout.operator('alice_eve.full_geometry')
         layout.operator('alice_eve.select_no_detectors');layout.operator('alice_eve.complete_geometry')
@@ -848,7 +897,7 @@ class EVEPanel(bpy.types.Panel):
         layout.prop(ui,'export_path');layout.prop(ui,'include_defaults')
         row=layout.row();row.operator('alice_eve.export');row.operator('alice_eve.render_full')
 
-CLASSES=(GeometryComponent,ToggleComponent,RefreshComponents,DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,SolidDetectorSurfaces,LightTransparentSurfaces,RestoreSurfaceExclusions,TPCSectorsInnerWall,SurroundLighting,FastStructuralSurfaces,ShowSceneLighting,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,ExportConfig,RenderFull,EVEPanel)
+CLASSES=(GeometryComponent,ToggleComponent,RefreshComponents,DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,SolidDetectorSurfaces,LightTransparentSurfaces,RestoreSurfaceExclusions,TPCSectorsInnerWall,SurroundLighting,FastStructuralSurfaces,ShowSceneLighting,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,PlayVideo,StopVideo,ExportConfig,RenderFull,EVEPanel)
 
 def start_editor(job,event,metadata):
     global JOB,EVENT,DEVICES,RECOMMENDATION,PALETTES
@@ -867,6 +916,7 @@ def start_editor(job,event,metadata):
     for cls in CLASSES:bpy.utils.register_class(cls)
     bpy.types.Scene.alice_eve=bpy.props.PointerProperty(type=SceneSettings)
     scene=bpy.context.scene;ui=scene.alice_eve;settings=job['settings']
+    for key,default in (('video_enabled',False),('video_timing','fixed'),('video_interval_s',1.),('video_time_scale',0.),('video_speed_m_s',10.),('video_tower_rise_s',.2),('video_fps',24)):setattr(ui,key,settings.get(key,default))
     # Suppress updates during property initialization.
     from worker import rgb
     ui.tpc_cluster_profile=settings.get('tpc_cluster_profile','sphere');ui.tpc_profile_scale=settings.get('tpc_profile_scale',1.);ui.tpc_profile_thickness_cm=settings.get('tpc_profile_thickness_cm',.03)
@@ -880,6 +930,7 @@ def start_editor(job,event,metadata):
     ui.view_transform=settings.get('view_transform','AgX');ui.exposure=settings.get('exposure',0.);ui.track_emission=settings.get('track_emission',.7);ui.cluster_emission=settings.get('cluster_emission',1.)
     ui.data_glow_lighting=settings.get('data_glow_lighting',True)
     available=set(event.get('data_detectors',[]))|{d for t in event['tracks'] for d in t['detectors']}|{c['detector'] for c in event['clusters']}
+    for header in job.get('video_headers',[]):available.update(header.get('available_detectors',[]))
     counts=event_counts(event);track_counts=counts['tracks_by_detector'];cluster_counts=counts['clusters_by_detector']
     from alice_renderer.model import DETECTORS
     for name in (*DETECTORS,'L3'):
@@ -905,6 +956,7 @@ def start_editor(job,event,metadata):
         inner=settings.get('geometry_inner_masks',{}).get(name,{});item.inner_mask_radius=inner.get('radius_m',0);item.inner_mask_patterns=', '.join(inner.get('patterns',[]));item.inner_mask_front=inner.get('front_only',True)
     settings['palette_lut']=PALETTES[settings['palette']]
     locked=recipe(RenderSettings(**settings),event)['scene']['color_ranges']
+    if settings.get('video_enabled'):locked.update(settings.get('color_ranges',{}))
     ui.track_min,ui.track_max=locked['tracks'];ui.cluster_min,ui.cluster_max=locked['clusters']
     ui.export_path=str(Path(job['output'])/'scene-config.json')
     JOB=job;JOB['input_counts']=metadata.get('input_counts') or event_counts(event)
@@ -921,6 +973,9 @@ def start_editor(job,event,metadata):
     bpy.context.view_layer.objects.active=scene.camera
     for obj in scene.objects:obj.select_set(False)
     scene.camera.select_set(True)
+    if settings.get('video_enabled') and job.get('events'):
+        from video_player import VideoPlayer
+        player=VideoPlayer(job,settings,job.get('track_regions',{}));JOB['video_player']=player;player.set_frame(0);player.play()
     bpy.ops.wm.save_as_mainfile(filepath=str(Path(job['output'])/'interactive.blend'))
     if job.get('library_path'):
         save_session();bpy.app.timers.register(save_session,first_interval=2.)

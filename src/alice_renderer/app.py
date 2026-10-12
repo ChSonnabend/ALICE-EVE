@@ -106,7 +106,7 @@ class Window(QMainWindow):
         split=QSplitter();layout.addWidget(split,1)
         self.tabs=QTabWidget();split.addWidget(self.tabs)
         self.detector_modes={};self.data_checks={};self.geometry_checks={};self.asset_fields={};self.color_buttons={};self.detector_labels={}
-        self.build_detectors();self.build_components();self.build_appearance();self.build_data_sizes();self.build_render();self.build_runtime();self.build_library()
+        self.build_detectors();self.build_components();self.build_appearance();self.build_data_sizes();self.build_video();self.build_render();self.build_runtime();self.build_library()
         right=QWidget();right_layout=QVBoxLayout(right);split.addWidget(right);split.setSizes([540,840])
         tools=QHBoxLayout();right_layout.addLayout(tools)
         self.all_button=QPushButton('Select all');self.none_button=QPushButton('Select none');tools.addWidget(self.all_button);tools.addWidget(self.none_button)
@@ -368,6 +368,20 @@ class Window(QMainWindow):
             mapping.setCurrentIndex(mapping.findData(self.base.tower_height_mappings.get(name,'inherit')));self.tower_mappings[name]=mapping;layout.addRow('Height mapping',mapping)
             reference=number(self.base.tower_log_references.get(name,1.),.000001,1000000,6);self.tower_log_refs[name]=reference;layout.addRow('Log reference signal',reference)
 
+    def build_video(self):
+        widget=self.tab('Video');layout=QFormLayout(widget)
+        self.video_enabled=QCheckBox('Play / render selected collisions as a video');self.video_enabled.setChecked(self.base.video_enabled);layout.addRow(self.video_enabled)
+        self.video_timing=QComboBox();self.video_timing.addItem('One collision per fixed interval','fixed');self.video_timing.addItem('Scaled collision timestamps','realtime');self.video_timing.setCurrentIndex(self.video_timing.findData(self.base.video_timing));layout.addRow('Timing',self.video_timing)
+        for key,label,low,high,decimals in (('video_interval_s','Event interval / final hold (seconds)',.001,3600,3),('video_time_scale','Time scale (0 = automatic)',0,1e12,6),('video_speed_m_s','Propagation (metres / video second)',.001,100000,3),('video_tower_rise_s','Tower rise time (video seconds)',.001,3600,3),('video_fps','Video frames per second',1,120,0)):
+            field=number(getattr(self.base,key),low,high,decimals);setattr(self,key,field);layout.addRow(label,field)
+        self.video_time_scale.setSpecialValueText('Automatic: about one collision / second')
+        note=QLabel('Select at least two collision events. Automatic timestamp scaling averages about one collision per video second. Fixed intervals accept 1, 5, or any positive number of seconds. The final collision uses the interval as its hold time. Tracks use detector extent masks and grow at the display speed. Linked clusters follow their sampled track; unlinked cells use a wave from the primary vertex. Towers rise after arrival. Playback loops in Blender; Stop video pauses immediately. Full render writes MP4 and checks FFmpeg first.');note.setWordWrap(True);layout.addRow(note)
+        self.video_enabled.toggled.connect(self.video_changed)
+    def video_changed(self,on):
+        if on:self.clip_tracks.setChecked(True)
+        self.clip_tracks.setEnabled(not on)
+        if hasattr(self,'model'):self.update_availability()
+
     def settings(self):
         cfg=RenderSettings(detectors=[d for d,c in self.data_checks.items() if c.isChecked() and c.isEnabled()],geometry=[d for d,c in self.geometry_checks.items() if c.isChecked()],magnet=self.magnet.isChecked(),mode=self.mode.currentText(),track_color_mode=self.track_mode.currentText(),cluster_color_mode=self.cluster_mode.currentText(),colors={k:b.text() for k,b in self.color_buttons.items()},scale_min=None if self.auto_range.isChecked() else self.minimum.value(),scale_max=None if self.auto_range.isChecked() else self.maximum.value(),palette=self.palette.currentText(),geometry_assets={k:v.text() for k,v in self.asset_fields.items() if v.text()},geometry_units=self.geometry_units.currentText(),geometry_opacity=self.opacity.value(),cutaway=self.cutaway.isChecked(),schematic=self.schematic.isChecked(),width=self.width.value(),height=self.height.value(),samples=self.samples.value(),denoise=self.denoise.isChecked(),backend=self.backend.currentText(),device=self.device.currentData() or '',threads=self.threads.value(),track_radius_cm=self.track_radius.value()/2,cluster_radius_cm=self.cluster_radius.value(),camera=self.camera.currentText(),azimuth=self.azimuth.value(),elevation=self.elevation.value(),distance_cm=self.distance.value(),target_cm=[s.value() for s in self.target],save_blend=self.save_blend.isChecked())
         for key,value in self.scene_overrides.items():setattr(cfg,key,value)
@@ -388,6 +402,9 @@ class Window(QMainWindow):
         cfg.tower_height_mapping=self.tower_height_mapping.currentData()
         cfg.tower_height_mappings={name:field.currentData() for name,field in self.tower_mappings.items() if field.currentData()!='inherit'}
         cfg.tower_log_references={name:field.value() for name,field in self.tower_log_refs.items() if field.value()!=1.}
+        cfg.video_enabled=self.video_enabled.isChecked();cfg.video_timing=self.video_timing.currentData()
+        for key in ('video_interval_s','video_time_scale','video_speed_m_s','video_tower_rise_s','video_fps'):setattr(cfg,key,getattr(self,key).value())
+        if cfg.video_enabled:cfg.clip_tracks=True
         cfg.data_glow_lighting=self.data_glow_lighting.isChecked()
         cfg.camera_lens_mm=self.camera_lens.value()
         if cfg.camera_pose:cfg.camera_pose={**cfg.camera_pose,'lens':cfg.camera_lens_mm}
@@ -545,6 +562,9 @@ class Window(QMainWindow):
         self.preview_button.setEnabled(renderable);self.render_button.setEnabled(renderable);self.editor_button.setEnabled(renderable)
         self.preview_button.setText('Preview first selected event' if rows else 'Preview geometry only')
         self.render_button.setText('Render selected events' if rows else 'Render geometry only')
+        if self.video_enabled.isChecked():
+            self.preview_button.setText('Preview video');self.render_button.setText('Render video');self.editor_button.setText('Play collisions…')
+        else:self.editor_button.setText('Interactive scene…')
     def check_devices(self):
         def done(info):
             self.device_info=info;self.device_label.setText(info['version_string']+' · '+', '.join(d['name']+' ('+d['type']+')' for d in info['devices']));self.update_devices()
@@ -666,6 +686,9 @@ class Window(QMainWindow):
             for name,field in fields.items():field.setValue(getattr(cfg,key).get(name,default))
         self.tower_height_mapping.setCurrentIndex(self.tower_height_mapping.findData(cfg.tower_height_mapping))
         for name,field in self.tower_mappings.items():field.setCurrentIndex(field.findData(cfg.tower_height_mappings.get(name,'inherit')))
+        self.video_enabled.setChecked(cfg.video_enabled);self.video_timing.setCurrentIndex(self.video_timing.findData(cfg.video_timing))
+        for key in ('video_interval_s','video_time_scale','video_speed_m_s','video_tower_rise_s','video_fps'):getattr(self,key).setValue(getattr(cfg,key))
+        self.video_changed(cfg.video_enabled)
         self.view_transform.setCurrentText(cfg.view_transform);self.exposure.setValue(cfg.exposure);self.track_emission.setValue(cfg.track_emission);self.cluster_emission.setValue(cfg.cluster_emission)
         self.data_glow_lighting.setChecked(cfg.data_glow_lighting)
         self.camera_lens.setValue(cfg.camera_pose.get('lens',cfg.camera_lens_mm))
@@ -698,7 +721,13 @@ class Window(QMainWindow):
             self.refresh_library();self.message('Interactive Blender scene started. Open the ALICE EVE sidebar; export or render from there. Log: '+str(result[0]/'editor.log'))
         blender=self.blender.text();output=Path(self.output.text())
         fast=self.fast_interactive.isChecked()
-        self.start_task(lambda p,c:launch_editor(blender,self.catalogue.event_path(ordinal,progress=p,cancelled=c) if has_event else None,cfg,output,library_path=self.library.path,fast=fast),launched)
+        def launch(p,c):
+            if cfg.video_enabled:
+                paths=[self.catalogue.event_path(i,progress=p,cancelled=c) for i in sorted(self.model.selected)] if has_event else []
+                if len(paths)<2:raise ValueError('Video needs at least two selected collisions')
+                return launch_editor(blender,paths[0],cfg,output,library_path=self.library.path,fast=fast,event_paths=paths)
+            return launch_editor(blender,self.catalogue.event_path(ordinal,progress=p,cancelled=c) if has_event else None,cfg,output,library_path=self.library.path,fast=fast)
+        self.start_task(launch,launched)
     def render_quality_dialog(self,cfg,devices):
         rec=recommended_quality(devices);dialog=QDialog(self);dialog.setWindowTitle('Full render quality');form=QFormLayout(dialog)
         note=QLabel(rec['reason']);note.setWordWrap(True);form.addRow(note)
@@ -738,7 +767,8 @@ class Window(QMainWindow):
         try:cfg=self.settings();self.save_settings(cfg)
         except Exception as exc:self.failure(str(exc));return
         ids=sorted(self.model.selected)
-        if preview:ids=ids[:1]
+        if cfg.video_enabled and len(ids)<2:self.failure('Video needs at least two selected collision events');return
+        if preview and not cfg.video_enabled:ids=ids[:1]
         blender=self.blender.text();output=Path(self.output.text())
         def run(chosen):
             if chosen is not None:self.start_task(lambda p,c:render_events(blender,[self.catalogue.event_path(i,progress=p,cancelled=c) for i in ids],chosen,output,preview=preview,progress=p,cancelled=c,library_path=self.library.path),lambda batch:(self.refresh_library(),self.message(f'Completed: {batch}')))

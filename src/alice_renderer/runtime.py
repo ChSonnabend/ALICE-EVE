@@ -48,8 +48,8 @@ def preflight(settings: RenderSettings, events, devices: dict, output: Path) -> 
             clip_assets.update(d for t in tracks for d in selected_track_detectors(values,t) if not is_schematic(values,d))
         peak_points=max(peak_points,sum(len(t['points']) for t in tracks));peak_clusters=max(peak_clusters,len(clusters))
         for name,mode,objects,active in [('tracks',settings.track_color_mode,tracks,bool(enabled_detectors(settings.to_dict(),'tracks'))),('clusters',settings.cluster_color_mode,clusters,bool(enabled_detectors(settings.to_dict(),'clusters')))]:
-            if active and settings.detectors and mode not in capabilities(objects): errors.append(f'Event {event["id"]}: {mode} is unavailable for selected {name}')
-        if settings.detectors and not tracks and not clusters:errors.append(f'Event {event["id"]}: no selected tracks or clusters')
+            if active and settings.detectors and (objects or not settings.video_enabled) and mode not in capabilities(objects): errors.append(f'Event {event["id"]}: {mode} is unavailable for selected {name}')
+        if settings.detectors and not tracks and not clusters and not settings.video_enabled:errors.append(f'Event {event["id"]}: no selected tracks or clusters')
     for name in sorted(clip_assets):
         asset=settings.geometry_assets.get(name,'')
         if not asset or not Path(asset).is_file():errors.append(f'{name}: aligned geometry is required for track clipping. Provide its asset in Setup or explicitly disable Clip tracks to selected detectors.')
@@ -146,6 +146,7 @@ def fast_editor_settings(settings):
 
 
 def render_events(blender: str, paths: list[Path], settings: RenderSettings, output: Path, *, preview=False, progress=lambda s:None, cancelled=lambda:False, library_path=None):
+    if settings.video_enabled:return render_video(blender,paths,settings,output,preview=preview,progress=progress,cancelled=cancelled,library_path=library_path)
     output=Path(output)
     if not paths:
         if not settings.geometry and not settings.magnet:raise ValueError('Select detector geometry for a geometry-only render')
@@ -210,7 +211,7 @@ def render_events(blender: str, paths: list[Path], settings: RenderSettings, out
         progress(str(folder/'render.png'))
     return batch
 
-def launch_editor(blender, event_path, settings, output, *, library_path=None, fast=True):
+def launch_editor(blender, event_path, settings, output, *, library_path=None, fast=True, event_paths=None):
     """Launch native Blender editing; quality is chosen only by Render full."""
     import copy
     cfg=materialize(fast_editor_settings(settings) if fast else copy.deepcopy(settings))
@@ -222,11 +223,17 @@ def launch_editor(blender, event_path, settings, output, *, library_path=None, f
         cfg.geometry_openings.setdefault(name,180. if cfg.cutaway else 0.)
     cfg.cutaway=False
     devices=probe(blender)
+    video_payload={}
+    if cfg.video_enabled:
+        cfg,video_payload=prepare_video(cfg,list(event_paths or [event_path]),devices,Path(output))
+        event_path=video_payload['events'][video_payload['video_plan']['entries'][0]['source_index']]
     errors=preflight(cfg,[load_event(event_path)],devices,Path(output))
     if errors:raise ValueError('\n'.join(errors))
     folder=Path(output)/('editor-'+time.strftime('%Y%m%d-%H%M%S')+'-'+os.urandom(3).hex());folder.mkdir()
     job=folder/'job.json'
     payload={'fast_interactive':fast,'event':str(Path(event_path).resolve()),'output':str(folder.resolve()),'settings':cfg.to_dict(),'preview':True,'blender':devices,'python':sys.executable,'render_output':str(Path(output).resolve()),'palettes':{name:sample(name) for name in names()}}
+    payload.update(video_payload)
+    if cfg.video_enabled:payload['ffmpeg']=find_ffmpeg()
     from .scene_library import SceneLibrary
     library=SceneLibrary(library_path);payload['library_path']=str(library.path.resolve())
     job.write_text(json.dumps(payload,indent=2))
@@ -235,3 +242,90 @@ def launch_editor(blender, event_path, settings, output, *, library_path=None, f
         process=subprocess.Popen([blender,'--factory-startup','--python-exit-code','1','--python',str(WORKER),'--','--job',str(job),'--interactive'],stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
     finally:log.close()
     return folder,process.pid
+
+def find_ffmpeg():
+    # Prefer the portable dependency over unrelated/broken system installations.
+    try:
+        import imageio_ffmpeg
+        value=imageio_ffmpeg.get_ffmpeg_exe()
+        if Path(value).is_file():return value
+    except (ImportError,RuntimeError,OSError):pass
+    value=shutil.which('ffmpeg')
+    if value:return value
+    return next((p for p in ('/opt/homebrew/bin/ffmpeg','/usr/local/bin/ffmpeg') if Path(p).is_file()),'')
+
+def check_encoder(path=None):
+    path=path or find_ffmpeg()
+    if not path or not Path(path).is_file():raise ValueError('MP4 video needs FFmpeg with the libx264 encoder. Install FFmpeg or provide --ffmpeg before rendering.')
+    try:result=subprocess.run([path,'-hide_banner','-encoders'],capture_output=True,text=True,timeout=15)
+    except (OSError,subprocess.TimeoutExpired) as exc:raise ValueError(f'FFmpeg cannot start: {exc}. Select a working installation with --ffmpeg before rendering.') from exc
+    if result.returncode:raise ValueError(f'FFmpeg cannot start ({path}):\n{(result.stderr or result.stdout)[-2000:]}\nSelect a working installation with --ffmpeg before rendering.')
+    if 'libx264' not in result.stdout+result.stderr:raise ValueError('This FFmpeg build lacks libx264. Select an FFmpeg installation with H.264 encoding before rendering.')
+    return path
+
+def prepare_video(settings,paths,devices,output,*,cancelled=lambda:False):
+    import math
+    from .video import header,schedule
+    from .model import color_value
+    from .track_clipping import selected_track_detectors
+    if len(paths)<2:raise ValueError('Video needs at least two selected collisions')
+    cfg=dataclasses.replace(settings,clip_tracks=True);values=cfg.to_dict();headers=[];required=set();ranges={}
+    def events():
+        for path in paths:
+            if cancelled():raise InterruptedError('Video preparation cancelled')
+            event=load_event(path);headers.append(header(event))
+            for track in selected_tracks(event,values):required.update(selected_track_detectors(values,track))
+            for kind,objects in (('tracks',selected_tracks(event,values)),('clusters',selected_clusters(event,values))):
+                mode=values[kind[:-1]+'_color_mode']
+                if mode=='solid' or kind in cfg.color_ranges:continue
+                for obj in objects:
+                    v=color_value(obj,mode)
+                    if v is not None and math.isfinite(v):
+                        lo,hi=ranges.get(kind,(v,v));ranges[kind]=(min(lo,v),max(hi,v))
+            yield event
+    errors=preflight(cfg,events(),devices,output);plan=schedule(headers,values)
+    if errors:raise ValueError('\n'.join(errors))
+    cfg.color_ranges=dict(cfg.color_ranges)
+    for kind,(lo,hi) in ranges.items():
+        mode=values[kind[:-1]+'_color_mode']
+        if mode in ('primaries','secondaries','matching'):lo,hi=0.,1.
+        elif mode=='phi':lo,hi=-math.pi,math.pi
+        if cfg.scale_min is not None:lo=cfg.scale_min
+        if cfg.scale_max is not None:hi=cfg.scale_max
+        cfg.color_ranges[kind]=[lo,hi]
+    return cfg,dict(events=[str(Path(p).resolve()) for p in paths],video_headers=headers,video_plan=plan,required_track_detectors=sorted(required))
+
+def render_video(blender,paths,settings,output,*,preview=False,progress=lambda s:None,cancelled=lambda:False,library_path=None,ffmpeg=None):
+    encoder=check_encoder(ffmpeg);cfg=materialize(dataclasses.replace(settings,clip_tracks=True))
+    if preview:
+        factor=min(1.,640/max(cfg.width,cfg.height));cfg.width=max(64,int(cfg.width*factor));cfg.height=max(64,int(cfg.height*factor));cfg.samples=16;cfg.denoise=True;cfg.save_blend=False
+    progress('Checking video timing, selected detectors and render prerequisites')
+    devices=probe(blender);cfg,payload=prepare_video(cfg,paths,devices,output,cancelled=cancelled)
+    plan=payload['video_plan'];progress(f'Video: {len(paths)} collisions, {plan["frames"]} frames, {plan["duration_s"]:.2f} seconds')
+    if plan['time_scale'] is not None:progress(f'Collision time scale: {plan["time_scale"]:.6g} video seconds per source second')
+    batch=Path(output)/(('video-preview-' if preview else 'video-')+time.strftime('%Y%m%d-%H%M%S')+'-'+os.urandom(3).hex());batch.mkdir(parents=True)
+    first=payload['events'][plan['entries'][0]['source_index']]
+    payload.update(event=first,output=str(batch.resolve()),settings=cfg.to_dict(),preview=preview,blender=devices,ffmpeg=encoder)
+    job=batch/'job.json';job.write_text(json.dumps(payload,indent=2))
+    command=[blender,'--background','--factory-startup','--python-exit-code','1','--python',str(WORKER),'--','--job',str(job)]
+    with (batch/'blender.log').open('w') as log,(batch/'blender.log').open() as status:
+        process=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+        def report():
+            for line in status:
+                if 'ALICE_FRAME ' in line:
+                    done,total=map(int,line.split('ALICE_FRAME ',1)[1].split('/'));progress(f'Render progress: {int(done*100/total)}% — video frame {done}/{total}')
+                elif 'ALICE_STAGE ' in line:progress(line.split('ALICE_STAGE ',1)[1].strip())
+        while process.poll() is None:
+            report()
+            if cancelled():
+                import signal
+                os.killpg(process.pid,signal.SIGTERM)
+                try:process.wait(timeout=5)
+                except subprocess.TimeoutExpired:os.killpg(process.pid,signal.SIGKILL);process.wait()
+                raise InterruptedError('Video render cancelled')
+            time.sleep(.1)
+        report()
+    if process.returncode or not (batch/'video.mp4').is_file():raise ValueError(f'Video render failed. See {batch/"blender.log"}')
+    from .scene_library import SceneLibrary
+    SceneLibrary(library_path).record_job(batch,kind='video preview' if preview else 'video')
+    progress(str(batch/'video.mp4'));return batch

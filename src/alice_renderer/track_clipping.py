@@ -23,7 +23,7 @@ def prepare_regions(regions):
     return result
 
 
-def clip_polyline(points, regions, *, margin_cm=0.):
+def clip_polyline(points, regions, *, margin_cm=0., distances=None):
     """Return disconnected pieces, interpolating intersections even if both endpoints are outside."""
     if len(points)<2 or not regions:return []
     p=np.asarray(points,dtype=float);a,b=p[:-1],p[1:];intervals=[[] for _ in a]
@@ -36,7 +36,9 @@ def clip_polyline(points, regions, *, margin_cm=0.):
         lo=np.maximum(0.,np.max(np.where(delta< -1.e-12,ratio,-np.inf),axis=1))
         hi=np.minimum(1.,np.min(np.where(delta>1.e-12,ratio,np.inf),axis=1))
         for i in np.flatnonzero(~bad & (hi-lo>1.e-10)):intervals[i].append((float(lo[i]),float(hi[i])))
-    pieces=[];current=[]
+    pieces=[];current=[];current_distances=[]
+    def finish():
+        if len(current)>1:pieces.append(dict(points=current.copy(),distances=current_distances.copy()) if distances is not None else current.copy())
     for i,values in enumerate(intervals):
         merged=[]
         for lo,hi in sorted(values):
@@ -44,13 +46,14 @@ def clip_polyline(points, regions, *, margin_cm=0.):
             else:merged.append((lo,hi))
         for lo,hi in merged:
             start=a[i]+lo*(b[i]-a[i]);end=a[i]+hi*(b[i]-a[i])
-            if current and np.linalg.norm(np.asarray(current[-1])-start)<=1.e-7:current.append(end.tolist())
+            ds=distances[i]+lo*(distances[i+1]-distances[i]) if distances is not None else 0
+            de=distances[i]+hi*(distances[i+1]-distances[i]) if distances is not None else 0
+            if current and np.linalg.norm(np.asarray(current[-1])-start)<=1.e-7:current.append(end.tolist());current_distances.append(de)
             else:
-                if len(current)>1:pieces.append(current)
-                current=[start.tolist(),end.tolist()]
+                finish();current=[start.tolist(),end.tolist()];current_distances=[ds,de]
             if hi<1.-1.e-9:
-                pieces.append(current);current=[]
+                finish();current=[];current_distances=[]
         if not merged and current:
-            pieces.append(current);current=[]
-    if len(current)>1:pieces.append(current)
+            finish();current=[];current_distances=[]
+    finish()
     return pieces

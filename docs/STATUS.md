@@ -1,4 +1,30 @@
-# Validation status — 11 October 2026
+# Validation status — 12 October 2026
+
+## Collision video update
+
+Multi-collision playback and H.264 MP4 export use the same geometry-node growth
+for tracks, delayed cluster instancing and gradually rising towers. Fixed intervals
+and fine collision-clock schedules are portable settings; automatic scaling averages
+one arrival per video second. Event files remain an instance-level selection.
+Viewport playback loops and Stop unregisters its timer immediately. Geometry and
+camera remain fixed between collisions; only the active collision's particle
+buffers are loaded. Colour ranges cover the selected collisions.
+
+244 Python tests pass, including UI selections/config round trips, timestamp clocks,
+AO2D clock-field import, encoder prerequisites and command-line selection. Native
+Blender checks verify clipped growth, hidden/revealed clusters, half/full tower
+heights, collision replacement, repeated loops without node-group accumulation,
+Play/Stop and the full-render button's all-event handoff. Existing per-detector
+controls, sizes and calorimeter tower QA also pass. Two run-560067 collisions
+(ordinals 8 and 36) exported and decoded successfully on CPU at 640 × 360,
+8 FPS, 16 frames, 2 seconds. The measured timestamp scale was
+606.7887116633854 video seconds per source second, with collision replacement at
+frame 8. Video hardware validation on other platforms remains outstanding.
+
+Unlinked measurements use an explicitly labelled primary-vertex distance wave;
+linked hits use their sampled associated path. Animation speeds are visual controls,
+not measured flight times. Detector clipping retains the aligned outer extent masks
+used by still rendering. See [video controls and limits](VIDEO.md).
 
 ## Implemented
 

@@ -25,6 +25,29 @@ def settle(w,application):
     application.processEvents()
     assert not (w.task and w.task.isRunning())
 
+def test_video_controls_round_trip_and_keep_all_selected_events_for_preview(window,monkeypatch):
+    from alice_renderer.scene_config import recipe,resolve_settings
+    w,application,root=window;generate(root/'events.jsonl');w.load_input(root/'events.jsonl');settle(w,application)
+    w.video_enabled.setChecked(True);w.video_timing.setCurrentIndex(w.video_timing.findData('realtime'));w.video_interval_s.setValue(5);w.video_speed_m_s.setValue(12);w.video_tower_rise_s.setValue(.4);w.video_fps.setValue(30)
+    cfg=w.settings();assert cfg.clip_tracks and not w.clip_tracks.isEnabled()
+    w.apply_scene(resolve_settings(recipe(cfg),'unused.json',asset_overrides=cfg.geometry_assets))
+    assert w.settings().video_enabled and w.settings().video_fps==30 and w.settings().video_interval_s==5
+    assert w.render_button.text()=='Render video' and w.editor_button.text()=='Play collisions…'
+    captured=[]
+    def rendered(blender,paths,settings,output,**kwargs):captured.extend(paths);return root/'fake-video'
+    monkeypatch.setattr(app_module,'render_events',rendered)
+    w.start_render(True);settle(w,application)
+    assert len(captured)==3
+
+def test_video_editor_receives_all_selected_paths_and_stop_prerequisite_is_clear(window,monkeypatch):
+    w,application,root=window;generate(root/'events.jsonl');w.load_input(root/'events.jsonl');settle(w,application);w.video_enabled.setChecked(True)
+    captured=[]
+    def launched(blender,event_path,settings,output,**kwargs):captured.extend(kwargs['event_paths']);return root/'editor-video',123
+    monkeypatch.setattr(app_module,'launch_editor',launched)
+    w.open_editor();settle(w,application);assert len(captured)==3
+    messages=[];monkeypatch.setattr(w,'failure',messages.append);w.model.selected={0};w.start_render(False)
+    assert any('at least two' in text for text in messages)
+
 def test_calorimeter_controls_round_trip_into_exported_scene(window):
     from alice_renderer.scene_config import recipe,resolve_settings
     w,application,root=window

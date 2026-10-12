@@ -9,7 +9,7 @@ from alice_renderer.model import color_value,RenderSettings,capabilities
 def fixture_file(path,*,bad_index=False,bad_extra=False):
     with uproot.recreate(path) as f:
         for df,n in [('DF_1',2),('DF_2',1)]:
-            f.mktree(df+'/O2collision_001',{'fPosX':np.zeros(n,dtype='f4'),'fPosY':np.zeros(n,dtype='f4'),'fPosZ':np.zeros(n,dtype='f4'),'fIndexBCs':np.zeros(n,dtype='i4'),'fNumContrib':np.ones(n,dtype='u2')})
+            f.mktree(df+'/O2collision_001',{'fPosX':np.zeros(n,dtype='f4'),'fPosY':np.zeros(n,dtype='f4'),'fPosZ':np.zeros(n,dtype='f4'),'fIndexBCs':np.zeros(n,dtype='i4'),'fNumContrib':np.ones(n,dtype='u2'),'fCollisionTime':np.arange(n,dtype='f4')*1e6})
             f.mktree(df+'/O2bc_001',{'fRunNumber':np.array([99],dtype='i4'),'fGlobalBC':np.array([123],dtype='u8')})
             ids=np.array([0,(8 if bad_index else n-1),-1],dtype='i4');count=len(ids)
             f.mktree(df+'/O2track_iu',{'fIndexCollisions':ids,'fX':np.array([2,83,90],dtype='f4'),'fY':np.zeros(count,dtype='f4'),'fZ':np.ones(count,dtype='f4'),'fAlpha':np.zeros(count,dtype='f4'),'fSnp':np.zeros(count,dtype='f4'),'fTgl':np.ones(count,dtype='f4')*.5,'fSigned1Pt':np.array([1,-2,3],dtype='f4'),'fTrackType':np.zeros(count,dtype='u1')})
@@ -24,6 +24,7 @@ def test_aod_lazy_collision_index_and_selected_fitted_features(tmp_path):
     rows=cat.rows();assert len(rows)==3 and [r['ntracks'] for r in rows]==[1,1,2]
     assert not list(cat.folder.glob('event-*.json.gz'))
     event=load_event(cat.event_path(1));assert len(event['tracks'])==1 and event['clusters']==[]
+    assert event['global_bc']==123 and event['collision_time_ns']==1e6
     track=event['tracks'][0];assert track['detectors']==['ITS','TPC'] and track['matching']
     assert track['associations']['index_collisions']==1
     assert track['id']=='DF_1:barrel:1';assert track['kinematics']['pt']==.5

@@ -23,6 +23,9 @@ def main():
     for name in ('render-config','edit-config'):
         command=sub.add_parser(name,help='Render or interactively edit a portable scene')
         command.add_argument('config',type=Path);command.add_argument('--input',type=Path);command.add_argument('--event',help='Event ID or ordinal:N; overrides config default')
+        command.add_argument('--events',help='Comma-separated event IDs or ordinal:N selectors for a collision video')
+        command.add_argument('--event-files',type=Path,help='Local JSON list of materialized event files; input selection stays outside the portable config')
+        command.add_argument('--ffmpeg',help='Local FFmpeg executable for MP4 encoding')
         command.add_argument('--profile',type=Path);command.add_argument('--geometry-root',type=Path);command.add_argument('--assets',type=Path,help='Local detector-to-asset mapping; hashes still verified')
         command.add_argument('--cache',type=Path,default=Path('cache'));command.add_argument('--output',type=Path,default=Path('renders'))
         command.add_argument('--blender',default=find_blender());command.add_argument('--backend',default='AUTO',choices=['AUTO','CPU','METAL','HIP','CUDA','OPTIX']);command.add_argument('--device',default='')
@@ -55,22 +58,30 @@ def main():
         elif args.command in ('render-config','edit-config'):
             data=load_config(args.config)
             source=args.input or (Path(data['defaults']['input']) if data.get('defaults',{}).get('input') else None)
-            if source is None:raise ValueError('Provide --input; this portable scene has no default input')
-            if args.input is None and not source.is_absolute():source=args.config.resolve().parent/source
+            if source is None and args.event_files is None:raise ValueError('Provide --input; this portable scene has no default input')
+            if source is not None and args.input is None and not source.is_absolute():source=args.config.resolve().parent/source
             selector=args.event if args.event is not None else data.get('defaults',{}).get('event')
             cfg=resolve_settings(data,args.config,args.geometry_root,json.loads(args.assets.read_text()) if args.assets else None)
             devices_info=probe(args.blender);recommendation=recommended_quality(devices_info)
             backend=recommendation['backend'] if args.backend=='AUTO' else args.backend
             cfg=quality_settings(cfg,args.quality,backend=backend,device=args.device,width=args.width,height=args.height,samples=args.samples,resolution_percent=args.resolution_percent)
-            info=inspect_input(source)
-            if info.format not in ('events','aod'):
-                if not args.profile:raise ValueError('Raw TF/CTF requires --profile for O2 collision extraction; exported events render directly')
-                source=run_ingest_profile(source,args.profile,args.cache,progress=print)
-            cat=Catalogue.build(source,args.cache,convert=convert,progress=print,aod_options=aod_options)
-            event_path=choose_event(cat,selector)
+            if args.event_files:
+                values=json.loads(args.event_files.read_text())
+                if not isinstance(values,list) or not values or not all(isinstance(v,str) for v in values):raise ValueError('Event files must be a nonempty JSON list of local paths')
+                paths=[Path(v) if Path(v).is_absolute() else args.event_files.resolve().parent/v for v in values]
+            else:
+                info=inspect_input(source)
+                if info.format not in ('events','aod'):
+                    if not args.profile:raise ValueError('Raw TF/CTF requires --profile for O2 collision extraction; exported events render directly')
+                    source=run_ingest_profile(source,args.profile,args.cache,progress=print)
+                cat=Catalogue.build(source,args.cache,convert=convert,progress=print,aod_options=aod_options)
+                paths=[choose_event(cat,s.strip()) for s in args.events.split(',')] if args.events else [choose_event(cat,selector)]
             print('Recommended: '+recommendation['reason'])
-            if args.command=='edit-config':print(launch_editor(args.blender,event_path,cfg,args.output)[0])
-            else:print(render_events(args.blender,[event_path],cfg,args.output,progress=print))
+            if args.command=='edit-config':print(launch_editor(args.blender,paths[0],cfg,args.output,event_paths=paths)[0])
+            elif cfg.video_enabled:
+                from .runtime import render_video
+                print(render_video(args.blender,paths,cfg,args.output,progress=print,ffmpeg=args.ffmpeg))
+            else:print(render_events(args.blender,paths,cfg,args.output,progress=print))
         elif args.command=='render':
             cat=Catalogue(args.catalogue)
             ids=[row['ordinal'] for row in cat.rows()] if args.events=='all' else [int(v) for v in args.events.split(',')]

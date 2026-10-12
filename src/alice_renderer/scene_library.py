@@ -118,6 +118,7 @@ class SceneLibrary:
         """Import older successful renders and editor sessions, without reading event data."""
         output=Path(output)
         folders=[*output.glob('render-*/event-*'),*output.glob('preview-*/event-*'),*output.glob('editor-*')]
+        folders.extend(p for p in output.glob('video-*') if (p/'video.mp4').is_file())
         with self.connect() as db:known={r[0] for r in db.execute('SELECT config FROM scenes')}
         for folder in folders:
             interactive=folder.name.startswith('editor-')

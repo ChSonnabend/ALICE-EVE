@@ -200,7 +200,7 @@ def clusters(objects,settings):
     legend['cluster_size_scales']=settings.get('cluster_size_scales',{})
     expanded={}
     for key,group in groups.items():
-        plain={};shaped=[];tower_vertices=[];tower_faces=[]
+        plain={};shaped=[];tower_vertices=[];tower_faces=[];tower_arrivals=[]
         for c in group['items']:
             glyph=tower(c,settings)
             tower_report=legend['calorimeter_towers'].get(c['detector'])
@@ -209,6 +209,7 @@ def clusters(objects,settings):
                 tower_report['towers']+=1;tower_report['approximate_footprints']+=int(glyph['approximate']);tower_report['clipped_heights']+=int(glyph['clipped'])
                 kinds=tower_report['measurement_kinds'];kind=glyph['measurement_kind'];kinds[kind]=kinds.get(kind,0)+1
                 units=tower_report['signal_units'];unit=glyph['signal_unit'];units[unit]=units.get(unit,0)+1
+                if settings.get('_video_active'):tower_arrivals.append(c['_video_arrival_s'])
                 continue
             if tower_report is not None:tower_report['point_fallbacks']+=1
             axes=profile_axes(c,settings.get('tpc_profile_thickness_cm',.03)) if mode!='sphere' else None
@@ -221,6 +222,9 @@ def clusters(objects,settings):
             obj=bpy.data.objects.new('Cell towers '+key,mesh);coll.objects.link(obj)
             obj['alice_highlighted']=group['highlighted'];obj['alice_towers']=True
             mesh.materials.append(materials('Cluster towers '+key,group['color'],emission=settings.get('cluster_emission',1.),settings=settings))
+            if settings.get('_video_active'):
+                from video_player import animate_towers
+                animate_towers(obj,tower_arrivals,settings['video_tower_rise_s'])
         for name,items in plain.items():
             expanded[key+' '+name]=dict(group,items=items,detector=name,size_scale=settings.get('cluster_size_scales',{}).get(name,1.))
         # Gaussian display approximation: nested 0.5, 1, 1.5, 2, 2.5, 3 sigma
@@ -250,6 +254,9 @@ def clusters(objects,settings):
         ico=n.new('GeometryNodeMeshIcoSphere');ico.inputs['Radius'].default_value=(settings['highlight_cluster_radius_cm'] if group['highlighted'] else settings['cluster_radius_cm'])*.01*group.get('size_scale',1.);ico.inputs['Subdivisions'].default_value=1
         material=n.new('GeometryNodeSetMaterial');material.inputs['Material'].default_value=mat
         instance=n.new('GeometryNodeInstanceOnPoints')
+        if settings.get('_video_active'):
+            from video_player import animate_spheres
+            animate_spheres(mesh,n,l,instance,group['items'])
         if 'axes' in group:
             ico.inputs['Radius'].default_value=1.;ico.inputs['Subdivisions'].default_value=2
             for attribute,socket in [('profile_scale','Scale'),('profile_rotation','Rotation')]:
@@ -503,6 +510,7 @@ def render(job_path,interactive=False):
     regions={}
     from alice_renderer.track_clipping import selected_track_detectors
     required={d for t in ts for d in selected_track_detectors(settings,t)} if settings.get('clip_tracks',True) and bool(enabled_detectors(settings,'tracks')) else set()
+    if settings.get('video_enabled') and job.get('events'):required.update(job.get('required_track_detectors',[]))
     for name in settings['geometry']+(['L3'] if settings['magnet'] else []):
         if is_schematic(settings,name):
             envelope(name,settings);metadata['geometry'][name]={'type':'schematic'}
@@ -520,9 +528,13 @@ def render(job_path,interactive=False):
         else:raise ValueError(name+': aligned geometry is required to clip tracks to the selected detector')
     settings['_track_regions']=regions
     metadata['track_clipping']={'enabled':settings.get('clip_tracks',True),'regions':regions,'basis':'selected source detectors; outer extent mask, not active-volume selection'}
-    if bool(enabled_detectors(settings,'tracks')):
+    if settings.get('video_enabled') and job.get('events'):
+        collection('Tracks');collection('Clusters');metadata['rendered_tracks']=len(ts);metadata['rendered_clusters']=len(cs)
+        metadata['track_legend']=buckets(ts,settings['track_color_mode'],settings['colors']['tracks'],settings,'tracks')[1]
+        metadata['cluster_legend']=buckets(cs,settings['cluster_color_mode'],settings['colors']['clusters'],settings,'clusters')[1]
+    elif bool(enabled_detectors(settings,'tracks')):
         metadata['track_legend']=tracks(ts,settings);metadata['rendered_tracks']=metadata['track_legend']['visible_tracks']
-    if interactive or bool(enabled_detectors(settings,'clusters')):metadata['cluster_legend']=clusters(cs,settings);metadata['rendered_clusters']=len(cs)
+    if not (settings.get('video_enabled') and job.get('events')) and (interactive or bool(enabled_detectors(settings,'clusters'))):metadata['cluster_legend']=clusters(cs,settings);metadata['rendered_clusters']=len(cs)
     from alice_renderer.camera import orbit_position
     target=Vector([v*.01 for v in settings['target_cm']]);distance=settings['distance_cm']*.01
     position=Vector(orbit_position(settings['azimuth'],settings['elevation'],distance,target,settings.get('camera_orbit_axis','Z')))
@@ -565,6 +577,9 @@ def render(job_path,interactive=False):
         job['track_regions']=regions
         start_editor(job,event,metadata)
         return
+    if settings.get('video_enabled') and job.get('events'):
+        from video_player import render_movie
+        render_movie(job,settings,regions,metadata);return
     print('ALICE_STAGE Saving scene',flush=True)
     if settings['save_blend']:bpy.ops.wm.save_as_mainfile(filepath=str(output/'scene.blend'))
     def stats(*args):

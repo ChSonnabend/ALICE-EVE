@@ -12,7 +12,7 @@ import uproot
 from .catalogue import fingerprint
 from .model import validate_event,capabilities
 
-VERSION=2
+VERSION=3
 TABLE_PATTERNS={
  'collisions':r'O2collision(?:_\d+)?', 'bc':r'O2bc(?:_\d+)?',
  'barrel':r'O2track_iu(?:_\d+)?', 'barrel_pv':r'O2track(?:_\d+)?',
@@ -239,6 +239,12 @@ def materialize(catalogue,ordinal,*,progress=lambda s:None,cancelled=lambda:Fals
     with uproot.open(source,object_cache=None,array_cache=None) as file:
         directory=file[ref[0]];mapping=tables(directory);collision=int(ref[1]);col=arrays(directory[mapping['collisions']],entry_start=collision,entry_stop=collision+1)
         event['vertex']=[float(col['fPos'+axis][0]) for axis in 'XYZ'];event['collision_features']=row_features({k:v[0] for k,v in col.items()})
+        if 'fCollisionTime' in col:event['collision_time_ns']=float(col['fCollisionTime'][0])
+        if 'bc' in mapping and 'fIndexBCs' in col:
+            bc_index=int(col['fIndexBCs'][0])
+            if 0<=bc_index<directory[mapping['bc']].num_entries:
+                bc=arrays(directory[mapping['bc']],['fGlobalBC'],entry_start=bc_index,entry_stop=bc_index+1)
+                if 'fGlobalBC' in bc:event['global_bc']=int(bc['fGlobalBC'][0])
         for family in ('barrel','mft','fwd'):
             if cancelled():raise InterruptedError('AO2D trajectory generation cancelled')
             if family not in mapping:continue
