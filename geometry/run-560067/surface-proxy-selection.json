@@ -1,0 +1,205 @@
+{
+  "scope": "15 ALICE2/run-560067 detectors plus L3 magnet",
+  "candidate_renders": 80,
+  "critics": 16,
+  "resolution": [
+    1920,
+    1080
+  ],
+  "total_cache_faces": 202103,
+  "runtime_meshes_all_detectors": 17,
+  "selected": {
+    "CPV": {
+      "selected_attempt": 3,
+      "faces": 1296,
+      "reviewed_attempts": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "post_review_correction": null
+    },
+    "EMC": {
+      "selected_attempt": 1,
+      "faces": 26496,
+      "reviewed_attempts": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "post_review_correction": null
+    },
+    "FDD": {
+      "selected_attempt": 1,
+      "faces": 536,
+      "reviewed_attempts": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "post_review_correction": null
+    },
+    "FT0": {
+      "selected_attempt": 4,
+      "faces": 11473,
+      "reviewed_attempts": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "post_review_correction": null
+    },
+    "FV0": {
+      "selected_attempt": 4,
+      "faces": 27034,
+      "reviewed_attempts": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "post_review_correction": null
+    },
+    "HMP": {
+      "selected_attempt": 2,
+      "faces": 1062,
+      "reviewed_attempts": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "post_review_correction": null
+    },
+    "ITS": {
+      "selected_attempt": 4,
+      "faces": 26173,
+      "reviewed_attempts": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "post_review_correction": "Added broad native ITS support/cage/service shells missing from legacy structural cache; validate in combined scene"
+    },
+    "L3": {
+      "selected_attempt": 3,
+      "faces": 21076,
+      "reviewed_attempts": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "post_review_correction": null
+    },
+    "MCH": {
+      "selected_attempt": 4,
+      "faces": 39032,
+      "reviewed_attempts": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "post_review_correction": null
+    },
+    "MFT": {
+      "selected_attempt": 2,
+      "faces": 28216,
+      "reviewed_attempts": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "post_review_correction": null
+    },
+    "MID": {
+      "selected_attempt": 1,
+      "faces": 8496,
+      "reviewed_attempts": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "post_review_correction": null
+    },
+    "PHS": {
+      "selected_attempt": 1,
+      "faces": 24,
+      "reviewed_attempts": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "post_review_correction": null
+    },
+    "TOF": {
+      "selected_attempt": 2,
+      "faces": 2934,
+      "reviewed_attempts": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "post_review_correction": null
+    },
+    "TPC": {
+      "selected_attempt": 5,
+      "faces": 7103,
+      "reviewed_attempts": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "post_review_correction": null
+    },
+    "TRD": {
+      "selected_attempt": 1,
+      "faces": 648,
+      "reviewed_attempts": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "post_review_correction": null
+    },
+    "ZDC": {
+      "selected_attempt": 1,
+      "faces": 504,
+      "reviewed_attempts": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "post_review_correction": null
+    }
+  }
+}

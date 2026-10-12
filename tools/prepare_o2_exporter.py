@@ -38,7 +38,7 @@ def prepare(reference,destination,templates):
     text,n=re.subn(r'  void drawAOD[^\n]*\n','',text)
     if n!=3:raise ValueError('AOD method declarations anchor mismatch')
     extra='''
-  struct ExportCluster {std::array<float,3> xyz;std::string detector;int track;};
+  struct ExportCluster {std::array<float,3> xyz;std::string detector;int track;float sigmaPad=0,sigmaTime=0,qTot=0,qMax=0;std::array<float,3> sigmaPadXYZ{},sigmaTimeXYZ{};};
   std::vector<ExportCluster> mExportClusters;
   std::vector<GID> mExportTrackGIDs;
   GID mExportCurrentGID;
@@ -105,7 +105,23 @@ def prepare(reference,destination,templates):
     def tpc(section):
         section=replace(section,'  // store the TPC cluster positions','  mExportTPCClusterTimes[mExportCurrentGID]={trc.getTime0(),trackTimeTB,float(mExportCurrentGID.getSource()==GID::TPC && trc.hasBothSidesClusters())};\n  // store the TPC cluster positions')
         section=replace(section,'this->mTPCFastTransform->TransformIdeal(','this->mExportTPCMap->Transform(')
-        section=replace(section,'mEvent.addCluster(\n      xyz.data());','recordPoint(xyz.data(),"TPC");')
+        section=replace(section,'mEvent.addCluster(\n      xyz.data());','''recordPoint(xyz.data(),"TPC");
+    auto& measured=mExportClusters.back();
+    measured.sigmaPad=clTPC.getSigmaPad();measured.sigmaTime=clTPC.getSigmaTime();
+    measured.qTot=clTPC.getQtot();measured.qMax=clTPC.getQmax();
+    // Propagate measured RMS widths with the same calibrated map and t0.
+    // Central differences estimate the local Jacobian, including distortions.
+    for(int axis=0;axis<2;++axis){
+      std::array<float,3> minus,plus;
+      const float h=.25f;
+      for(int sign=-1;sign<=1;sign+=2){
+        auto& point=sign<0?minus:plus;
+        mExportTPCMap->Transform(sector,row,clTPC.getPad()+(axis==0?sign*h:0),clTPC.getTime()+(axis==1?sign*h:0),point[0],point[1],point[2],trackTimeTB);
+        o2::math_utils::rotateZ(point,o2::math_utils::sector2Angle(sector % o2::tpc::SECTORSPERSIDE));
+      }
+      auto& vector=axis==0?measured.sigmaPadXYZ:measured.sigmaTimeXYZ;
+      for(int j=0;j<3;++j)vector[j]=(plus[j]-minus[j])/(2*h)*(axis==0?measured.sigmaPad:measured.sigmaTime);
+    }''')
         return '\n  if(!mExportTPCMap)throw std::runtime_error("Calibrated per-TF TPC map is missing");'+section
     text=function(text,'void EveWorkflowHelper::drawTPCClusters(',tpc)
     text=function(text,'void EveWorkflowHelper::drawHMP(',lambda s:replace(s,'drawGlobalPoint(vec3, gid, time);','float xyz[]={float(vec3.X()),float(vec3.Y()),float(vec3.Z())};recordPoint(xyz,"HMP",false);'))

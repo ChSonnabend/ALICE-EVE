@@ -97,6 +97,15 @@ inline void write(std::ostream& output,o2::event_visualisation::EveWorkflowHelpe
       w.Key("measurement_kind");w.String("calorimeter_cell");w.Key("energy");if(std::isfinite(cell.getEnergy()))w.Double(cell.getEnergy());else w.Null();
       w.Key("trigger_time_us");if(std::isfinite(cell.getTime()))w.Double(cell.getTime());else w.Null();
     } else {w.Key("measurement_kind");w.String(cluster.detector=="TRD"?"calibrated_tracklet":"cluster");}
+    if(cluster.detector=="TPC" && std::all_of(cluster.sigmaPadXYZ.begin(),cluster.sigmaPadXYZ.end(),[](float v){return std::isfinite(v);}) && std::all_of(cluster.sigmaTimeXYZ.begin(),cluster.sigmaTimeXYZ.end(),[](float v){return std::isfinite(v);})) {
+      w.Key("measurements");w.StartObject();
+      w.Key("q_tot");w.Double(cluster.qTot);w.Key("q_max");w.Double(cluster.qMax);w.EndObject();
+      w.Key("tpc_profile");w.StartObject();
+      w.Key("sigma_pad");w.Double(cluster.sigmaPad);
+      w.Key("sigma_time_bins");w.Double(cluster.sigmaTime);
+      w.Key("sigma_vectors_cm");w.StartArray();point(w,cluster.sigmaPadXYZ);point(w,cluster.sigmaTimeXYZ);w.EndArray();
+      w.Key("basis");w.String("O2 ClusterNative RMS pad/time widths; central-difference Jacobian of per-TF TPCCORRMAP and sector rotation at the associated time hypothesis; pad-time covariance unavailable, assumed zero; charge spread, not centroid uncertainty");w.EndObject();
+    }
     w.Key("association_basis");w.String("O2 reconstructed track/trigger reference to this primary vertex; shared clusters may have multiple associations");
     if(cluster.track>=0) {
       const auto t=size_t(cluster.track);if(t>=helper.mExportTrackGIDs.size())throw std::runtime_error("Invalid exported cluster track reference");

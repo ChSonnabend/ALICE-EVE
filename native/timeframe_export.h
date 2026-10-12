@@ -79,6 +79,7 @@ inline uint64_t writeTimeframe(const std::filesystem::path& path,o2::event_visua
       for(unsigned i=0;i<clusters.nClusters[sector][row];++i){const auto& c=clusters.clusters[sector][row][i];
         w.StartObject();w.Key("sector");w.Int(sector);w.Key("row");w.Int(row);w.Key("index");w.Uint(i);
         w.Key("pad");w.Double(c.getPad());w.Key("time_bins");w.Double(c.getTime());
+        w.Key("sigma_pad");w.Double(c.getSigmaPad());w.Key("sigma_time_bins");w.Double(c.getSigmaTime());
         w.Key("q_max");w.Double(c.getQmax());w.Key("q_tot");w.Double(c.getQtot());w.EndObject();}}
   w.EndArray();w.Key("tpc_coordinate_basis");w.String("Native measurements retained for every cluster. Calibrated global coordinates require a track/PV t0 and are exported in the corresponding collision associations.");
   w.Key("timing_channels");w.StartArray();

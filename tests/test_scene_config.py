@@ -92,3 +92,14 @@ def test_component_masks_and_opening_direction_roundtrip():
 def test_invalid_structural_visibility_settings(values):
     from alice_renderer.model import RenderSettings
     with pytest.raises(ValueError):RenderSettings(**values).validate()
+
+
+def test_raster_engine_survives_portable_recipe(tmp_path):
+    settings=RenderSettings(render_engine='BLENDER_EEVEE')
+    path=tmp_path/'raster.json'
+    save_config(path,recipe(settings))
+    restored=resolve_settings(load_config(path),path)
+    assert restored.render_engine=='BLENDER_EEVEE'
+    assert quality_settings(restored,'balanced').render_engine=='BLENDER_EEVEE'
+    with pytest.raises(ValueError,match='render engine'):
+        RenderSettings(render_engine='unsupported').validate()

@@ -10,7 +10,7 @@ def test_portable_startup_preset_has_no_local_inputs_or_quality():
     cfg=commissioning_settings()
     assert cfg.geometry_assets=={} and cfg.detectors==cfg.geometry==['ITS','TPC']
     assert cfg.mode=='both' and cfg.geometry_lod=='full' and not cfg.schematic
-    assert cfg.geometry_openings=={'ITS':180.,'TPC':0.}
+    assert cfg.geometry_openings.get('ITS')==180. and cfg.geometry_openings.get('TPC')==0.
     assert cfg.view_transform=='Standard' and cfg.camera_lens_mm==cfg.camera_pose['lens']
     # Orbit distance is in centimetres in settings, metres in the worker.
     position=orbit_position(cfg.azimuth,cfg.elevation,cfg.distance_cm*.01,[v*.01 for v in cfg.target_cm],'Y')
@@ -27,10 +27,10 @@ def test_default_style_clone_uses_current_local_alignment_and_independent_instan
 def test_startup_keeps_reviewed_camera_with_reduced_tpc_and_surround_lights():
     cfg=startup_settings()
     assert cfg.camera_lens_mm==16 and cfg.roll==13.3
-    assert 'TPC' not in cfg.geometry_inner_masks and 'TPC' not in cfg.geometry_exclusions
+    assert not cfg.geometry_inner_masks.get('TPC') and not cfg.geometry_exclusions.get('TPC')
     parts=cfg.geometry_components['TPC']
     assert parts['parts/TPC_ICVM'] and parts['parts/TPC_IROCB']
     assert not any(parts[key] for key in ('parts/TPC_IGR1','parts/TPC_INPLL','parts/TPC_ring','parts/TPC_rodl','parts/TPC_MMHC'))
     from alice_renderer.scene_presets import SURROUND_LIGHT_PREFIX
     assert sum(light.get('name','').startswith(SURROUND_LIGHT_PREFIX) for light in cfg.lights)==10
-    assert cfg.geometry_openings=={'ITS':180.,'TPC':0.}
+    assert cfg.geometry_openings.get('ITS')==90. and cfg.geometry_openings.get('TPC')==90.

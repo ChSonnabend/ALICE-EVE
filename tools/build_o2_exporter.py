@@ -38,7 +38,7 @@ added=[]
 for attempt in range(12):
     result=subprocess.run(command,capture_output=True,text=True)
     if result.returncode==0:break
-    match=re.search(r'ld: (/[^:\n]+): error adding symbols: DSO missing from command line',result.stderr)
+    match=re.search(r': (/[^:\n]+): error adding symbols: DSO missing from command line',result.stderr)
     dependency=Path(match[1]) if match else None
     if not dependency or dependency.parent.resolve()!=(root/'lib').resolve() or str(dependency) in command:
         print(result.stderr,file=sys.stderr);raise SystemExit(result.returncode)

@@ -9,6 +9,8 @@ from .runtime import find_blender, probe, render_events, launch_editor
 from .scene_config import load_config, resolve_settings, quality_settings, choose_event, recommended_quality
 
 def main():
+    import sys
+    if hasattr(sys.stdout,"reconfigure"):sys.stdout.reconfigure(line_buffering=True)
     parser=argparse.ArgumentParser(description='ALICE event catalogue and Blender rendering')
     sub=parser.add_subparsers(dest='command',required=True)
     inspect=sub.add_parser('inspect');inspect.add_argument('input',type=Path)

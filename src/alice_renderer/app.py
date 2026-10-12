@@ -1,15 +1,17 @@
 """Native desktop controls; all expensive work runs outside the UI thread."""
 from __future__ import annotations
-import json, threading, sqlite3, math
+import json, threading, sqlite3, math, os
 from pathlib import Path
+import PySide6
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QThread, Signal, QTimer
 from PySide6.QtGui import QColor, QPixmap
-from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QFormLayout,QLabel,QPushButton,QLineEdit,QCheckBox,QComboBox,QSpinBox,QDoubleSpinBox,QTabWidget,QScrollArea,QSplitter,QTableView,QFileDialog,QMessageBox,QPlainTextEdit,QHeaderView,QDialog,QDialogButtonBox,QSizePolicy,QInputDialog,QSlider,QListWidget,QListWidgetItem,QTreeWidget,QTreeWidgetItem)
+from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QFormLayout,QLabel,QPushButton,QLineEdit,QCheckBox,QComboBox,QSpinBox,QDoubleSpinBox,QTabWidget,QScrollArea,QSplitter,QTableView,QFileDialog,QMessageBox,QPlainTextEdit,QHeaderView,QDialog,QDialogButtonBox,QSizePolicy,QInputDialog,QSlider,QListWidget,QListWidgetItem,QTreeWidget,QTreeWidgetItem,QProgressBar)
 from .catalogue import Catalogue
 from .converters import convert
 from .demo import generate
 from .inputs import inspect_input,run_ingest_profile
 from .model import DETECTORS,COLOR_FIELDS,RenderSettings
+from .cluster_colors import CLUSTER_COLOR_FIELDS,DESCRIPTIONS
 from .runtime import find_blender,probe,render_events,launch_editor
 from .scene_config import recipe,save_config,load_config,resolve_settings,recommended_quality,quality_settings
 from .catalogue import load_event
@@ -17,7 +19,7 @@ from .object_selection import parse_track_ids
 from .palettes import names as palette_names
 from .scene_library import SceneLibrary
 from .resolution import PRESET_PERCENT, minimum_percent, percentage_size
-from .defaults import startup_settings,commissioning_settings
+from .defaults import startup_settings,commissioning_settings,local_geometry_asset,detector_settings,SETUP_PRESETS
 
 ROOT=Path(__file__).resolve().parents[2]
 
@@ -78,7 +80,7 @@ class Window(QMainWindow):
             except Exception:self.saved={}
         else:self.saved={}
         self.scene_detector_selection=set(self.base.detectors)
-        self.scene_overrides={key:getattr(self.base,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_opening_directions','geometry_exclusions','geometry_inner_masks','geometry_components','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
+        self.scene_overrides={key:getattr(self.base,key) for key in ('render_engine','detector_setup','camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_opening_directions','geometry_exclusions','geometry_inner_masks','geometry_components','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
         central=QWidget();self.setCentralWidget(central);layout=QVBoxLayout(central)
         title=QLabel('ALICE  /  EVENT RENDERER');title.setObjectName('title');layout.addWidget(title)
         self.summary=QLabel('Choose an input, select events and detectors, then preview or render.');layout.addWidget(self.summary)
@@ -89,6 +91,11 @@ class Window(QMainWindow):
         self.folder_button=QPushButton('Browse folder…');self.folder_button.clicked.connect(self.open_folder);top.addWidget(self.folder_button)
         self.timeframe_button=QPushButton('Whole-TF detector views');self.timeframe_button.setEnabled(False);self.timeframe_button.clicked.connect(self.toggle_timeframe_views);top.addWidget(self.timeframe_button)
         self.demo_button=QPushButton('Synthetic demonstration');self.demo_button.clicked.connect(self.open_demo);top.addWidget(self.demo_button)
+        inputs=QHBoxLayout();layout.addLayout(inputs);inputs.addWidget(QLabel('Recent data:'))
+        self.input_recent_picker=QComboBox();self.input_recent_picker.setMinimumWidth(0);self.input_recent_picker.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred);inputs.addWidget(self.input_recent_picker,1)
+        self.input_recent_load=QPushButton('Load recent input');self.input_recent_load.clicked.connect(self.load_recent_input);inputs.addWidget(self.input_recent_load)
+        self.input_recent_clear=QPushButton('Clear recents');self.input_recent_clear.clicked.connect(self.clear_recent_inputs);inputs.addWidget(self.input_recent_clear)
+        self.refresh_recent_inputs()
         reuse=QHBoxLayout();layout.addLayout(reuse)
         reuse.addWidget(QLabel('Reuse scene settings:'))
         self.recent_picker=QComboBox();self.recent_picker.setMinimumWidth(0);self.recent_picker.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred);reuse.addWidget(self.recent_picker,1)
@@ -111,10 +118,12 @@ class Window(QMainWindow):
         self.legend=QLabel('');self.legend.setWordWrap(True);right_layout.addWidget(self.legend)
         self.log=QPlainTextEdit();self.log.setReadOnly(True);self.log.setMaximumHeight(120);right_layout.addWidget(self.log)
         bottom=QHBoxLayout();layout.addLayout(bottom)
+        self.render_progress=QProgressBar();self.render_progress.setRange(0,100);self.render_progress.setValue(0);bottom.addWidget(self.render_progress)
         self.status=QLabel('Ready');self.status.setMinimumWidth(0);self.status.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred);bottom.addWidget(self.status,1)
         self.cancel_button=QPushButton('Cancel');self.cancel_button.setEnabled(False);self.cancel_button.clicked.connect(self.cancel_task);bottom.addWidget(self.cancel_button)
         self.load_config_button=QPushButton('Load config…');self.load_config_button.clicked.connect(self.import_scene);bottom.addWidget(self.load_config_button)
         self.export_config_button=QPushButton('Export config…');self.export_config_button.clicked.connect(self.export_scene);bottom.addWidget(self.export_config_button)
+        self.fast_interactive=QCheckBox('Fast interactive');self.fast_interactive.setChecked(self.saved.get('fast_interactive',True));self.fast_interactive.setToolTip('Use reviewed cached approximate surfaces for detectors and magnet, with a 32-sample Eevee viewport. Full detail remains available in the editor.');bottom.addWidget(self.fast_interactive)
         self.editor_button=QPushButton('Interactive scene…');self.editor_button.clicked.connect(self.open_editor);bottom.addWidget(self.editor_button)
         self.preview_button=QPushButton('Preview first selected event');self.preview_button.clicked.connect(lambda:self.start_render(True));bottom.addWidget(self.preview_button)
         self.render_button=QPushButton('Render selected events');self.render_button.setObjectName('primary');self.render_button.clicked.connect(lambda:self.start_render(False));bottom.addWidget(self.render_button)
@@ -141,16 +150,17 @@ class Window(QMainWindow):
         for row,name in enumerate(DETECTORS,1):
             data=QCheckBox();geometry=QCheckBox();geometry.setChecked(name in self.base.geometry)
             self.data_checks[name]=data;self.geometry_checks[name]=geometry
+            geometry.toggled.connect(self.update_availability)
             data.clicked.connect(lambda checked=False:self.remember_detector_selection())
             mode=QComboBox();mode.addItems(['tracks','clusters','both']);mode.setCurrentText(self.base.detector_modes.get(name,self.base.mode));self.detector_modes[name]=mode
             label=QLabel(name);self.detector_labels[name]=label
             grid.addWidget(label,row,0);grid.addWidget(data,row,1);grid.addWidget(mode,row,2);grid.addWidget(geometry,row,3);grid.addWidget(self.color_button(name),row,4)
-        self.magnet=QCheckBox('L3 magnet');self.magnet.setChecked(self.base.magnet);layout.addWidget(self.magnet)
+        self.magnet=QCheckBox('L3 magnet');self.magnet.setChecked(self.base.magnet);self.magnet.toggled.connect(self.update_availability);layout.addWidget(self.magnet)
         self.schematic=QCheckBox('Use approximate schematic envelopes');self.schematic.setChecked(self.base.schematic);self.schematic.setToolTip('Approximate dimensions, not calibrated detector geometry. This choice is recorded in render metadata.');layout.addWidget(self.schematic)
         self.cutaway=QCheckBox('Half cutaway (global Y plane)');self.cutaway.setChecked(self.base.cutaway);self.cutaway.toggled.connect(self.change_cutaway);layout.addWidget(self.cutaway)
         opening_note=QLabel('Opening direction is configurable per detector in the interactive editor: 0° is +X, 90° is +Y, −90° is −Y. The half-cutaway shortcut uses −Y. Show complete detectors resets opening angles.');opening_note.setWordWrap(True);layout.addWidget(opening_note)
         self.geometry_opening_label=QLabel();self.geometry_opening_label.setWordWrap(True);layout.addWidget(self.geometry_opening_label);self.refresh_opening_summary()
-        self.geometry_lod=QComboBox();self.geometry_lod.addItems(['full','structural','simplified']);self.geometry_lod.setCurrentText(self.base.geometry_lod);layout.addWidget(QLabel('Geometry detail (structural = cached large surfaces)'));layout.addWidget(self.geometry_lod)
+        self.geometry_lod=QComboBox();self.geometry_lod.addItems(['full','proxy','structural','simplified']);self.geometry_lod.setCurrentText(self.base.geometry_lod);layout.addWidget(QLabel('Geometry detail (proxy = cached approximate surfaces)'));layout.addWidget(self.geometry_lod)
         self.opacity=number(self.base.geometry_opacity,0,1,2);form=QFormLayout();form.addRow('Geometry opacity',self.opacity);layout.addLayout(form);layout.addStretch()
     def set_all_detector_modes(self,mode):
         for combo in self.detector_modes.values():combo.setCurrentText(mode)
@@ -187,6 +197,8 @@ class Window(QMainWindow):
         for combo in (self.track_mode,self.cluster_mode):combo.setMinimumWidth(0);combo.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred)
         for combo in (self.track_mode,self.cluster_mode):
             combo.addItems(COLOR_FIELDS);combo.setItemData(combo.findText('matching'),'0 = standalone fitted source; 1 = composite matched source (e.g. ITS-TPC); grey = unknown',Qt.ToolTipRole)
+        self.cluster_mode.addItems(CLUSTER_COLOR_FIELDS)
+        for mode in CLUSTER_COLOR_FIELDS:self.cluster_mode.setItemData(self.cluster_mode.findText(mode),DESCRIPTIONS[mode],Qt.ToolTipRole)
         self.track_mode.setCurrentText(self.base.track_color_mode);self.cluster_mode.setCurrentText(self.base.cluster_color_mode)
         layout.addRow('Track colouring',self.track_mode);layout.addRow('Cluster colouring',self.cluster_mode)
         note=QLabel('Unavailable quantities are disabled. XYZ colours refer to the first sampled point of a track or the cluster position. Unknown values use grey. p and pT are in GeV/c; angles in radians; coordinates and DCA in cm.');note.setWordWrap(True);layout.addRow(note)
@@ -200,6 +212,11 @@ class Window(QMainWindow):
         self.view_transform=QComboBox();self.view_transform.addItems(['AgX','Standard']);self.view_transform.setCurrentText(self.base.view_transform);layout.addRow('Display colours',self.view_transform)
         self.exposure=number(self.base.exposure,-20,20,2);layout.addRow('Exposure (stops)',self.exposure)
         self.track_emission=number(self.base.track_emission,0,100,2);self.cluster_emission=number(self.base.cluster_emission,0,100,2);layout.addRow('Track glow',self.track_emission);layout.addRow('Cluster glow',self.cluster_emission)
+        self.tpc_profile=QComboBox();self.tpc_profile.addItems(['sphere','ellipse','gaussian']);self.tpc_profile.setCurrentText(self.base.tpc_cluster_profile);layout.addRow('TPC cluster profile',self.tpc_profile)
+        self.tpc_profile.setToolTip('Measured pad/time RMS; Gaussian uses weighted translucent shells. Missing widths retain spheres.')
+        self.tpc_profile_scale=number(self.base.tpc_profile_scale,.01,100,2);layout.addRow('TPC profile sigma scale',self.tpc_profile_scale)
+        self.tpc_profile_thickness=number(self.base.tpc_profile_thickness_cm,.001,10,3);layout.addRow('TPC profile display thickness (cm)',self.tpc_profile_thickness)
+        self.detector_setup=QComboBox();self.detector_setup.addItems(SETUP_PRESETS);self.detector_setup.setCurrentText(self.base.detector_setup);setup_button=QPushButton('Apply detector setup defaults');setup_button.clicked.connect(self.use_detector_defaults);layout.addRow('Detector setup',self.detector_setup);layout.addRow(setup_button)
         self.data_glow_lighting=QCheckBox('Data glow lights geometry');self.data_glow_lighting.setChecked(self.base.data_glow_lighting);layout.addRow(self.data_glow_lighting)
         self.highlight_ids=QLineEdit(', '.join(self.base.highlight_track_ids));self.highlight_ids.setPlaceholderText('Track IDs: 11730, 50331650, …');layout.addRow('Special track IDs',self.highlight_ids)
         self.highlight_width=number(self.base.highlight_track_radius_cm*2,.002,20,3);layout.addRow('Special track linewidth (cm)',self.highlight_width)
@@ -326,21 +343,23 @@ class Window(QMainWindow):
         cfg.camera_orbit_axis=self.camera_orbit_axis.currentText()
         cfg.geometry_lod=self.geometry_lod.currentText()
         cfg.view_transform=self.view_transform.currentText();cfg.exposure=self.exposure.value();cfg.track_emission=self.track_emission.value();cfg.cluster_emission=self.cluster_emission.value()
+        cfg.tpc_cluster_profile=self.tpc_profile.currentText();cfg.tpc_profile_scale=self.tpc_profile_scale.value();cfg.tpc_profile_thickness_cm=self.tpc_profile_thickness.value()
         cfg.data_glow_lighting=self.data_glow_lighting.isChecked()
         cfg.camera_lens_mm=self.camera_lens.value()
         if cfg.camera_pose:cfg.camera_pose={**cfg.camera_pose,'lens':cfg.camera_lens_mm}
         cfg.frame_aspect=cfg.width/cfg.height
         return cfg.validate()
     def save_settings(self,cfg):
-        saved={'render':cfg.to_dict(),'blender':self.blender.text(),'profile':self.profile.text(),'output':self.output.text(),'aod':self.aod_options()}
+        saved={'fast_interactive':self.fast_interactive.isChecked(),'render':cfg.to_dict(),'blender':self.blender.text(),'profile':self.profile.text(),'output':self.output.text(),'aod':self.aod_options()}
         self.settings_file.write_text(json.dumps(saved,indent=2))
     def aod_options(self):
         return {'conditions':self.aod_conditions.text(),'bz_kG':self.aod_bz.value() if self.aod_use_bz.isChecked() else None}
     def busy(self,on):
-        for w in (self.tabs,self.source,self.open_button,self.browse_button,self.folder_button,self.demo_button,self.table,self.all_button,self.none_button,self.preview_button,self.render_button,self.editor_button,self.export_config_button,self.load_config_button,self.recent_picker,self.favourite_picker,self.reuse_recent_button,self.reuse_favourite_button):w.setEnabled(not on)
+        self.render_progress.setRange(0,0 if on else 100)
+        for w in (self.fast_interactive,self.input_recent_picker,self.input_recent_load,self.input_recent_clear,self.tabs,self.source,self.open_button,self.browse_button,self.folder_button,self.demo_button,self.table,self.all_button,self.none_button,self.preview_button,self.render_button,self.editor_button,self.export_config_button,self.load_config_button,self.recent_picker,self.favourite_picker,self.reuse_recent_button,self.reuse_favourite_button):w.setEnabled(not on)
         self.cancel_button.setEnabled(on)
         self.timeframe_button.setEnabled(not on and self.timeframe_source is not None)
-        if not on:self.update_availability()
+        if not on:self.update_availability();self.refresh_recent_inputs()
     def start_task(self,fn,done):
         if self.task and self.task.isRunning():return
         self.busy(True);self.task=Task(fn,self);self.task.message.connect(self.message)
@@ -349,6 +368,9 @@ class Window(QMainWindow):
         self.busy(False)
         if self.close_pending:self.close()
     def message(self,text):
+        import re
+        match=re.search(r'Render progress: (\d+)%',text)
+        if match:self.render_progress.setRange(0,100);self.render_progress.setValue(int(match[1]))
         self.status.setText(text);self.status.setToolTip(text);self.log.appendPlainText(text)
         if text.endswith('/render.png') and Path(text).exists():self.show_image(Path(text))
     def failure(self,text):
@@ -356,6 +378,22 @@ class Window(QMainWindow):
         if not self.close_pending:QMessageBox.warning(self,'Unable to continue',text)
     def cancel_task(self):
         if self.task:self.task.cancel.set();self.status.setText('Cancelling…')
+    def refresh_recent_inputs(self):
+        selected=self.input_recent_picker.currentData()
+        self.input_recent_picker.clear()
+        for path in self.library.recent_inputs():
+            self.input_recent_picker.addItem(path+(' (missing)' if not Path(path).exists() else ''),path)
+            self.input_recent_picker.setItemData(self.input_recent_picker.count()-1,path,Qt.ToolTipRole)
+        index=self.input_recent_picker.findData(selected)
+        if index>=0:self.input_recent_picker.setCurrentIndex(index)
+        enabled=bool(self.input_recent_picker.count())
+        for widget in (self.input_recent_picker,self.input_recent_load,self.input_recent_clear):widget.setEnabled(enabled)
+    def load_recent_input(self):
+        if self.task and self.task.isRunning():return
+        path=self.input_recent_picker.currentData()
+        if path:self.load_input(path)
+    def clear_recent_inputs(self):
+        self.library.clear_recent_inputs();self.refresh_recent_inputs()
     def load_typed_input(self):
         if self.task and self.task.isRunning():return
         text=self.source.text().strip()
@@ -379,6 +417,7 @@ class Window(QMainWindow):
         elif self.timeframe_source:
             self.collision_mode=self.mode.currentText();self.mode.setCurrentText('clusters');self.load_input(self.timeframe_source)
     def load_input(self,path,event_selector=None,retain_scene_geometry=False):
+        retain_scene_geometry=retain_scene_geometry or self.scene_overrides.get('detector_setup','ALICE2')!='ALICE2'
         path=Path(path).expanduser()
         if path.is_dir() and not any(path.glob('*.json*')):
             candidates=sorted(p for p in path.iterdir() if p.is_file() and p.suffix.lower() in ('.tf','.rawtf','.root','.ctf'))
@@ -411,7 +450,12 @@ class Window(QMainWindow):
                 try:
                     manifest=json.loads(manifest_path.read_text())
                     for name,path in manifest.get('geometry_assets',{}).items():
-                        if not retain_scene_geometry and name in self.asset_fields and isinstance(path,str):self.asset_fields[name].setText(path)
+                        if not retain_scene_geometry and name in self.asset_fields and isinstance(path,str):
+                            local=local_geometry_asset(path,manifest_path,ROOT)
+                            if local:self.asset_fields[name].setText(local)
+                            elif not Path(self.asset_fields[name].text()).is_file():
+                                self.asset_fields[name].clear()
+                                self.message(f'{name}: exported geometry is unavailable locally; choose its asset in Setup.')
                     if not retain_scene_geometry and manifest.get('geometry_units') in ('cm','m'):self.geometry_units.setCurrentText(manifest['geometry_units'])
                     if manifest.get('timeframe_events_file')=='timeframe-events.jsonl.gz' and manifest.get('events_file') in ('events.jsonl','events.jsonl.gz'):
                         frames=manifest_path.parent/'timeframe-events.jsonl.gz';collisions=manifest_path.parent/manifest['events_file']
@@ -431,6 +475,7 @@ class Window(QMainWindow):
             if info.format!='aod':
                 first=self.catalogue.load(self.model.rows[0]['ordinal'])
                 for warning in first.get('warnings',[]):self.message(warning)
+            self.library.remember_input(self.loaded_input);self.refresh_recent_inputs()
             self.status.setText('Events ready')
         self.start_task(work,done)
     def update_availability(self):
@@ -452,7 +497,10 @@ class Window(QMainWindow):
             for i in range(combo.count()):combo.model().item(i).setEnabled(combo.itemText(i) in supported)
             if combo.currentText() not in supported and not self.requested_modes:combo.setCurrentText('solid')
         self.selection_label.setText(f'{len(rows)} / {len(self.model.rows)} selected')
-        self.preview_button.setEnabled(bool(rows));self.render_button.setEnabled(bool(rows))
+        renderable=bool(rows) or any(c.isChecked() for c in self.geometry_checks.values()) or self.magnet.isChecked()
+        self.preview_button.setEnabled(renderable);self.render_button.setEnabled(renderable);self.editor_button.setEnabled(renderable)
+        self.preview_button.setText('Preview first selected event' if rows else 'Preview geometry only')
+        self.render_button.setText('Render selected events' if rows else 'Render geometry only')
     def check_devices(self):
         def done(info):
             self.device_info=info;self.device_label.setText(info['version_string']+' · '+', '.join(d['name']+' ('+d['type']+')' for d in info['devices']));self.update_devices()
@@ -476,10 +524,12 @@ class Window(QMainWindow):
             if not data:
                 QTreeWidgetItem(self.component_tree,['No component metadata for this asset','']);return
             choices=self.scene_overrides.get('geometry_components',{}).get(name,{})
-            large=self.scene_overrides.get('geometry_lods',{}).get(name,self.geometry_lod.currentText())=='structural'
+            large=self.scene_overrides.get('geometry_lods',{}).get(name,self.geometry_lod.currentText()) in ('structural','proxy')
             supported=None
             if large:
                 from .structural_geometry import load,supported_components
+                if self.scene_overrides.get('geometry_lods',{}).get(name,self.geometry_lod.currentText())=='proxy':
+                    from .surface_proxy import load
                 supported=supported_components(load(path,self.geometry_units.currentText()))
             visibility=component_visibility(data,choices,self.scene_overrides.get('geometry_exclusions',{}).get(name,[]))
             nodes={}
@@ -539,17 +589,18 @@ class Window(QMainWindow):
             self.apply_scene(cfg);self.register_scene(path,'config',cfg);self.message('Scene loaded. Choose the local input and event, then preview or render.')
         except Exception as exc:self.failure(str(exc))
     def apply_scene(self,cfg):
+        self.detector_setup.setCurrentText(cfg.detector_setup)
         self.scene_detector_selection=set(cfg.detectors);self.requested_modes=(cfg.track_color_mode,cfg.cluster_color_mode)
         if self.palette.findText(cfg.palette)<0:self.palette.addItem(cfg.palette)
         for combo,mode in ((self.track_mode,cfg.track_color_mode),(self.cluster_mode,cfg.cluster_color_mode)):
             if combo.findText(mode)<0:combo.addItem(mode)
-        self.scene_overrides={key:getattr(cfg,key) for key in ('camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_opening_directions','geometry_exclusions','geometry_inner_masks','geometry_components','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
+        self.scene_overrides={key:getattr(cfg,key) for key in ('render_engine','detector_setup','camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_opening_directions','geometry_exclusions','geometry_inner_masks','geometry_components','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
         for name,box in self.data_checks.items():box.setChecked(name in cfg.detectors)
         for name,combo in self.detector_modes.items():combo.setCurrentText(cfg.detector_modes.get(name,cfg.mode))
         for name,box in self.geometry_checks.items():box.setChecked(name in cfg.geometry)
         for name,field in self.asset_fields.items():field.setText(cfg.geometry_assets.get(name,''))
         for name,button in self.color_buttons.items():
-            button.setText(cfg.colors[name]);button.setStyleSheet('background:'+cfg.colors[name])
+            button.setText(cfg.colors.get(name,'#243a82'));button.setStyleSheet('background:'+cfg.colors.get(name,'#243a82'))
         for name,value in [('mode',cfg.mode),('track_mode',cfg.track_color_mode),('cluster_mode',cfg.cluster_color_mode),('palette',cfg.palette),('camera',cfg.camera),('camera_orbit_axis',cfg.camera_orbit_axis),('geometry_units',cfg.geometry_units)]:getattr(self,name).setCurrentText(value)
         for name,value in [('opacity',cfg.geometry_opacity),('track_radius',cfg.track_radius_cm*2),('cluster_radius',cfg.cluster_radius_cm),('azimuth',cfg.azimuth),('elevation',cfg.elevation),('distance',cfg.distance_cm)]:getattr(self,name).setValue(value)
         for spin,value in zip(self.target,cfg.target_cm):spin.setValue(value)
@@ -562,6 +613,7 @@ class Window(QMainWindow):
         w,h=percentage_size(25,cfg.frame_aspect);self.width.setValue(w);self.height.setValue(h)
         for name,combo in self.detector_modes.items():combo.setCurrentText(cfg.detector_modes.get(name,cfg.mode))
         self.roll.setValue(cfg.roll);self.highlight_ids.setText(', '.join(cfg.highlight_track_ids));self.highlight_width.setValue(cfg.highlight_track_radius_cm*2);self.highlight_clusters.setValue(cfg.highlight_cluster_radius_cm);self.highlight_override.setChecked(cfg.highlight_override_color);self.highlight_track_color.setText(cfg.highlight_track_color);self.highlight_cluster_color.setText(cfg.highlight_cluster_color)
+        self.tpc_profile.setCurrentText(cfg.tpc_cluster_profile);self.tpc_profile_scale.setValue(cfg.tpc_profile_scale);self.tpc_profile_thickness.setValue(cfg.tpc_profile_thickness_cm)
         self.view_transform.setCurrentText(cfg.view_transform);self.exposure.setValue(cfg.exposure);self.track_emission.setValue(cfg.track_emission);self.cluster_emission.setValue(cfg.cluster_emission)
         self.data_glow_lighting.setChecked(cfg.data_glow_lighting)
         self.camera_lens.setValue(cfg.camera_pose.get('lens',cfg.camera_lens_mm))
@@ -574,20 +626,27 @@ class Window(QMainWindow):
         self.scene_overrides['geometry_components']=cfg.geometry_components
         self.refresh_components()
         self.refresh_opening_summary()
+    def use_detector_defaults(self):
+        try:
+            cfg=detector_settings(self.detector_setup.currentText(),ROOT)
+            self.apply_scene(cfg);self.update_availability();self.save_settings(self.settings())
+            self.message('Detector setup applied. Upgrade geometry is nominal O2 design geometry; data detector identities are unchanged.')
+        except Exception as exc:self.failure(str(exc))
     def use_commissioning_defaults(self):
         cfg=commissioning_settings({k:v.text() for k,v in self.asset_fields.items() if v.text()},self.geometry_units.currentText())
         self.apply_scene(cfg);self.update_availability()
         saved=self.settings();saved.detectors=cfg.detectors;self.save_settings(saved)
         self.message('Improved commissioning defaults applied. Input, selected events and local geometry assets retained.')
     def open_editor(self):
-        if not self.catalogue or not self.model.selected:return
-        if self.source.text()!=self.loaded_input:self.failure('The input path has changed. Press Enter or Load input, then select its event before opening the editor.');return
-        try:cfg=self.settings();ordinal=min(self.model.selected)
+        has_event=bool(self.catalogue and self.model.selected)
+        if has_event and self.source.text()!=self.loaded_input:self.failure('The input path has changed. Press Enter or Load input, then select its event before opening the editor.');return
+        try:cfg=self.settings();ordinal=min(self.model.selected) if has_event else None
         except Exception as exc:self.failure(str(exc));return
         def launched(result):
             self.refresh_library();self.message('Interactive Blender scene started. Open the ALICE EVE sidebar; export or render from there. Log: '+str(result[0]/'editor.log'))
         blender=self.blender.text();output=Path(self.output.text())
-        self.start_task(lambda p,c:launch_editor(blender,self.catalogue.event_path(ordinal,progress=p,cancelled=c),cfg,output,library_path=self.library.path),launched)
+        fast=self.fast_interactive.isChecked()
+        self.start_task(lambda p,c:launch_editor(blender,self.catalogue.event_path(ordinal,progress=p,cancelled=c) if has_event else None,cfg,output,library_path=self.library.path,fast=fast),launched)
     def render_quality_dialog(self,cfg,devices):
         rec=recommended_quality(devices);dialog=QDialog(self);dialog.setWindowTitle('Full render quality');form=QFormLayout(dialog)
         note=QLabel(rec['reason']);note.setWordWrap(True);form.addRow(note)
@@ -608,6 +667,8 @@ class Window(QMainWindow):
             from .geometry_selection import description
             combo=QComboBox();combo.addItem('Keep current: '+description(cfg.to_dict(),name),'current');combo.addItem('Full aligned surfaces','full')
             if name in ('ITS','TPC'):combo.addItem('Large surfaces (cached, fast)','structural')
+            from .surface_proxy import sidecar_path
+            if sidecar_path(cfg.geometry_assets.get(name,'')).is_file():combo.addItem('Cached approximate surfaces (fast)','proxy')
             combo.addItem('Simplified aligned cells','simplified');combo.addItem('Schematic envelope','schematic');geometry_details[name]=combo;form.addRow(name+' geometry detail',combo)
         if geometry_details:
             note=QLabel('Explicit geometry choices override the preview type and appearance. Full and simplified aligned geometry require their assets.');note.setWordWrap(True);form.addRow(note)
@@ -621,8 +682,7 @@ class Window(QMainWindow):
         from .geometry_selection import render_choices
         return render_choices(chosen,{name:combo.currentData() for name,combo in geometry_details.items()})
     def start_render(self,preview):
-        if not self.catalogue:return
-        if self.source.text()!=self.loaded_input:self.failure('The input path has changed. Press Enter or Load input, then select its event before rendering.');return
+        if self.model.selected and self.source.text()!=self.loaded_input:self.failure('The input path has changed. Press Enter or Load input, then select its event before rendering.');return
         try:cfg=self.settings();self.save_settings(cfg)
         except Exception as exc:self.failure(str(exc));return
         ids=sorted(self.model.selected)
@@ -643,6 +703,8 @@ class Window(QMainWindow):
         for key in ('track_legend','cluster_legend'):
             legend=metadata.get(key)
             if legend and legend['mode']!='solid':parts.append(f'{key.split("_")[0]}: {legend["mode"]} [{legend["min"]:.3g}, {legend["max"]:.3g}] · {legend["missing"]} unknown')
+        profile=metadata.get('cluster_legend',{})
+        if profile.get('tpc_profile','sphere')!='sphere':parts.append(f"TPC profiles: {profile.get('profiled_clusters',0)} measured; {profile.get('missing_tpc_profiles',0)} missing widths (spheres)")
         if any(v['type']=='schematic' for v in metadata['geometry'].values()):parts.append('Approximate schematic geometry')
         self.legend.setText(' | '.join(parts))
     def resizeEvent(self,event):
@@ -654,6 +716,12 @@ class Window(QMainWindow):
         super().closeEvent(event)
 
 def main():
+    # Conda's qt.conf can redirect discovery to plugins from a different Qt
+    # release. Use the plugins shipped with the PySide6 loaded by this process.
+    bundled_plugins=Path(PySide6.__file__).resolve().parent/'Qt'/'plugins'
+    if bundled_plugins.is_dir():
+        os.environ.setdefault('QT_PLUGIN_PATH',str(bundled_plugins))
+        os.environ.setdefault('QT_QPA_PLATFORM_PLUGIN_PATH',str(bundled_plugins/'platforms'))
     app=QApplication.instance() or QApplication([]);window=Window();window.show();return app.exec()
 
 if __name__=='__main__':raise SystemExit(main())

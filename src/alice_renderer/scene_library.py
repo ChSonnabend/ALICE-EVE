@@ -15,10 +15,21 @@ class SceneLibrary:
     def __init__(self,path=None):
         self.path=Path(path or default_path());self.path.parent.mkdir(parents=True,exist_ok=True)
         with self.connect() as db:
+            db.execute('CREATE TABLE IF NOT EXISTS recent_inputs (path TEXT PRIMARY KEY, updated REAL)')
             db.execute('CREATE TABLE IF NOT EXISTS scenes (id TEXT PRIMARY KEY, config TEXT, title TEXT, kind TEXT, input TEXT, event TEXT, assets TEXT, updated REAL)')
             db.execute('CREATE TABLE IF NOT EXISTS favourites (id TEXT PRIMARY KEY, config TEXT, title TEXT, kind TEXT, input TEXT, event TEXT, assets TEXT, updated REAL)')
     def connect(self):
         db=sqlite3.connect(self.path,timeout=10);db.row_factory=sqlite3.Row;return db
+    def recent_inputs(self):
+        with self.connect() as db:
+            return [r['path'] for r in db.execute('SELECT path FROM recent_inputs ORDER BY updated DESC, path LIMIT 12')]
+    def remember_input(self,path):
+        path=str(Path(path).expanduser().resolve())
+        with self.connect() as db:
+            db.execute('INSERT INTO recent_inputs VALUES (?,?) ON CONFLICT(path) DO UPDATE SET updated=excluded.updated',(path,time.time()))
+            db.execute('DELETE FROM recent_inputs WHERE path NOT IN (SELECT path FROM recent_inputs ORDER BY updated DESC, path LIMIT 12)')
+    def clear_recent_inputs(self):
+        with self.connect() as db:db.execute('DELETE FROM recent_inputs')
     def register(self,path,*,kind='config',input_path='',event='',assets=None,title=None,updated=None):
         path=str(Path(path).resolve());data=load_config(path)
         supplied_input=input_path;input_path=str(input_path or data.get('defaults',{}).get('input',''));event=str(event or data.get('defaults',{}).get('event',''))

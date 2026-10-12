@@ -3,8 +3,9 @@ from __future__ import annotations
 import math, re
 from dataclasses import asdict, dataclass, field
 from typing import Any
+from .cluster_colors import CLUSTER_COLOR_FIELDS
 
-DETECTORS = ("ITS", "TPC", "TRD", "TOF", "HMP", "EMC", "PHS", "CPV", "MCH", "MFT", "MID", "FT0", "FV0", "FDD", "ZDC")
+DETECTORS = ("ITS", "TPC", "TRD", "TOF", "HMP", "EMC", "PHS", "CPV", "MCH", "MFT", "MID", "FT0", "FV0", "FDD", "ZDC", "TRK", "FT3", "FCT", "TF3", "RCH", "ECL", "MI3", "FD3", "MAG3", "ABS3", "PIPE3")
 ALIASES = {"HMPID":"HMP", "EMCAL":"EMC", "PHOS":"PHS", "V0":"FV0"}
 COLOR_FIELDS = ("solid", "eta", "tan_lambda", "phi", "p", "pt", "x", "y", "z", "dca", "primaries", "secondaries", "matching")
 
@@ -37,8 +38,8 @@ def kinematics(data: dict) -> dict[str,float]:
 def validate_event(raw: dict) -> dict:
     if raw.get('schema_version') != 1: raise ValueError("Expected ALICE interchange schema_version=1")
     if raw.get('units') != 'cm': raise ValueError("Event positions must be ALICE global centimetres (units=cm)")
-    if raw.get('kind') not in ('collision','timeframe','rof','synthetic'):
-        raise ValueError("Event kind must declare collision/timeframe/rof/synthetic")
+    if raw.get('kind') not in ('collision','timeframe','rof','synthetic','geometry'):
+        raise ValueError("Event kind must declare collision/timeframe/rof/synthetic/geometry")
     if not str(raw.get('id','')).strip(): raise ValueError("Event identifier is required")
     event = dict(raw)
     if event.get('vertex') is not None: event['vertex'] = xyz(event['vertex'])
@@ -73,6 +74,9 @@ def validate_event(raw: dict) -> dict:
         cluster['id'] = str(cluster.get('id',index))
         cluster['detector'] = detector(cluster['detector'])
         cluster['position'] = xyz(cluster['position'])
+        if 'tpc_profile' in cluster:
+            from .cluster_profiles import profile_axes
+            profile_axes(cluster,.03)
         if 'matching' in cluster and (not isinstance(cluster['matching'],bool) or not cluster.get('matching_basis')):raise ValueError('Cluster matching requires a boolean and matching_basis')
         cluster['kinematics'] = kinematics(cluster.get('kinematics',{}))
         if any(k in cluster['kinematics'] for k in ('eta','tan_lambda','phi','p','pt','dca')) and not cluster.get('kinematics_basis'):
@@ -87,6 +91,9 @@ def validate_event(raw: dict) -> dict:
     return annotate_matching(event)
 
 def color_value(obj: dict, mode: str, position: list[float] | None = None) -> float | None:
+    if mode in CLUSTER_COLOR_FIELDS:
+        from .cluster_colors import value
+        return value(obj,mode)
     if mode.startswith('feature:'):return obj.get('features',{}).get(mode.removeprefix('feature:'))
     if mode == 'matching':
         from .object_selection import matching_value
@@ -104,10 +111,11 @@ def color_value(obj: dict, mode: str, position: list[float] | None = None) -> fl
 
 def capabilities(objects: list[dict]) -> list[str]:
     extra=sorted({'feature:'+k for o in objects for k,v in o.get('features',{}).items() if isinstance(v,(int,float)) and math.isfinite(v)})
-    return ['solid'] + [m for m in COLOR_FIELDS[1:] if any(color_value(o,m) is not None for o in objects)]+extra
+    return ['solid'] + [m for m in (*COLOR_FIELDS[1:],*CLUSTER_COLOR_FIELDS) if any(color_value(o,m) is not None for o in objects)]+extra
 
 @dataclass
 class RenderSettings:
+    detector_setup: str = "ALICE2"
     detectors: list[str] = field(default_factory=lambda: list(DETECTORS))
     geometry: list[str] = field(default_factory=list)
     magnet: bool = False
@@ -130,6 +138,7 @@ class RenderSettings:
     height: int = 1080
     samples: int = 128
     denoise: bool = True
+    render_engine: str = 'CYCLES'
     backend: str = 'CPU'
     device: str = ''
     threads: int = 0
@@ -143,6 +152,9 @@ class RenderSettings:
     highlight_track_color: str = '#ffcc33'
     highlight_cluster_color: str = '#ff6633'
     cluster_radius_cm: float = 0.35
+    tpc_cluster_profile: str = 'sphere'
+    tpc_profile_scale: float = 1.
+    tpc_profile_thickness_cm: float = .03
     camera: str = 'perspective'
     camera_lens_mm: float = 48.
     camera_orbit_axis: str = 'Y'
@@ -185,6 +197,9 @@ class RenderSettings:
         if not isinstance(self.data_glow_lighting,bool):raise ValueError('Data glow lighting must be a boolean')
         if not isinstance(self.include_ambiguous_tracks,bool):raise ValueError('Ambiguous-track selection must be a boolean')
         if not isinstance(self.clip_tracks,bool):raise ValueError('Track clipping must be a boolean')
+        if self.detector_setup not in ('ALICE2','ALICE2 + ITS3','ALICE3'):raise ValueError('Unknown detector setup')
+        if self.tpc_cluster_profile not in ('sphere','ellipse','gaussian'):raise ValueError('Invalid TPC cluster profile')
+        if any(not math.isfinite(v) or v<=0 for v in (self.tpc_profile_scale,self.tpc_profile_thickness_cm)):raise ValueError('TPC profile scale/thickness must be positive')
         if self.mode not in ('tracks','clusters','both'): raise ValueError('Invalid rendering mode')
         for name,mode in self.detector_modes.items():
             detector(name)
@@ -192,11 +207,12 @@ class RenderSettings:
         from .object_selection import parse_track_ids
         self.highlight_track_ids=parse_track_ids(self.highlight_track_ids)
         for v in self.detectors+self.geometry: detector(v)
+        if self.render_engine not in ('CYCLES','BLENDER_EEVEE'):raise ValueError('Invalid render engine')
         if self.backend not in ('CPU','METAL','HIP','CUDA','OPTIX'): raise ValueError('Invalid Cycles backend')
         if not 64<=self.width<=16384 or not 64<=self.height<=16384: raise ValueError('Resolution must be 64–16384 pixels')
         if not 1<=self.samples<=8192: raise ValueError('Samples must be 1–8192')
         if not 0<=self.geometry_opacity<=1: raise ValueError('Opacity must be between zero and one')
-        if any(m not in COLOR_FIELDS and not re.fullmatch(r'feature:[a-z][a-z0-9_]*',m) for m in (self.track_color_mode,self.cluster_color_mode)): raise ValueError('Invalid colour mode')
+        if any(m not in (*COLOR_FIELDS,*CLUSTER_COLOR_FIELDS) and not re.fullmatch(r'feature:[a-z][a-z0-9_]*',m) for m in (self.track_color_mode,self.cluster_color_mode)): raise ValueError('Invalid colour mode')
         if self.scale_min is not None and self.scale_max is not None and self.scale_min>=self.scale_max: raise ValueError('Colour minimum must be less than maximum')
         if self.geometry_units not in ('cm','m'): raise ValueError('Geometry units must be cm or m')
         if self.camera not in ('perspective','orthographic'):raise ValueError('Invalid camera type')
@@ -220,10 +236,10 @@ class RenderSettings:
         for color in (self.highlight_track_color,self.highlight_cluster_color):
             if not re.fullmatch(r'#[0-9a-fA-F]{6}',color):raise ValueError('Invalid highlight colour')
         if not isinstance(self.highlight_override_color,bool):raise ValueError('Highlight colour override must be boolean')
-        if self.geometry_lod not in ('full','simplified','structural'):raise ValueError('Invalid geometry detail')
+        if self.geometry_lod not in ('full','simplified','structural','proxy'):raise ValueError('Invalid geometry detail')
         for name,lod in self.geometry_lods.items():
             if name!='L3':detector(name)
-            if lod not in ('full','simplified','structural'):raise ValueError('Invalid per-detector geometry detail')
+            if lod not in ('full','simplified','structural','proxy'):raise ValueError('Invalid per-detector geometry detail')
         for name,approximate in self.geometry_schematics.items():
             if name!='L3':detector(name)
             if not isinstance(approximate,bool):raise ValueError('Per-detector schematic choice must be boolean')

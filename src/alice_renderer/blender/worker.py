@@ -52,8 +52,9 @@ def value(obj,mode):return color_value(obj,mode)
 def configure_surface_material(mat,opacity,interactive=False):
     # BLENDED sorts whole objects; it cannot reliably order the nested faces
     # of opaque instancers. Binary opening masks need opaque depth writes.
-    if hasattr(mat,'surface_render_method'):mat.surface_render_method='BLENDED' if interactive and opacity<1. else 'DITHERED'
-    if hasattr(mat,'use_transparency_overlap'):mat.use_transparency_overlap=not interactive
+    proxy=bool(mat.get('alice_proxy',False))
+    if hasattr(mat,'surface_render_method'):mat.surface_render_method='BLENDED' if interactive and opacity<1. and not proxy else 'DITHERED'
+    if hasattr(mat,'use_transparency_overlap'):mat.use_transparency_overlap=not interactive or proxy
 
 def materials(name,color,opacity=1.,emission=0.,cutaway=False,settings=None):
     mat=bpy.data.materials.new(name);mat.use_nodes=True
@@ -184,11 +185,37 @@ def tracks(objects,settings):
 def clusters(objects,settings):
     coll=collection('Clusters')
     groups,legend=buckets(objects,settings['cluster_color_mode'],settings['colors']['clusters'],settings,'clusters')
+    from alice_renderer.cluster_profiles import profile_axes
+    from mathutils import Matrix
+    mode=settings.get('tpc_cluster_profile','sphere')
+    legend['tpc_profile']=mode;legend['profiled_clusters']=0;legend['missing_tpc_profiles']=0
+    expanded={}
     for key,group in groups.items():
+        plain=[];shaped=[]
+        for c in group['items']:
+            axes=profile_axes(c,settings.get('tpc_profile_thickness_cm',.03)) if mode!='sphere' else None
+            if axes:shaped.append((c,axes));legend['profiled_clusters']+=1
+            else:
+                plain.append(c)
+                if mode!='sphere' and c['detector']=='TPC':legend['missing_tpc_profiles']+=1
+        if plain:expanded[key]=dict(group,items=plain)
+        # Gaussian display approximation: nested 0.5, 1, 1.5, 2, 2.5, 3 sigma
+        # translucent shells with exp(-r²/2) weights; not a fitted 3D density.
+        for radius in ([.5,1.,1.5,2.,2.5,3.] if mode=='gaussian' else [1.]):
+            if shaped:expanded[key+' profile '+str(radius)]=dict(group,items=[c for c,a in shaped],axes=[a for c,a in shaped],profile_radius=radius)
+    if mode=='gaussian':legend['profile_basis']='Nested Gaussian-weighted ellipsoidal shells; independent pad/time RMS, display-only radial thickness'
+    for key,group in expanded.items():
         mesh=bpy.data.meshes.new('Cluster positions '+key)
         mesh.from_pydata([tuple(v*.01 for v in c['position']) for c in group['items']],[],[]);mesh.update()
         obj=bpy.data.objects.new('Clusters '+key,mesh);coll.objects.link(obj);obj['alice_highlighted']=group['highlighted']
         mat=materials('Cluster '+key,group['color'],emission=settings.get('cluster_emission',1.),settings=settings)
+        if 'axes' in group:
+            if mode=='gaussian':mat=materials('Cluster '+key,group['color'],opacity=.3*math.exp(-.5*group['profile_radius']**2),emission=settings.get('cluster_emission',1.),settings=settings)
+            scales=mesh.attributes.new('profile_scale','FLOAT_VECTOR','POINT');rotations=mesh.attributes.new('profile_rotation','FLOAT_VECTOR','POINT')
+            factor=.01*settings.get('tpc_profile_scale',1.)*group['profile_radius']
+            for i,(size,basis) in enumerate(group['axes']):
+                scales.data[i].vector=tuple(v*factor for v in size)
+                rotations.data[i].vector=Matrix(basis).to_euler()
         # Instanced spheres keep even large cluster clouds compact in memory.
         nodes=bpy.data.node_groups.new('Cluster spheres '+key,'GeometryNodeTree')
         nodes.interface.new_socket(name='Geometry',in_out='INPUT',socket_type='NodeSocketGeometry')
@@ -198,6 +225,11 @@ def clusters(objects,settings):
         ico=n.new('GeometryNodeMeshIcoSphere');ico.inputs['Radius'].default_value=(settings['highlight_cluster_radius_cm'] if group['highlighted'] else settings['cluster_radius_cm'])*.01;ico.inputs['Subdivisions'].default_value=1
         material=n.new('GeometryNodeSetMaterial');material.inputs['Material'].default_value=mat
         instance=n.new('GeometryNodeInstanceOnPoints')
+        if 'axes' in group:
+            ico.inputs['Radius'].default_value=1.;ico.inputs['Subdivisions'].default_value=2
+            for attribute,socket in [('profile_scale','Scale'),('profile_rotation','Rotation')]:
+                attr=n.new('GeometryNodeInputNamedAttribute');attr.data_type='FLOAT_VECTOR';attr.inputs['Name'].default_value=attribute
+                l.new(attr.outputs['Attribute'],instance.inputs[socket])
         l.new(input_.outputs['Geometry'],instance.inputs['Points']);l.new(ico.outputs['Mesh'],material.inputs['Geometry'])
         l.new(material.outputs['Geometry'],instance.inputs['Instance']);l.new(instance.outputs['Instances'],output.inputs['Geometry'])
         obj.modifiers.new('Cluster instancing','NODES').node_group=nodes
@@ -230,6 +262,15 @@ def envelope(name,settings):
     obj.data.materials.append(materials(name, settings.get('colors_linear',{}).get(key,rgb(settings['colors'][key])),settings.get('geometry_opacities',{}).get(name,settings['geometry_opacity']),settings=settings))
 
 def imported_geometry(name,path,settings,bounds_only=False):
+    if settings.get('geometry_lods',{}).get(name,settings.get('geometry_lod','full'))=='proxy':
+        from alice_renderer.surface_proxy import load
+        data=load(path,settings['geometry_units'])
+        if not bounds_only or data.get('track_region'):
+            from structural import imported
+            return imported(name,path,settings,bounds_only,data=data,lod='proxy')
+        # Never clip physical tracks to a display approximation. Detectors without
+        # cached exact bounds still derive those bounds from their source asset.
+
     if settings.get('geometry_lods',{}).get(name,settings.get('geometry_lod','full'))=='structural':
         if settings.get('geometry_display',{}).get(name,'surfaces')!='surfaces':raise ValueError('Large surfaces use their built shapes; choose Existing surfaces')
         from structural import imported
@@ -406,13 +447,16 @@ def render(job_path,interactive=False):
     path=Path(job['event'])
     with (gzip.open(path,'rt') if path.suffix=='.gz' else path.open()) as stream:event=annotate_matching(json.load(stream))
     bpy.ops.object.select_all(action='SELECT');bpy.ops.object.delete(use_global=False)
-    scene=bpy.context.scene;scene.render.engine='CYCLES'
+    scene=bpy.context.scene;scene.render.engine=settings.get('render_engine','CYCLES')
     scene.cycles.samples=settings['samples'];scene.cycles.use_denoising=settings['denoise']
+    if scene.render.engine=='BLENDER_EEVEE':
+        scene.eevee.taa_render_samples=settings['samples']
+        scene.eevee.use_raytracing=False
     # Aligned detectors contain many nested surfaces. Cycles' default eight
     # transparent bounces turn cutaway/opacity rays black before they reach data.
     scene.cycles.transparent_max_bounces=128
     backend=settings['backend'];prefs=bpy.context.preferences.addons['cycles'].preferences
-    if backend=='CPU':scene.cycles.device='CPU'
+    if scene.render.engine!='CYCLES' or backend=='CPU':scene.cycles.device='CPU'
     else:
         prefs.compute_device_type=backend;prefs.get_devices();selected=[]
         for d in prefs.devices:
@@ -496,8 +540,17 @@ def render(job_path,interactive=False):
         job['track_regions']=regions
         start_editor(job,event,metadata)
         return
+    print('ALICE_STAGE Saving scene',flush=True)
     if settings['save_blend']:bpy.ops.wm.save_as_mainfile(filepath=str(output/'scene.blend'))
-    bpy.ops.render.render(write_still=True)
+    def stats(*args):
+        print('ALICE_STATS '+' '.join(str(a) for a in args),flush=True)
+    bpy.app.handlers.render_stats.append(stats)
+    print('ALICE_STAGE Sampling',flush=True)
+    print('ALICE_PROGRESS 0',flush=True)
+    try:bpy.ops.render.render(write_still=True)
+    finally:bpy.app.handlers.render_stats.remove(stats)
+    print('ALICE_STAGE Image saved',flush=True)
+
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--probe');parser.add_argument('--job');parser.add_argument('--interactive',action='store_true')

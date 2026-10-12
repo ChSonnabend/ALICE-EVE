@@ -4,6 +4,7 @@ from pathlib import Path
 import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, StringProperty
 from alice_renderer.model import RenderSettings, COLOR_FIELDS, capabilities
+from alice_renderer.cluster_colors import CLUSTER_COLOR_FIELDS, DESCRIPTIONS
 from alice_renderer.object_selection import parse_track_ids,selected_tracks,selected_clusters,enabled_detectors,event_counts
 from alice_renderer.palettes import names as palette_names
 from alice_renderer.geometry_selection import is_schematic,render_choices,description as geometry_description
@@ -56,6 +57,7 @@ def current_settings():
     cfg['colors']['background']=hex_color(ui.background)
     cfg['colors']['tracks']=hex_color(ui.track_color);cfg['colors']['clusters']=hex_color(ui.cluster_color)
     cfg['colors_linear'].update(background=list(ui.background),tracks=list(ui.track_color),clusters=list(ui.cluster_color))
+    cfg['tpc_cluster_profile']=ui.tpc_cluster_profile;cfg['tpc_profile_scale']=ui.tpc_profile_scale;cfg['tpc_profile_thickness_cm']=ui.tpc_profile_thickness_cm
     cfg['track_radius_cm']=ui.track_width_cm/2;cfg['cluster_radius_cm']=ui.cluster_radius_cm;cfg['clip_tracks']=ui.clip_tracks;cfg['include_ambiguous_tracks']=ui.include_ambiguous_tracks
     cfg['highlight_track_ids']=parse_track_ids(ui.highlight_ids);cfg['highlight_track_radius_cm']=ui.highlight_width_cm/2;cfg['highlight_cluster_radius_cm']=ui.highlight_cluster_radius_cm;cfg['highlight_override_color']=ui.highlight_override;cfg['highlight_track_color']=hex_color(ui.highlight_track_color);cfg['highlight_cluster_color']=hex_color(ui.highlight_cluster_color)
     cfg['geometry_lod']=ui.geometry_lod
@@ -71,7 +73,7 @@ def current_settings():
     return RenderSettings(**cfg).validate()
 
 def track_signature(ui):
-    return (tuple((i.name,i.mode) for i in ui.detectors if i.data and i.data_available),tuple(i.name for i in ui.detectors if i.visible and i.geometry_available and i.name!='L3'),ui.track_width_cm,ui.cluster_radius_cm,ui.clip_tracks,ui.include_ambiguous_tracks,ui.highlight_ids,ui.highlight_width_cm,ui.highlight_cluster_radius_cm,ui.highlight_override,tuple(ui.highlight_track_color),tuple(ui.highlight_cluster_color))
+    return (tuple((i.name,i.mode) for i in ui.detectors if i.data and i.data_available),tuple(i.name for i in ui.detectors if i.visible and i.geometry_available and i.name!='L3'),ui.track_width_cm,ui.cluster_radius_cm,ui.tpc_cluster_profile,ui.tpc_profile_scale,ui.tpc_profile_thickness_cm,ui.clip_tracks,ui.include_ambiguous_tracks,ui.highlight_ids,ui.highlight_width_cm,ui.highlight_cluster_radius_cm,ui.highlight_override,tuple(ui.highlight_track_color),tuple(ui.highlight_cluster_color))
 
 def set_all_modes(self,context):
     if not JOB:return
@@ -237,7 +239,7 @@ class DetectorSettings(bpy.types.PropertyGroup):
     data: BoolProperty(name='Event data',default=True,update=selection_update)
     mode: EnumProperty(name='Objects',items=[(v,v,'') for v in ('tracks','clusters','both')],update=selection_update)
     visible: BoolProperty(name='Surface',default=True,update=surface_update)
-    detail: EnumProperty(name='Geometry detail',items=[('inherit','Use scene detail','Use the Geometry detail control above'),('full','Full geometry','Keep aligned detector surfaces'),('structural','Large surfaces (cached, fast)','ITS stave panels and TPC walls/sectors; fine details omitted'),('simplified','Simplified geometry','Use approximate coarse spatial cells')],default='inherit')
+    detail: EnumProperty(name='Geometry detail',items=[('inherit','Use scene detail','Use the Geometry detail control above'),('full','Full geometry','Keep aligned detector surfaces'),('proxy','Cached approximate surfaces','Reviewed low-complexity detector surfaces; no source mesh import'),('structural','Large surfaces (cached, fast)','ITS stave panels and TPC walls/sectors; fine details omitted'),('simplified','Simplified geometry','Use approximate coarse spatial cells')],default='inherit')
     opening: FloatProperty(name='Opening (degrees)',min=0,max=360,default=0,update=appearance_update)
     opening_direction: FloatProperty(name='Opening direction (degrees)',description='Wedge centre in ALICE XY: 0 is +X, 90 is +Y, −90 is −Y',min=-360,max=360,default=-90,update=appearance_update)
     exclusions: StringProperty(name='Hide component names',description='Comma-separated object-name patterns, e.g. ITSServices*, CageCover*. Apply geometry appearance to update. Recorded in the recipe; data and clipping bounds remain unchanged')
@@ -248,7 +250,7 @@ class DetectorSettings(bpy.types.PropertyGroup):
     display: EnumProperty(name='Appearance',items=[('surfaces','Existing surfaces','Keep the current aligned surfaces or simplified cells'),('shell','Outer shell','Approximate outer hull; removes internal structures and openings'),('outline','Outline','Edges of the approximate outer hull')])
     color: FloatVectorProperty(name='Colour',subtype='COLOR',size=3,min=0,max=1,default=(.02,.04,.2),update=appearance_update)
 
-COLOR_ITEMS=[(name,name,'0 = standalone fitted source; 1 = composite matched source (e.g. ITS-TPC); grey = unknown' if name=='matching' else '') for name in COLOR_FIELDS]
+COLOR_ITEMS=[(name,name,'0 = standalone fitted source; 1 = composite matched source (e.g. ITS-TPC); grey = unknown' if name=='matching' else '') for name in COLOR_FIELDS] + [(name,name,DESCRIPTIONS[name]) for name in CLUSTER_COLOR_FIELDS]
 def use_scene_lighting():
     for screen in bpy.data.screens:
         for area in screen.areas:
@@ -270,9 +272,14 @@ def viewport_renderer_update(self,context):
 class SceneSettings(bpy.types.PropertyGroup):
     viewport_renderer: EnumProperty(name='Viewport renderer',items=[('BLENDER_EEVEE','Fast (Eevee)','Responsive preview; transparency and lighting are approximate'),('CYCLES','Accurate (Cycles)','Progressive preview using the final renderer; slower on CPU')],default='CYCLES',update=viewport_renderer_update)
     detectors: CollectionProperty(type=DetectorSettings)
-    geometry_lod: EnumProperty(name='Geometry detail',items=[('full','Full aligned surfaces','Preserve the actual detector geometry'),('structural','Large surfaces (cached, fast)','Prebuilt ITS/TPC display surfaces; no heavy source import'),('simplified','Coarse cells','Reduce complexity; approximate bounding cells')])
+    geometry_lod: EnumProperty(name='Geometry detail',items=[('full','Full aligned surfaces','Preserve the actual detector geometry'),('proxy','Cached approximate surfaces','Reviewed low-complexity detector surfaces; no source mesh import'),('structural','Large surfaces (cached, fast)','Prebuilt ITS/TPC display surfaces; no heavy source import'),('simplified','Coarse cells','Reduce complexity; approximate bounding cells')])
     mode: EnumProperty(name='Set all object modes',items=[(v,v,'') for v in ('tracks','clusters','both')],update=set_all_modes)
     track_width_cm: FloatProperty(name='Track linewidth (cm)',min=.002,max=20,default=.24,precision=3,update=appearance_update)
+    tpc_cluster_profile: EnumProperty(name='TPC cluster profile',items=[('sphere','Spheres','Fixed radius'),('ellipse','Measured ellipse','Pad/time RMS profile'),('gaussian','Gaussian shells','Gaussian-weighted translucent shells; display approximation')],default='sphere',update=selection_update)
+    tpc_profile_scale: FloatProperty(name='Sigma scale',min=.01,max=100,default=1.,update=selection_update)
+    tpc_profile_thickness_cm: FloatProperty(name='Display thickness (cm)',min=.001,max=10,default=.03,update=selection_update)
+    render_status: StringProperty(name='Render status',default='Ready')
+    render_percent: IntProperty(name='Render progress %',min=0,max=100,default=0)
     cluster_radius_cm: FloatProperty(name='Cluster radius (cm)',min=.001,max=20,default=.35,update=selection_update)
     highlight_ids: StringProperty(name='Special track IDs',description='Comma-separated event track IDs; Ctrl-click adds, Shift-click toggles',update=selection_update)
     highlight_width_cm: FloatProperty(name='Special track linewidth (cm)',min=.002,max=20,default=.7,update=appearance_update)
@@ -480,15 +487,18 @@ class SurroundLighting(bpy.types.Operator):
         return {'FINISHED'}
 
 class FastStructuralSurfaces(bpy.types.Operator):
-    bl_idname='alice_eve.fast_surfaces';bl_label='Use fast ITS/TPC surfaces'
-    bl_description='Load prebuilt ITS stave panels and large TPC walls/sectors; retain camera, colours, openings and supported component choices. Fine details are omitted'
+    bl_idname='alice_eve.fast_surfaces';bl_label='Use cached approximate surfaces'
+    bl_description='Use reviewed low-complexity surfaces for visible detectors and magnet; retain camera, colours, openings and component choices'
     def execute(self,context):
-        from alice_renderer.structural_geometry import load
-        selected=[i for i in context.scene.alice_eve.detectors if i.name in ('ITS','TPC') and i.visible and i.geometry_available]
+        from alice_renderer.surface_proxy import load
+        selected=[i for i in context.scene.alice_eve.detectors if i.visible and i.geometry_available]
         try:
-            if not selected:raise ValueError('Select ITS or TPC Surface first')
-            for item in selected:load(bpy.path.abspath(item.asset_path),JOB['settings']['geometry_units'])
-            for item in selected:item.detail='structural';item.display='surfaces';item.inner_mask_radius=0
+            if not selected:raise ValueError('Select detector surfaces first')
+            # Validate every cache before changing any editor choices.
+            for item in selected:
+                data=load(bpy.path.abspath(item.asset_path),JOB['settings']['geometry_units'])
+                if data['detector']!=item.name:raise ValueError('Cache detector differs from '+item.name)
+            for item in selected:item.detail='proxy';item.display='surfaces';item.inner_mask_radius=0
             return bpy.ops.alice_eve.apply_geometry()
         except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
 
@@ -554,7 +564,7 @@ class ExportConfig(bpy.types.Operator):
             self.report({'INFO'},'Portable scene exported');return {'FINISHED'}
         except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
 
-DETAIL_ITEMS=[('current','Keep current scene','Preserve the current geometry type, detail and appearance'),('full','Full aligned surfaces','Load the actual aligned geometry; overrides schematic/outline/coarse-cell modes'),('structural','Large surfaces (cached, fast)','ITS/TPC display approximation; requires its prebuilt cache'),('simplified','Simplified aligned cells','Coarse cells derived from actual aligned geometry; requires its asset'),('schematic','Schematic envelope','Approximate detector envelope; does not load aligned geometry')]
+DETAIL_ITEMS=[('current','Keep current scene','Preserve the current geometry type, detail and appearance'),('full','Full aligned surfaces','Load the actual aligned geometry; overrides schematic/outline/coarse-cell modes'),('proxy','Cached approximate surfaces','Reviewed low-complexity detector surfaces; no source mesh import'),('structural','Large surfaces (cached, fast)','ITS/TPC display approximation; requires its prebuilt cache'),('simplified','Simplified aligned cells','Coarse cells derived from actual aligned geometry; requires its asset'),('schematic','Schematic envelope','Approximate detector envelope; does not load aligned geometry')]
 
 class RenderGeometryDetail(bpy.types.PropertyGroup):
     detail: EnumProperty(name='Geometry detail',items=DETAIL_ITEMS,default='current')
@@ -621,8 +631,31 @@ class RenderFull(bpy.types.Operator):
             command=[JOB['python'],'-m','alice_renderer.cli','render-config',str(path),'--input',JOB['event'],'--event',str(EVENT['id']),'--assets',str(asset_map),'--blender',bpy.app.binary_path,'--backend',backend,'--quality','balanced' if self.quality=='custom' else self.quality,'--output',bpy.path.abspath(self.output)]
             command+=['--resolution-percent',str(self.resolution_percent or PRESET_PERCENT[self.quality])]
             if self.quality=='custom':command+=['--samples',str(self.samples)]
-            with (root/'full-render.log').open('w') as log:subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
-            self.report({'INFO'},'Full render started; progress in '+str(root/'full-render.log'));return {'FINISHED'}
+            log_path=root/('full-render-'+str(time.time_ns())+'.log')
+            with log_path.open('w') as log:process=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+            ui.render_status='Starting render';ui.render_percent=0
+            offset=0
+            def monitor():
+                nonlocal offset
+                import re
+                try:
+                    with log_path.open() as stream:
+                        stream.seek(offset)
+                        for line in stream:
+                            match=re.search(r'Render progress: (\d+)%',line)
+                            if match:ui.render_percent=int(match[1])
+                            if line.strip():ui.render_status=line.strip()[-160:]
+                        offset=stream.tell()
+                    for screen in bpy.data.screens:
+                        for area in screen.areas:
+                            if area.type=='VIEW_3D':area.tag_redraw()
+                    if process.poll() is not None:
+                        ui.render_status='Render completed' if process.returncode==0 else 'Render failed: '+str(log_path)
+                        return None
+                    return .5
+                except ReferenceError:return None
+            bpy.app.timers.register(monitor,first_interval=.5)
+            self.report({'INFO'},'Full render started; progress in '+str(log_path));return {'FINISHED'}
         except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
 
 class RollCamera(bpy.types.Operator):
@@ -722,6 +755,8 @@ class EVEPanel(bpy.types.Panel):
         row=layout.row();row.enabled=counts['association_flags_available'];row.prop(ui,'include_ambiguous_tracks')
         layout.prop(context.scene.camera.data,'type');layout.prop(context.scene.camera.data,'lens');layout.prop(context.scene.camera.data,'ortho_scale')
         layout.operator('alice_eve.opaque_geometry');layout.operator('alice_eve.apply_geometry')
+        layout.label(text=ui.render_status);row=layout.row();row.enabled=False;row.prop(ui,'render_percent',slider=True)
+        layout.prop(ui,'tpc_cluster_profile');layout.prop(ui,'tpc_profile_scale');layout.prop(ui,'tpc_profile_thickness_cm')
         layout.prop(ui,'mode');layout.prop(ui,'track_width_cm');layout.prop(ui,'cluster_radius_cm');layout.prop(ui,'clip_tracks');layout.prop(ui,'track_color');layout.prop(ui,'cluster_color')
         box=layout.box();box.label(text='Track emphasis / decay chain');box.prop(ui,'highlight_ids')
         if ui.picking_active:box.operator('alice_eve.stop_picking',text='Stop picking (Esc)')
@@ -739,7 +774,7 @@ class EVEPanel(bpy.types.Panel):
             if item.geometry_available:
                 kind=geometry_description(cfg,item.name)
                 box.label(text='Geometry source: '+kind)
-                if cfg['geometry_lods'].get(item.name,cfg['geometry_lod'])=='structural':box.label(text='Fine parts omitted; layers / walls / sectors retained')
+                if cfg['geometry_lods'].get(item.name,cfg['geometry_lod']) in ('structural','proxy'):box.label(text='Fine parts omitted; layers / walls / sectors retained')
                 box.prop(item,'detail');box.prop(item,'display');box.prop(item,'opening');box.prop(item,'opening_direction');box.prop(item,'exclusions');box.prop(item,'color');box.prop(item,'opacity')
                 box.prop(item,'show_components')
                 if item.show_components:
@@ -747,7 +782,7 @@ class EVEPanel(bpy.types.Panel):
                     displayed=0;component_enabled=not is_schematic(current_settings().to_dict(),item.name)
                     coll=bpy.data.collections.get(item.name)
                     supported=set(json.loads(coll.get('alice_structural_components','[]'))) if coll else set()
-                    large=cfg['geometry_lods'].get(item.name,cfg['geometry_lod'])=='structural'
+                    large=cfg['geometry_lods'].get(item.name,cfg['geometry_lod']) in ('structural','proxy')
                     for component in item.components:
                         if component.identifier.split('/')[0]!=item.component_category:continue
                         if item.component_filter and item.component_filter.lower() not in (component.identifier+' '+component.label).lower():continue
@@ -787,6 +822,7 @@ def start_editor(job,event,metadata):
     scene=bpy.context.scene;ui=scene.alice_eve;settings=job['settings']
     # Suppress updates during property initialization.
     from worker import rgb
+    ui.tpc_cluster_profile=settings.get('tpc_cluster_profile','sphere');ui.tpc_profile_scale=settings.get('tpc_profile_scale',1.);ui.tpc_profile_thickness_cm=settings.get('tpc_profile_thickness_cm',.03)
     ui.cluster_radius_cm=settings['cluster_radius_cm'];ui.highlight_ids=', '.join(settings.get('highlight_track_ids',[]));ui.highlight_width_cm=settings.get('highlight_track_radius_cm',.35)*2;ui.highlight_cluster_radius_cm=settings.get('highlight_cluster_radius_cm',1.);ui.highlight_override=settings.get('highlight_override_color',True);ui.highlight_track_color=rgb(settings.get('highlight_track_color','#ffcc33'));ui.highlight_cluster_color=rgb(settings.get('highlight_cluster_color','#ff6633'))
     ui.track_width_cm=settings['track_radius_cm']*2;ui.clip_tracks=settings.get('clip_tracks',True);ui.include_ambiguous_tracks=settings.get('include_ambiguous_tracks',True)
     ui.geometry_lod=settings.get('geometry_lod','full')
@@ -816,6 +852,8 @@ def start_editor(job,event,metadata):
     ui.displayed_tracks=metadata['rendered_tracks'];ui.displayed_clusters=metadata['rendered_clusters']
     JOB['applied_track_signature']=track_signature(ui);appearance_update(ui,bpy.context)
     bpy.context.preferences.inputs.view_rotate_method='TRACKBALL'
+    if job.get('fast_interactive'):
+        ui.viewport_renderer='BLENDER_EEVEE';ui.viewport_samples=32
     viewport_renderer_update(ui,bpy.context);scene.render.resolution_percentage=100
     for screen in bpy.data.screens:
         for area in screen.areas:

@@ -33,7 +33,7 @@ def preflight(settings: RenderSettings, events, devices: dict, output: Path) -> 
     if tuple(devices.get('version',[0,0])[:2])<(4,5): errors.append('Blender 4.5 or newer is required')
     available=[d for d in devices.get('devices',[]) if d['type']==settings.backend]
     if settings.device: available=[d for d in available if d['id']==settings.device]
-    if not available:
+    if settings.render_engine=='CYCLES' and not available:
         if settings.device:errors.append(f'Selected device {settings.device!r} is not available for {settings.backend}. Check devices and choose a current device ID.')
         else:errors.append(f'No usable {settings.backend} device found in this Blender build. Select CPU or install a compatible backend/driver.')
     count=0;peak_points=0;peak_clusters=0;clip_assets=set()
@@ -79,6 +79,14 @@ def preflight(settings: RenderSettings, events, devices: dict, output: Path) -> 
             if not asset or not Path(asset).is_file(): errors.append(f'{name}: provide detector geometry (.glb, .gltf, .obj, .blend), or explicitly select schematic envelopes')
             elif Path(asset).suffix.lower() not in ('.glb','.gltf','.obj','.blend'): errors.append(f'{name}: unsupported geometry format')
     for name in set(settings.geometry+(['L3'] if settings.magnet else []))|clip_assets:
+        if not is_schematic(values,name) and detail(values,name)=='proxy':
+            try:
+                from .surface_proxy import load
+                cache=load(settings.geometry_assets.get(name,''),settings.geometry_units)
+                if cache['detector']!=name:raise ValueError('Fast surface cache detector differs from selected asset')
+                if settings.geometry_inner_masks.get(name):raise ValueError('Clear inner-placement masks before using approximate surfaces')
+                if settings.geometry_display.get(name,'surfaces')!='surfaces':raise ValueError('Choose Existing surfaces for cached approximate surfaces')
+            except (OSError,ValueError,KeyError) as exc:errors.append(name+': '+str(exc))
         if not is_schematic(values,name) and detail(values,name)=='structural':
             try:
                 from .structural_geometry import load,SUPPORTED
@@ -105,8 +113,44 @@ def preflight(settings: RenderSettings, events, devices: dict, output: Path) -> 
     except OSError as exc: errors.append(f'Output directory is not writable: {exc}')
     return list(dict.fromkeys(errors))
 
+def geometry_only_input(output):
+    """Explicit empty scene input; never impersonates a collision or demo event."""
+    output=Path(output);output.mkdir(parents=True,exist_ok=True)
+    path=output/'geometry-only.json'
+    path.write_text(json.dumps({'schema_version':1,'units':'cm','kind':'geometry','id':'Geometry only','tracks':[],'clusters':[]}))
+    return path
+
+
+def fast_editor_settings(settings):
+    """Use validated cached surfaces where compatible; preserve other detectors."""
+    import copy
+    from .geometry_selection import is_schematic
+    from .structural_geometry import load
+    cfg=copy.deepcopy(settings)
+    values=cfg.to_dict()
+    for name in cfg.geometry+(['L3'] if cfg.magnet else []):
+        if name not in ('ITS','TPC') and cfg.geometry_lods.get(name,cfg.geometry_lod)=='structural':cfg.geometry_lods[name]='full'
+    for name in cfg.geometry+(['L3'] if cfg.magnet else []):
+        if is_schematic(values,name) or cfg.geometry_inner_masks.get(name) or cfg.geometry_display.get(name,'surfaces')!='surfaces':continue
+        try:
+            from .surface_proxy import load as load_proxy
+            data=load_proxy(cfg.geometry_assets.get(name,''),cfg.geometry_units)
+            if data['detector']!=name:continue
+            cfg.geometry_lods[name]='proxy';continue
+        except (OSError,ValueError,KeyError):pass
+        if name not in ('ITS','TPC'):continue
+        try:load(cfg.geometry_assets.get(name,''),cfg.geometry_units)
+        except (OSError,ValueError,KeyError):continue
+        cfg.geometry_lods[name]='structural'
+    return cfg
+
+
 def render_events(blender: str, paths: list[Path], settings: RenderSettings, output: Path, *, preview=False, progress=lambda s:None, cancelled=lambda:False, library_path=None):
     output=Path(output)
+    if not paths:
+        if not settings.geometry and not settings.magnet:raise ValueError('Select detector geometry for a geometry-only render')
+        paths=[geometry_only_input(output)]
+        settings=dataclasses.replace(settings,detectors=[],highlight_track_ids=[])
     settings.validate()
     effective=materialize(dataclasses.replace(settings))
     if preview:
@@ -116,6 +160,7 @@ def render_events(blender: str, paths: list[Path], settings: RenderSettings, out
         # keep resolution low while letting translucent surfaces converge.
         effective.samples=128;effective.denoise=True;effective.save_blend=False
     # Re-check at execution, not only in the UI. Never silently switch the selected backend.
+    progress('Checking Blender devices and render prerequisites')
     devices=probe(blender)
     events=(load_event(p) for p in paths)
     errors=preflight(effective,events,devices,output)
@@ -133,9 +178,22 @@ def render_events(blender: str, paths: list[Path], settings: RenderSettings, out
         command=[blender,'--background','--factory-startup','--python-exit-code','1','--python',str(WORKER),'--','--job',str(job)]
         event_id=load_event(path)['id']
         progress(f'{index+1}/{len(paths)} — event {event_id}')
-        with (folder/'blender.log').open('w') as log:
+        progress('Building scene and loading detector geometry')
+        from .render_progress import sample_percent
+        last_percent=-1
+        def report(line):
+            nonlocal last_percent
+            if 'ALICE_STAGE ' in line:progress(line.split('ALICE_STAGE ',1)[1].strip())
+            percent=sample_percent(line)
+            if percent is not None and percent>last_percent:
+                last_percent=percent
+                overall=int((index+percent/100)*100/len(paths))
+                progress(f'Render progress: {overall}% — event {index+1}/{len(paths)}: {percent}%')
+        with (folder/'blender.log').open('w') as log, (folder/'blender.log').open() as status:
+
             process=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
             while process.poll() is None:
+                for line in status:report(line)
                 if cancelled():
                     import signal
                     os.killpg(process.pid,signal.SIGTERM)
@@ -143,17 +201,23 @@ def render_events(blender: str, paths: list[Path], settings: RenderSettings, out
                     except subprocess.TimeoutExpired: os.killpg(process.pid,signal.SIGKILL); process.wait()
                     raise InterruptedError('Render cancelled')
                 time.sleep(.1)
+            for line in status:report(line)
         if process.returncode or not (folder/'render.png').exists(): raise ValueError(f'Blender failed for event {event_id}. See {folder/"blender.log"}')
         # Worker output contains display ranges, counts and geometry provenance.
         from .scene_library import SceneLibrary
         SceneLibrary(library_path).record_job(folder)
+        progress(f'Render progress: {int((index+1)*100/len(paths))}% — event {index+1}/{len(paths)} saved')
         progress(str(folder/'render.png'))
     return batch
 
-def launch_editor(blender, event_path, settings, output, *, library_path=None):
+def launch_editor(blender, event_path, settings, output, *, library_path=None, fast=True):
     """Launch native Blender editing; quality is chosen only by Render full."""
     import copy
-    cfg=materialize(copy.deepcopy(settings))
+    cfg=materialize(fast_editor_settings(settings) if fast else copy.deepcopy(settings))
+    if event_path is None:
+        if not cfg.geometry and not cfg.magnet:raise ValueError('Select detector geometry for a geometry-only scene')
+        event_path=geometry_only_input(output)
+        cfg=dataclasses.replace(cfg,detectors=[],highlight_track_ids=[])
     for name in cfg.geometry+(['L3'] if cfg.magnet else []):
         cfg.geometry_openings.setdefault(name,180. if cfg.cutaway else 0.)
     cfg.cutaway=False
@@ -162,7 +226,7 @@ def launch_editor(blender, event_path, settings, output, *, library_path=None):
     if errors:raise ValueError('\n'.join(errors))
     folder=Path(output)/('editor-'+time.strftime('%Y%m%d-%H%M%S')+'-'+os.urandom(3).hex());folder.mkdir()
     job=folder/'job.json'
-    payload={'event':str(Path(event_path).resolve()),'output':str(folder.resolve()),'settings':cfg.to_dict(),'preview':True,'blender':devices,'python':sys.executable,'render_output':str(Path(output).resolve()),'palettes':{name:sample(name) for name in names()}}
+    payload={'fast_interactive':fast,'event':str(Path(event_path).resolve()),'output':str(folder.resolve()),'settings':cfg.to_dict(),'preview':True,'blender':devices,'python':sys.executable,'render_output':str(Path(output).resolve()),'palettes':{name:sample(name) for name in names()}}
     from .scene_library import SceneLibrary
     library=SceneLibrary(library_path);payload['library_path']=str(library.path.resolve())
     job.write_text(json.dumps(payload,indent=2))

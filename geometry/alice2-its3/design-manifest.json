@@ -1,0 +1,24 @@
+{
+  "variant": "ALICE2.1",
+  "basis": "Official installed O2 design geometry, first-solid material surfaces; nominal simulation geometry, not run alignment",
+  "source_sha256": "6748aded4ffb90ea9c5778987b05973bcf637bd5d669b6fdb71adb5a618642b6",
+  "units": "m",
+  "assets": {
+    "ITS": {
+      "file": "ITS.blend",
+      "sha256": "004b7b90abf031ed6dcb9a61820ad8a36115a563289324726bdf0896252faaff",
+      "shapes": 138,
+      "instances": 243097
+    }
+  },
+  "o2_build": "dev-local1; o2-sim 1.2.0 fe47e4fe98; ALIDIST 38ebb99aeddd504d7afa342ee4206c9e0a76f452",
+  "generation_command": [
+    "o2-sim",
+    "--detectorList",
+    "ALICE2.1",
+    "-n",
+    "0",
+    "-e",
+    "TGeant3"
+  ]
+}

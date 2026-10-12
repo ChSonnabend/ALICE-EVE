@@ -35,6 +35,30 @@ def test_pasted_folder_loaded_by_enter_action_without_file_dialog(window,monkeyp
     assert Path(w.source.text())==folder
 
 
+def test_exported_mac_geometry_resolves_local_bundle(window):
+    w,application,root=window
+    folder=root/'events';generate(folder/'events.jsonl')
+    asset=root/'geometry'/'run-560067'/'ITS.blend'
+    asset.parent.mkdir(parents=True);asset.write_bytes(b'geometry')
+    (folder/'manifest.json').write_text(json.dumps({
+        'complete':True,'events_file':'events.jsonl','geometry_units':'m',
+        'geometry_assets':{'ITS':'/Users/jarvis/renderer/geometry/run-560067/ITS.blend'}}))
+    w.load_input(folder);settle(w,application)
+    assert w.settings().geometry_assets['ITS']==str(asset)
+
+
+def test_missing_exported_geometry_preserves_valid_setup_asset(window):
+    w,application,root=window
+    folder=root/'events';generate(folder/'events.jsonl')
+    asset=root/'ITS.blend';asset.write_bytes(b'geometry')
+    w.asset_fields['ITS'].setText(str(asset))
+    (folder/'manifest.json').write_text(json.dumps({
+        'complete':True,'events_file':'events.jsonl',
+        'geometry_assets':{'ITS':'/missing/run-999/ITS.blend'}}))
+    w.load_input(folder);settle(w,application)
+    assert w.asset_fields['ITS'].text()==str(asset)
+
+
 def test_preview_and_long_status_do_not_resize_window(window):
     w,application,root=window
     before=w.size();image=root/'render.png';pixmap=QPixmap(3840,2160);pixmap.fill();pixmap.save(str(image))
@@ -246,3 +270,69 @@ def test_loaded_component_visibility_preserves_direction_across_cutaway_signals(
     w.apply_scene(cfg);actual=w.settings()
     assert actual.geometry_opening_directions=={'ITS':29.} and actual.geometry_exclusions==cfg.geometry_exclusions
     assert 'toward 29°' in w.geometry_opening_label.text()
+
+
+def test_profile_controls_roundtrip_and_render_progress(window):
+    w,application,root=window
+    cfg=RenderSettings(tpc_cluster_profile='gaussian',tpc_profile_scale=2.5,tpc_profile_thickness_cm=.08)
+    w.apply_scene(cfg)
+    restored=w.settings()
+    assert restored.tpc_cluster_profile=='gaussian'
+    assert restored.tpc_profile_scale==2.5
+    assert restored.tpc_profile_thickness_cm==.08
+    w.busy(True);w.message('Render progress: 42% — event 1/1: 42%')
+    assert w.render_progress.maximum()==100 and w.render_progress.value()==42
+    w.busy(False)
+
+
+def test_imported_raster_engine_preserved_by_desktop(window):
+    w,application,root=window
+    cfg=RenderSettings(render_engine='BLENDER_EEVEE',detectors=['ITS'],schematic=True)
+    w.apply_scene(cfg)
+    assert w.settings().render_engine=='BLENDER_EEVEE'
+
+
+def test_cluster_measurement_color_controls(window):
+    from alice_renderer.cluster_colors import CLUSTER_COLOR_FIELDS
+    w,application,root=window
+    for mode in CLUSTER_COLOR_FIELDS:
+        assert w.cluster_mode.findText(mode)>=0
+    w.apply_scene(RenderSettings(cluster_color_mode='residual_y/error_y'))
+    assert w.settings().cluster_color_mode=='residual_y/error_y'
+
+
+def test_recent_data_reopens_successful_input_and_can_clear(window):
+    w,application,root=window
+    source=generate(root/'events.jsonl')
+    w.load_input(source);settle(w,application)
+    assert w.input_recent_picker.currentData()==str(source.resolve())
+    assert w.input_recent_load.isEnabled()
+    w.source.clear()
+    w.input_recent_load.click();settle(w,application)
+    assert w.loaded_input==str(source.resolve())
+    assert w.input_recent_picker.count()==1
+    w.input_recent_clear.click()
+    assert w.library.recent_inputs()==[]
+    assert not w.input_recent_load.isEnabled()
+    assert source.exists()
+
+
+def test_failed_load_does_not_enter_recent_inputs(window,monkeypatch):
+    w,application,root=window
+    monkeypatch.setattr(app_module.QMessageBox,'warning',lambda *args:None)
+    w.load_input(root/'missing.jsonl');settle(w,application)
+    assert w.library.recent_inputs()==[]
+
+
+def test_geometry_only_controls_and_dispatch(window,monkeypatch):
+    w,application,root=window
+    w.model.selected.clear();w.geometry_checks['TPC'].setChecked(True);w.update_availability()
+    assert w.render_button.isEnabled() and w.preview_button.isEnabled() and w.editor_button.isEnabled()
+    assert w.render_button.text()=='Render geometry only'
+    calls=[]
+    monkeypatch.setattr(app_module,'render_events',lambda blender,paths,cfg,output,**kw:calls.append(('render',paths)) or output)
+    w.start_render(True);settle(w,application)
+    assert calls==[('render',[])]
+    monkeypatch.setattr(app_module,'launch_editor',lambda blender,path,cfg,output,**kw:calls.append(('editor',path,kw['fast'])) or (output,1))
+    w.open_editor();settle(w,application)
+    assert calls[-1]==('editor',None,True)

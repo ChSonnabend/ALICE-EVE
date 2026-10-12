@@ -75,6 +75,11 @@ def recipe(settings, event=None, *, default_input=None, default_event=None):
             if unknown:raise ValueError(name+': unknown geometry components: '+', '.join(sorted(unknown)))
         elif settings.geometry_components.get(name):raise ValueError(name+': component metadata is missing')
         from .geometry_selection import detail
+        if detail(values,name)=='proxy':
+            from .surface_proxy import load,sidecar_path
+            load(value,settings.geometry_units)
+            cache_file=sidecar_path(value)
+            refs[name]['surface']={'file':cache_file.name,'sha256':sha256(cache_file)}
         if detail(values,name)=='structural':
             from .structural_geometry import load,sidecar_path
             load(value,settings.geometry_units)
@@ -94,9 +99,10 @@ def validate_recipe(data):
     if not isinstance(refs,dict):raise ValueError('Invalid geometry references')
     for name,ref in refs.items():
         if not isinstance(ref,dict) or not isinstance(ref.get('file'),str) or Path(ref['file']).name!=ref['file'] or not ref['file'] or not isinstance(ref.get('sha256'),str) or len(ref['sha256'])!=64:raise ValueError(f'{name}: invalid geometry reference')
-        if 'components' in ref:
-            entry=ref['components']
-            if not isinstance(entry,dict) or not isinstance(entry.get('file'),str) or not entry['file'] or Path(entry['file']).name!=entry['file'] or not isinstance(entry.get('sha256'),str) or len(entry['sha256'])!=64:raise ValueError('Invalid geometry component reference')
+        for kind in ('components','structural','surface'):
+            if kind not in ref:continue
+            entry=ref[kind]
+            if not isinstance(entry,dict) or not isinstance(entry.get('file'),str) or Path(entry['file']).name!=entry['file'] or not entry['file'] or not isinstance(entry.get('sha256'),str) or len(entry['sha256'])!=64:raise ValueError('Invalid geometry '+kind+' reference')
     defaults=data.get('defaults',{})
     if not isinstance(defaults,dict) or set(defaults)-{'input','event'}:raise ValueError('Invalid input defaults')
     return data
@@ -124,6 +130,10 @@ def resolve_settings(data,config_path,geometry_root=None,asset_overrides=None):
             from .geometry_components import sidecar_path
             component_file=sidecar_path(path);component_ref=ref['components']
             if not component_file.is_file() or sha256(component_file)!=component_ref['sha256']:raise ValueError(name+': copy the identical geometry component metadata alongside the asset')
+        if 'surface' in ref:
+            from .surface_proxy import sidecar_path
+            cache_file=sidecar_path(path)
+            if not cache_file.is_file() or sha256(cache_file)!=ref['surface']['sha256']:raise ValueError(name+': copy the identical fast surface cache alongside the asset')
         if 'structural' in ref:
             from .structural_geometry import sidecar_path
             cache_file=sidecar_path(path)
@@ -147,6 +157,7 @@ def resolve_settings(data,config_path,geometry_root=None,asset_overrides=None):
     if any(name not in data.get('geometry',{}) and not is_schematic(cfg.to_dict(),name) for name in required):raise ValueError('Scene is missing selected geometry references')
     from .geometry_selection import detail
     if any(detail(cfg.to_dict(),name)=='structural' and not is_schematic(cfg.to_dict(),name) and 'structural' not in ref for name,ref in data['geometry'].items()):raise ValueError('Scene is missing the large-surface cache reference; export the scene again')
+    if any(detail(cfg.to_dict(),name)=='proxy' and not is_schematic(cfg.to_dict(),name) and 'surface' not in ref for name,ref in data['geometry'].items()):raise ValueError('Scene is missing the fast surface cache reference; export the scene again')
     return cfg.validate()
 
 def choose_event(cat,selector):

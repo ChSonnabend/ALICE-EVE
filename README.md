@@ -4,7 +4,7 @@ Native Python/Qt application and headless Blender Cycles renderer. Each selected
 
 ## Working framework
 
-The renderer, event catalogue, GUI and prerequisite checks are runnable. CPU and Apple Metal rendering are verified on this Mac, including separate images for multiple events. HIP, CUDA and OptiX are implemented through Cycles device discovery but need hardware validation. First-use Metal kernel compilation took about ten minutes here; subsequent events rendered normally.
+The renderer, event catalogue, GUI and prerequisite checks are runnable. CPU and Apple Metal rendering were verified on the original Mac. Linux CPU and NVIDIA RTX 3090 OptiX rendering are also verified. HIP and CUDA device discovery are implemented but their render paths still need hardware validation. First-use Metal kernel compilation took about ten minutes here; subsequent events rendered normally.
 
 The configurable remote O2 integration decodes and reconstructs full TF/CTF inputs, exports every reconstructed primary vertex, checks them against an independent O2 inventory, and retrieves compressed event data and aligned geometry. Its locally configured instance was validated for **run 560067** in the user-provided O2 environment; generic setup profiles are in `profiles/example-*.json`. Real-data checks retained **55 collisions from the raw TF** and **56 from a full-detector CTF generated from that TF**. These are two separately checked reconstructions; their vertex sets differ. See [validation and limits](docs/STATUS.md).
 
@@ -22,10 +22,23 @@ cd /Users/jarvis/alice/Other/ALICE-event-renderer
 For another supported machine:
 
 ```sh
-python3 -m venv .venv
+python3.12 -m venv .venv
 .venv/bin/python -m pip install -e .
 .venv/bin/alice-renderer
 ```
+
+Python 3.11 or newer is required. If using an existing Conda environment, no
+additional virtual environment is needed:
+
+```sh
+conda activate py312
+python -m pip install -e .
+alice-renderer
+```
+
+Check `python --version` (or `.venv/bin/python --version`) if installation reports
+an incompatible Python. Creating a venv over an old venv can retain its old
+interpreter symlink; move the old directory aside and create a fresh one.
 
 Install Blender 4.5+ (this machine has 5.0). Choose its executable in Setup if it is not detected. CPU rendering works without GPU drivers. GPU choices are verified against the actual Blender build; unavailable backends stop before scene construction. AMD uses HIP/ROCm, Apple uses Metal, and NVIDIA uses CUDA/OptiX. The application never silently switches backends.
 
@@ -45,7 +58,7 @@ For a cleaner TPC view, the Blender sidebar's **TPC sectors + inner wall** keeps
 
 **Use fast ITS/TPC surfaces** loads prebuilt broad ITS stave panels and TPC walls/sectors, keeping the existing camera, opening angles, colours and lighting. This display approximation uses full aligned track-clipping bounds. Prepare its small caches once with `alice-render prepare-geometry --geometry-root /local/geometry --detectors ITS,TPC --units m`; then choose **Large surfaces (cached, fast)** / `structural` detail. See [large surfaces](docs/LARGE-SURFACES.md).
 
-Fresh desktop installations use the improved [commissioning interior preset](docs/REFERENCE-RECREATION.md), the best of ten reviewed renders (6.5/10 qualitative similarity, not an exact recreation). Saved local preferences take priority. **Appearance → Use commissioning defaults** restores it for the current input/event and local assets. It uses a 16 mm interior camera, explicit component exclusions and a front-only inner TPC placement mask that retains outer structures. Directional openings, structural selection, display colour transform, exposure, lens and separate track/cluster glow are portable.
+Fresh desktop installations use the saved ALICE2 scene exported from `editor-20261012-130704-860001`. Appearance → Detector setup offers ALICE2, ALICE2 + ITS3, and ALICE3 defaults with shared camera and lighting. Saved local preferences take priority. The earlier commissioning style remains available through **Use commissioning defaults**. See [detector setups](docs/DETECTOR-SETUPS.md).
 
 Direct AO2D import lists collision rows and lazily reads barrel, MFT and forward fitted tracks, with numeric track-feature colour choices. It needs run-specific field conditions and no local O2 installation. See [AO2D usage and projection limits](docs/AO2D.md). Detector **Components** controls expose ITS layers, TPC walls/cages/readout, supports and named elements; recipes preserve per-placement choices. See [component categories](docs/SCENE-CONFIG.md#detector-component-categories).
 
@@ -93,3 +106,15 @@ Use `--settings settings.json` for the headless render options. A saved GUI `set
 The track-curve approach and geometry conversion are informed by Felix Schlepper's MIT-licensed aliceBlender reference. Geometry conversion corrects half-space boolean handling and preserves aligned global placements. Reference files remain unchanged and are not shipped. Building new TGeo geometry assets requires that separately installed MIT converter; set `ALICE_GEOMETRY_CONVERTER` or pass `--converter`. Rendering existing geometry assets does not require it. The native exporter derives from O2's GPL-licensed EventVisualisation workflow in an isolated generated build; its upstream license and exact source revision are retained there. No O2 checkout is modified.
 
 The native exporter derivative retains the O2 GPL license. Project code is distributed under GPL-3.0; see [COPYING](COPYING).
+
+## Local preprocessing, detector setups and profiles
+
+See [local TF/CTF and AO2D preprocessing](docs/LOCAL-PREPROCESSING.md), [TPC pad/time profiles](docs/TPC-PROFILES.md), and [ALICE2 / ITS3 / ALICE3 presets and render progress](docs/DETECTOR-SETUPS.md).
+
+Portable scene recipes can select `"render_engine": "BLENDER_EEVEE"` for GPU rasterization, or `"CYCLES"` (the default) for path tracing. Eevee uses the recipe’s materials, openings and geometry detail settings; rasterization itself does not remove subpixel geometry. ITS/TPC `structural` detail reduces geometry before rendering. The sample setting controls Eevee temporal antialiasing; Cycles backend/device selections do not apply to Eevee.
+
+Interactive loading defaults to **Fast interactive**: reviewed cached approximate surfaces for all 15 ALICE2 detectors and the L3 magnet, plus a 32-sample Eevee viewport. Caches are baked from aligned native geometry and batched into 17 mesh objects for the complete setup. Compatible ITS/TPC structural caches remain a fallback for bundles without the new caches. Missing caches or incompatible masks keep the existing geometry. Turn this option off to retain the original editor startup path; full aligned surfaces remain selectable in the editor/render dialog. This does not decimate or subsample event data.
+
+With no event selected, the desktop preview, render and interactive-scene actions show **geometry only**. No input dataset is required. Select detector geometry first; use **Select none** to clear event selection after loading data. Geometry-only jobs explicitly record `kind: geometry` and contain zero tracks/clusters.
+
+See [cached interactive surfaces and review workflow](docs/FAST-SURFACES.md) for geometry scope, quality limitations and rebuild commands.

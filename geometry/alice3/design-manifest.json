@@ -1,0 +1,84 @@
+{
+  "variant": "ALICE3",
+  "basis": "Official installed O2 design geometry, first-solid material surfaces; nominal simulation geometry, not run alignment",
+  "source_sha256": "fbf5399db06226e6632714710740e042f13985bf142df4cc1d98b888a9d6972d",
+  "units": "m",
+  "assets": {
+    "PIPE3": {
+      "file": "PIPE3.blend",
+      "sha256": "05ae0cd613825d94cb39a74beb602339b7f6230d816facc648a253d8d33c8cd7",
+      "shapes": 1,
+      "instances": 1
+    },
+    "ABS3": {
+      "file": "ABS3.blend",
+      "sha256": "3d358686725e460a55d356837b29c4658826725ac8b62ec6a8a55bdb65858b95",
+      "shapes": 1,
+      "instances": 1
+    },
+    "MAG3": {
+      "file": "MAG3.blend",
+      "sha256": "876ff47ae75dac39a1e79d54076490f571ace6777c2545610283537929a71cd5",
+      "shapes": 4,
+      "instances": 4
+    },
+    "TRK": {
+      "file": "TRK.blend",
+      "sha256": "8385ec18c3d436bc5c2fc1f500030309bf3eb90b2fafe3dfd068ba7f09e79ef6",
+      "shapes": 51,
+      "instances": 1890
+    },
+    "FT3": {
+      "file": "FT3.blend",
+      "sha256": "f834f9081c64f35572c6683b4bda583fd7b93b09f1a6349e99e050e494e24b4c",
+      "shapes": 49,
+      "instances": 55968
+    },
+    "FCT": {
+      "file": "FCT.blend",
+      "sha256": "6e71564e3c0c476c9e74f74bf27413fb8ca26130725126136846fe4804c0f605",
+      "shapes": 3,
+      "instances": 11
+    },
+    "TF3": {
+      "file": "TF3.blend",
+      "sha256": "94ce4d23d661d415d478b588c92d8064c427bff2d39c0a88ef0984543dd07b45",
+      "shapes": 2,
+      "instances": 55488
+    },
+    "RCH": {
+      "file": "RCH.blend",
+      "sha256": "53d5b9726916c537a077e0bc21ae09daad0c8d882cf168d394632533bbf146bc",
+      "shapes": 7,
+      "instances": 3876
+    },
+    "ECL": {
+      "file": "ECL.blend",
+      "sha256": "a6dbd21a7942435a81f981cd564ed7d0f51d99d2b58f03a1de436b02a129af7d",
+      "shapes": 87,
+      "instances": 53824
+    },
+    "MI3": {
+      "file": "MI3.blend",
+      "sha256": "92b27f6f77ad8fe721ac744cbd6082aa28ff6a19b95ad47d81143d4d6be6014e",
+      "shapes": 2,
+      "instances": 6880
+    },
+    "FD3": {
+      "file": "FD3.blend",
+      "sha256": "a3944f37b5a599747d2b8edff7a7dff421424d2dad5986e9554b87d4d277f072",
+      "shapes": 88,
+      "instances": 88
+    }
+  },
+  "o2_build": "dev-local1; o2-sim 1.2.0 fe47e4fe98; ALIDIST 38ebb99aeddd504d7afa342ee4206c9e0a76f452",
+  "generation_command": [
+    "o2-sim",
+    "--detectorList",
+    "ALICE3",
+    "-n",
+    "0",
+    "-e",
+    "TGeant3"
+  ]
+}
