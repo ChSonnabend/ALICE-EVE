@@ -110,6 +110,7 @@ class Window(QMainWindow):
         right=QWidget();right_layout=QVBoxLayout(right);split.addWidget(right);split.setSizes([540,840])
         tools=QHBoxLayout();right_layout.addLayout(tools)
         self.all_button=QPushButton('Select all');self.none_button=QPushButton('Select none');tools.addWidget(self.all_button);tools.addWidget(self.none_button)
+        self.play_button=QPushButton('Play collisions…');self.play_button.setToolTip('Select at least two collisions to open looping Blender playback; no video checkbox is required');self.play_button.clicked.connect(self.play_editor);tools.addWidget(self.play_button)
         self.selection_label=QLabel('0 events selected');tools.addWidget(self.selection_label,1)
         self.model=EventsModel();self.model.changed.connect(self.update_availability)
         self.all_button.clicked.connect(lambda:self.model.select_all(True));self.none_button.clicked.connect(lambda:self.model.select_all(False))
@@ -417,7 +418,7 @@ class Window(QMainWindow):
         return {'conditions':self.aod_conditions.text(),'bz_kG':self.aod_bz.value() if self.aod_use_bz.isChecked() else None}
     def busy(self,on):
         self.render_progress.setRange(0,0 if on else 100)
-        for w in (self.fast_interactive,self.input_recent_picker,self.input_recent_load,self.input_recent_clear,self.tabs,self.source,self.open_button,self.browse_button,self.folder_button,self.demo_button,self.table,self.all_button,self.none_button,self.preview_button,self.render_button,self.editor_button,self.export_config_button,self.load_config_button,self.recent_picker,self.favourite_picker,self.reuse_recent_button,self.reuse_favourite_button):w.setEnabled(not on)
+        for w in (self.fast_interactive,self.input_recent_picker,self.input_recent_load,self.input_recent_clear,self.tabs,self.source,self.open_button,self.browse_button,self.folder_button,self.demo_button,self.table,self.all_button,self.none_button,self.preview_button,self.render_button,self.editor_button,self.play_button,self.export_config_button,self.load_config_button,self.recent_picker,self.favourite_picker,self.reuse_recent_button,self.reuse_favourite_button):w.setEnabled(not on)
         self.cancel_button.setEnabled(on)
         self.timeframe_button.setEnabled(not on and self.timeframe_source is not None)
         if not on:self.update_availability();self.refresh_recent_inputs()
@@ -562,9 +563,9 @@ class Window(QMainWindow):
         self.preview_button.setEnabled(renderable);self.render_button.setEnabled(renderable);self.editor_button.setEnabled(renderable)
         self.preview_button.setText('Preview first selected event' if rows else 'Preview geometry only')
         self.render_button.setText('Render selected events' if rows else 'Render geometry only')
-        if self.video_enabled.isChecked():
-            self.preview_button.setText('Preview video');self.render_button.setText('Render video');self.editor_button.setText('Play collisions…')
-        else:self.editor_button.setText('Interactive scene…')
+        self.play_button.setEnabled(len(rows)>=2)
+        if self.video_enabled.isChecked():self.preview_button.setText('Preview video');self.render_button.setText('Render video')
+        self.editor_button.setText('Interactive scene…')
     def check_devices(self):
         def done(info):
             self.device_info=info;self.device_label.setText(info['version_string']+' · '+', '.join(d['name']+' ('+d['type']+')' for d in info['devices']));self.update_devices()
@@ -712,6 +713,9 @@ class Window(QMainWindow):
         self.apply_scene(cfg);self.update_availability()
         saved=self.settings();saved.detectors=cfg.detectors;self.save_settings(saved)
         self.message('Improved commissioning defaults applied. Input, selected events and local geometry assets retained.')
+    def play_editor(self):
+        if len(self.model.selected)<2:self.failure('Select at least two collision events to play a video');return
+        self.video_enabled.setChecked(True);self.open_editor()
     def open_editor(self):
         has_event=bool(self.catalogue and self.model.selected)
         if has_event and self.source.text()!=self.loaded_input:self.failure('The input path has changed. Press Enter or Load input, then select its event before opening the editor.');return
@@ -721,12 +725,16 @@ class Window(QMainWindow):
             self.refresh_library();self.message('Interactive Blender scene started. Open the ALICE EVE sidebar; export or render from there. Log: '+str(result[0]/'editor.log'))
         blender=self.blender.text();output=Path(self.output.text())
         fast=self.fast_interactive.isChecked()
+        rows=[dict(r) for r in self.model.rows if r['ordinal'] in self.model.selected] if has_event else []
         def launch(p,c):
-            if cfg.video_enabled:
-                paths=[self.catalogue.event_path(i,progress=p,cancelled=c) for i in sorted(self.model.selected)] if has_event else []
-                if len(paths)<2:raise ValueError('Video needs at least two selected collisions')
-                return launch_editor(blender,paths[0],cfg,output,library_path=self.library.path,fast=fast,event_paths=paths)
-            return launch_editor(blender,self.catalogue.event_path(ordinal,progress=p,cancelled=c) if has_event else None,cfg,output,library_path=self.library.path,fast=fast)
+            headers=None
+            if cfg.video_enabled:paths=[self.catalogue.event_path(r['ordinal'],progress=p,cancelled=c) for r in rows]
+            else:
+                paths=[self.catalogue.folder/r['filename'] for r in rows]
+                if rows:paths[0]=self.catalogue.event_path(rows[0]['ordinal'],progress=p,cancelled=c)
+                headers=[dict(id=r['event_id'],kind=r['kind'],available_detectors=json.loads(r['detectors']),track_fields=json.loads(r['track_fields']),cluster_fields=json.loads(r['cluster_fields'])) for r in rows]
+            if cfg.video_enabled and len(paths)<2:raise ValueError('Video needs at least two selected collisions')
+            return launch_editor(blender,paths[0] if paths else None,cfg,output,library_path=self.library.path,fast=fast,event_paths=paths,event_headers=headers)
         self.start_task(launch,launched)
     def render_quality_dialog(self,cfg,devices):
         rec=recommended_quality(devices);dialog=QDialog(self);dialog.setWindowTitle('Full render quality');form=QFormLayout(dialog)

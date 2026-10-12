@@ -47,8 +47,11 @@ with tempfile.TemporaryDirectory(prefix='alice-video-qa-') as tmp:
     screen=SimpleNamespace(areas=[area]);context=SimpleNamespace(scene=bpy.context.scene,window=SimpleNamespace(screen=screen))
     watcher=SimpleNamespace(job=editor.JOB)
     assert editor.WatchPlaybackControls.modal(watcher,context,SimpleNamespace(type='MOUSEMOVE',mouse_x=800,mouse_y=100))=={'PASS_THROUGH'}
+    assert player.held_at is None
+    editor.WatchPlaybackControls.modal(watcher,context,SimpleNamespace(type='LEFTMOUSE',value='PRESS',mouse_x=800,mouse_y=100))
     assert player.held_at is not None
     player.timer();assert player.frame==f
+    bpy.ops.alice_eve.play_video();assert player.playing and player.held_at is None
     editor.WatchPlaybackControls.modal(watcher,context,SimpleNamespace(type='MOUSEMOVE',mouse_x=100,mouse_y=100));assert player.held_at is None
     bpy.ops.alice_eve.stop_video();assert not player.playing and not bpy.context.scene.alice_eve.video_playing
     player.regions={'TPC':dict(planes=[[1,0,0,150],[-1,0,0,-50],[0,1,0,10],[0,-1,0,10],[0,0,1,10],[0,0,-1,10]],units='cm')}

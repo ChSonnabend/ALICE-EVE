@@ -3,7 +3,7 @@
 ## Collision video update
 
 Interactive playback now has independent collision and viewport pause/resume
-controls. Sidebar hover holds the playback clock while dropdowns are being edited;
+controls. Sidebar editing holds the playback clock while dropdowns are being edited;
 track picking pauses the collision. Object modes, enabled detectors and feature
 menus remain available across the selected sequence, with missing values coloured
 as unknown. Detector object/mesh identities remain unchanged across repeated
@@ -13,6 +13,15 @@ Cycles preview pause and Eevee solid-inspection pause were checked natively.
 detector absent from the second collision. A 16-frame real run-560067 CPU movie
 renders and decodes with geometry reuse enabled. Detector pixels are still shaded
 per frame to retain depth, transparency and shadows.
+
+The desktop event-list toolbar now exposes Play collisions independently of the
+video export checkbox. Ordinary interactive scenes retain the full selection and
+can start playback later from Blender. Explicit Play clears a sidebar hold;
+hovering alone no longer suppresses playback. A native Blender test starts from a
+still scene, enables playback, clears an editing hold and advances to the next
+collision without rebuilding detector meshes. Desktop tests exercise the actual
+Play button and verify still launches materialize only their first event.
+The full Python suite now passes 246 tests; both native Blender playback checks pass.
 
 Multi-collision playback and H.264 MP4 export use the same geometry-node growth
 for tracks, delayed cluster instancing and gradually rising towers. Fixed intervals

@@ -32,7 +32,7 @@ def test_video_controls_round_trip_and_keep_all_selected_events_for_preview(wind
     cfg=w.settings();assert cfg.clip_tracks and not w.clip_tracks.isEnabled()
     w.apply_scene(resolve_settings(recipe(cfg),'unused.json',asset_overrides=cfg.geometry_assets))
     assert w.settings().video_enabled and w.settings().video_fps==30 and w.settings().video_interval_s==5
-    assert w.render_button.text()=='Render video' and w.editor_button.text()=='Play collisions…'
+    assert w.render_button.text()=='Render video' and w.editor_button.text()=='Interactive scene…' and w.play_button.isEnabled()
     captured=[]
     def rendered(blender,paths,settings,output,**kwargs):captured.extend(paths);return root/'fake-video'
     monkeypatch.setattr(app_module,'render_events',rendered)
@@ -47,6 +47,20 @@ def test_video_editor_receives_all_selected_paths_and_stop_prerequisite_is_clear
     w.open_editor();settle(w,application);assert len(captured)==3
     messages=[];monkeypatch.setattr(w,'failure',messages.append);w.model.selected={0};w.start_render(False)
     assert any('at least two' in text for text in messages)
+
+def test_gui_play_is_available_without_video_checkbox_and_static_edit_retains_selection(window,monkeypatch):
+    w,application,root=window;generate(root/'events.jsonl');w.load_input(root/'events.jsonl');settle(w,application)
+    w.video_enabled.setChecked(False);assert w.play_button.isEnabled()
+    calls=[]
+    monkeypatch.setattr(app_module,'launch_editor',lambda blender,path,cfg,output,**kw:calls.append((cfg,kw)) or (root/'editor',123))
+    materialized=[];original=w.catalogue.event_path
+    monkeypatch.setattr(w.catalogue,'event_path',lambda ordinal,**kw:materialized.append(ordinal) or original(ordinal,**kw))
+    w.open_editor();settle(w,application)
+    assert not calls[0][0].video_enabled and len(calls[0][1]['event_paths'])==3 and len(calls[0][1]['event_headers'])==3
+    assert materialized==[0]
+    w.play_button.click();settle(w,application)
+    assert calls[-1][0].video_enabled and len(calls[-1][1]['event_paths'])==3
+    w.model.selected={0};w.update_availability();assert not w.play_button.isEnabled()
 
 def test_calorimeter_controls_round_trip_into_exported_scene(window):
     from alice_renderer.scene_config import recipe,resolve_settings

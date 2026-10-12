@@ -334,7 +334,9 @@ class WatchPlaybackControls(bpy.types.Operator):
         if JOB is not self.job or not JOB.get('video_player'):return {'FINISHED'}
         if event.type in ('MOUSEMOVE','LEFTMOUSE','RIGHTMOUSE','WHEELUPMOUSE','WHEELDOWNMOUSE'):
             ui=context.scene.alice_eve
-            JOB['video_player'].hold_controls(ui.pause_while_editing and sidebar_contains(context.window.screen,event.mouse_x,event.mouse_y))
+            inside=sidebar_contains(context.window.screen,event.mouse_x,event.mouse_y)
+            if not ui.pause_while_editing or not inside:JOB['video_player'].hold_controls(False)
+            elif event.type=='LEFTMOUSE' and event.value=='PRESS' or event.type in ('WHEELUPMOUSE','WHEELDOWNMOUSE'):JOB['video_player'].hold_controls(True)
         return {'PASS_THROUGH'}
 
 class ToggleViewportPause(bpy.types.Operator):
@@ -766,8 +768,17 @@ class PlayVideo(bpy.types.Operator):
     def execute(self,context):
         try:
             player=JOB.get('video_player')
-            if player is None:raise ValueError('Select at least two collisions in the app and reopen with video enabled')
-            player.reconfigure(current_settings());player.play();return {'FINISHED'}
+            if player is None:
+                import dataclasses
+                from alice_renderer.runtime import prepare_video
+                from video_player import VideoPlayer
+                if any(not Path(p).is_file() for p in JOB.get('events',[])):raise ValueError('Selected events need track preparation. Use Play collisions in the desktop GUI to prepare and open the selected AO2D events.')
+                cfg,payload=prepare_video(dataclasses.replace(current_settings(),video_enabled=True),[Path(p) for p in JOB.get('events',[])],DEVICES,Path(JOB['output']))
+                JOB.update(payload);context.scene.alice_eve.video_enabled=True;context.scene.render.use_persistent_data=True
+                player=VideoPlayer(JOB,cfg.to_dict(),JOB.get('track_regions',{}));JOB['video_player']=player;player.set_frame(0)
+                if not bpy.app.background and not JOB.get('controls_watcher'):bpy.ops.alice_eve.watch_playback_controls('INVOKE_DEFAULT')
+            else:player.reconfigure(current_settings())
+            player.hold_controls(False);player.play();return {'FINISHED'}
         except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
 
 class StopVideo(bpy.types.Operator):
@@ -873,7 +884,7 @@ class EVEPanel(bpy.types.Panel):
             box=layout.box();box.label(text='Collision video');box.label(text=ui.video_status)
             row=box.row();row.operator('alice_eve.play_video');row.operator('alice_eve.stop_video')
             box.prop(ui,'pause_while_editing')
-            box.label(text='Playback waiting for sidebar editing' if JOB.get('video_player') and JOB['video_player'].held_at is not None else 'Move to the view to continue playback')
+            box.label(text='Playback waiting for sidebar editing' if JOB.get('video_player') and JOB['video_player'].held_at is not None else 'Play starts immediately; editing holds playback')
             for key in ('video_enabled','video_timing','video_interval_s','video_time_scale','video_speed_m_s','video_tower_rise_s','video_fps'):box.prop(ui,key)
         layout.operator('alice_eve.solid_surfaces');layout.operator('alice_eve.light_transparent_surfaces');layout.operator('alice_eve.restore_surface_exclusions');layout.operator('alice_eve.tpc_sectors_inner_wall');layout.operator('alice_eve.fast_surfaces');layout.operator('alice_eve.surround_lighting');layout.prop(ui,'viewport_renderer');layout.prop(ui,'viewport_samples')
         layout.prop(ui,'geometry_lod');layout.operator('alice_eve.full_geometry')

@@ -211,7 +211,7 @@ def render_events(blender: str, paths: list[Path], settings: RenderSettings, out
         progress(str(folder/'render.png'))
     return batch
 
-def launch_editor(blender, event_path, settings, output, *, library_path=None, fast=True, event_paths=None):
+def launch_editor(blender, event_path, settings, output, *, library_path=None, fast=True, event_paths=None,event_headers=None):
     """Launch native Blender editing; quality is chosen only by Render full."""
     import copy
     cfg=materialize(fast_editor_settings(settings) if fast else copy.deepcopy(settings))
@@ -227,13 +227,17 @@ def launch_editor(blender, event_path, settings, output, *, library_path=None, f
     if cfg.video_enabled:
         cfg,video_payload=prepare_video(cfg,list(event_paths or [event_path]),devices,Path(output))
         event_path=video_payload['events'][video_payload['video_plan']['entries'][0]['source_index']]
+    else:
+        from .video import header
+        selected_paths=list(event_paths or [event_path])
+        video_payload=dict(events=[str(Path(p).resolve()) for p in selected_paths],video_headers=event_headers if event_headers is not None else [header(load_event(p)) for p in selected_paths])
     errors=preflight(cfg,[load_event(event_path)],devices,Path(output))
     if errors:raise ValueError('\n'.join(errors))
     folder=Path(output)/('editor-'+time.strftime('%Y%m%d-%H%M%S')+'-'+os.urandom(3).hex());folder.mkdir()
     job=folder/'job.json'
     payload={'fast_interactive':fast,'event':str(Path(event_path).resolve()),'output':str(folder.resolve()),'settings':cfg.to_dict(),'preview':True,'blender':devices,'python':sys.executable,'render_output':str(Path(output).resolve()),'palettes':{name:sample(name) for name in names()}}
     payload.update(video_payload)
-    if cfg.video_enabled:payload['ffmpeg']=find_ffmpeg()
+    if len(video_payload.get('events',[]))>=2:payload['ffmpeg']=find_ffmpeg()
     from .scene_library import SceneLibrary
     library=SceneLibrary(library_path);payload['library_path']=str(library.path.resolve())
     job.write_text(json.dumps(payload,indent=2))

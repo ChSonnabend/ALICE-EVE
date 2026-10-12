@@ -6,6 +6,13 @@ opens a looping Blender session; **Preview video** exports a small MP4;
 **Render video** asks for resolution, samples, geometry detail and hardware,
 then writes `video.mp4` in the reported output folder.
 
+For interactive playback, use the **Play collisions…** button above the desktop
+event list. It enables playback directly, even when a loaded favourite has video
+disabled. Opening **Interactive scene…** also retains all selected event references;
+Blender's **Play collisions** can start playback later without reopening a prepared
+event dataset. AO2D events are materialized only as needed for the still scene;
+use desktop **Play collisions…** to prepare the entire selection for playback.
+
 The Blender **ALICE EVE → Collision video** box contains **Play collisions** and
 **Pause collisions**. Pause freezes immediately at the current frame. Play resumes;
 reaching the end loops to the first selected collision. Camera, lights, colours,
@@ -20,9 +27,11 @@ updates and live rendering together. These are local editing controls, so they d
 not pause an exported movie. Starting mouse track selection pauses collisions too,
 keeping the picked track/event stable until you press Play again.
 
-**Pause collisions while editing sidebar** is enabled by default. Hovering the
-sidebar holds the playback clock so dropdowns, object choices and colours remain
+**Pause collisions while editing sidebar** is enabled by default. Clicking a
+sidebar control holds the playback clock so dropdowns, object choices and colours remain
 available; moving back into the view resumes without jumping past the held time.
+Explicitly clicking **Play collisions** clears that hold and starts immediately,
+even with the pointer in the sidebar. Hovering alone does not pause playback.
 Colour-feature menus include the whole selected sequence. Detector data/object
 choices stay enabled if available anywhere in that sequence, even when a particular
 collision has no objects for that detector. Chosen modes and colour ranges persist;
