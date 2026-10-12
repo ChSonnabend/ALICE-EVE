@@ -28,6 +28,14 @@ inline void tpcTimeBasis(Writer& w,const Times& times,const GID& gid) {
   w.Key("tpc_cluster_time_basis");w.String(it->second[2]?"constrained both-side standalone TPC fit time":"matched-source or primary-vertex time hypothesis");
 }
 inline void point(Writer& w,const std::array<float,3>& p) {w.StartArray();for(float v:p)w.Double(v);w.EndArray();}
+template<class W,class Cluster> inline void cellGeometry(W& w,const Cluster& c) {
+  if(c.cellID<0 && c.detector!="CPV")return;
+  if(c.cellID>=0){w.Key("cell_id");w.Int(c.cellID);}w.Key("module_id");w.Int(c.moduleID);
+  w.Key("cell_geometry");w.StartObject();
+  w.Key("u_cm");w.StartArray();for(float v:c.cellU)w.Double(v);w.EndArray();
+  w.Key("v_cm");w.StartArray();for(float v:c.cellV)w.Double(v);w.EndArray();
+  w.Key("basis");w.String(c.detector=="CPV"?"CPV aligned module plane; one nominal pad footprint centred on a reconstructed cluster, not a resolved pad":c.detector=="PHS"?"PHOS 2.2 cm crystal face; O2 aligned local2Global differences":"EMCAL tile sizes in aligned supermodule Y/Z plane; display rectangle, cell taper omitted");w.EndObject();
+}
 inline void kin(Writer& w,const std::array<float,5>& values) {
   static const char* names[]={"eta","tan_lambda","phi","p","pt"};
   for(int j=0;j<5;++j)if(std::isfinite(values[j])){w.Key(names[j]);w.Double(j==2?std::atan2(std::sin(values[j]),std::cos(values[j])):values[j]);}
@@ -94,8 +102,10 @@ inline void write(std::ostream& output,o2::event_visualisation::EveWorkflowHelpe
     w.Key("id");w.String(cid.c_str());w.Key("detector");w.String(cluster.detector.c_str());w.Key("position");point(w,cluster.xyz);
     if(cluster.detector=="PHS"||cluster.detector=="EMC") {
       const auto& cell=event.getCalorimetersSpan()[cellIndex];
-      w.Key("measurement_kind");w.String("calorimeter_cell");w.Key("energy");if(std::isfinite(cell.getEnergy()))w.Double(cell.getEnergy());else w.Null();
+      w.Key("measurement_kind");w.String("calorimeter_cell");w.Key(cluster.detector=="PHS"?"amplitude":"energy");if(std::isfinite(cell.getEnergy()))w.Double(cell.getEnergy());else w.Null();
+      w.Key(cluster.detector=="PHS"?"amplitude_unit":"energy_unit");w.String(cluster.detector=="PHS"?"ADC":"GeV");
       w.Key("trigger_time_us");if(std::isfinite(cell.getTime()))w.Double(cell.getTime());else w.Null();
+      cellGeometry(w,cluster);
     } else {w.Key("measurement_kind");w.String(cluster.detector=="TRD"?"calibrated_tracklet":"cluster");}
     if(cluster.detector=="TPC" && std::all_of(cluster.sigmaPadXYZ.begin(),cluster.sigmaPadXYZ.end(),[](float v){return std::isfinite(v);}) && std::all_of(cluster.sigmaTimeXYZ.begin(),cluster.sigmaTimeXYZ.end(),[](float v){return std::isfinite(v);})) {
       w.Key("measurements");w.StartObject();

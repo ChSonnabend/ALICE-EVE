@@ -43,6 +43,9 @@ def current_settings():
             if item.name=='L3':cfg['magnet']=True
             else:cfg['geometry'].append(item.name)
         if item.name!='L3':cfg['detector_modes'][item.name]=item.mode
+        if item.name in ('EMC','PHS','CPV'):
+            cfg.setdefault('calorimeter_display',{})[item.name]=item.cell_display
+            cfg.setdefault('tower_height_scales',{})[item.name]=item.tower_height_scale
         cfg['geometry_display'][item.name]=item.display
         cfg['geometry_openings'][item.name]=item.opening
         cfg['geometry_opening_directions'][item.name]=item.opening_direction
@@ -58,6 +61,7 @@ def current_settings():
     cfg['colors']['tracks']=hex_color(ui.track_color);cfg['colors']['clusters']=hex_color(ui.cluster_color)
     cfg['colors_linear'].update(background=list(ui.background),tracks=list(ui.track_color),clusters=list(ui.cluster_color))
     cfg['tpc_cluster_profile']=ui.tpc_cluster_profile;cfg['tpc_profile_scale']=ui.tpc_profile_scale;cfg['tpc_profile_thickness_cm']=ui.tpc_profile_thickness_cm
+    for key in ('tower_fixed_height_cm','tower_max_height_cm','tower_width_scale','tower_direction'):cfg[key]=getattr(ui,key)
     cfg['track_radius_cm']=ui.track_width_cm/2;cfg['cluster_radius_cm']=ui.cluster_radius_cm;cfg['clip_tracks']=ui.clip_tracks;cfg['include_ambiguous_tracks']=ui.include_ambiguous_tracks
     cfg['highlight_track_ids']=parse_track_ids(ui.highlight_ids);cfg['highlight_track_radius_cm']=ui.highlight_width_cm/2;cfg['highlight_cluster_radius_cm']=ui.highlight_cluster_radius_cm;cfg['highlight_override_color']=ui.highlight_override;cfg['highlight_track_color']=hex_color(ui.highlight_track_color);cfg['highlight_cluster_color']=hex_color(ui.highlight_cluster_color)
     cfg['geometry_lod']=ui.geometry_lod
@@ -73,7 +77,7 @@ def current_settings():
     return RenderSettings(**cfg).validate()
 
 def track_signature(ui):
-    return (tuple((i.name,i.mode) for i in ui.detectors if i.data and i.data_available),tuple(i.name for i in ui.detectors if i.visible and i.geometry_available and i.name!='L3'),ui.track_width_cm,ui.cluster_radius_cm,ui.tpc_cluster_profile,ui.tpc_profile_scale,ui.tpc_profile_thickness_cm,ui.clip_tracks,ui.include_ambiguous_tracks,ui.highlight_ids,ui.highlight_width_cm,ui.highlight_cluster_radius_cm,ui.highlight_override,tuple(ui.highlight_track_color),tuple(ui.highlight_cluster_color))
+    return (tuple((i.name,i.mode,i.cell_display,i.tower_height_scale) for i in ui.detectors if i.data and i.data_available),tuple(i.name for i in ui.detectors if i.visible and i.geometry_available and i.name!='L3'),ui.track_width_cm,ui.cluster_radius_cm,ui.tpc_cluster_profile,ui.tpc_profile_scale,ui.tpc_profile_thickness_cm,ui.clip_tracks,ui.include_ambiguous_tracks,ui.highlight_ids,ui.highlight_width_cm,ui.highlight_cluster_radius_cm,ui.highlight_override,tuple(ui.highlight_track_color),tuple(ui.highlight_cluster_color),ui.tower_fixed_height_cm,ui.tower_max_height_cm,ui.tower_width_scale,ui.tower_direction)
 
 def set_all_modes(self,context):
     if not JOB:return
@@ -143,7 +147,7 @@ def appearance_update(self,context):
         if bsdf:bsdf.inputs['Roughness'].default_value=ui.roughness;bsdf.inputs['Metallic'].default_value=ui.metallic
     for obj in context.scene.objects:
         if obj.type=='MESH':
-            for p in obj.data.polygons:p.use_smooth=ui.shading=='smooth' and ('alice_lod' not in obj or obj.get('alice_structural_smooth',False))
+            for p in obj.data.polygons:p.use_smooth=not obj.get('alice_towers',False) and ui.shading=='smooth' and ('alice_lod' not in obj or obj.get('alice_structural_smooth',False))
     for item in ui.detectors:
         coll=bpy.data.collections.get(item.name)
         if coll:
@@ -227,6 +231,11 @@ class RefreshComponents(bpy.types.Operator):
         except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
 
 class DetectorSettings(bpy.types.PropertyGroup):
+    tower_count: IntProperty(default=0)
+    tower_point_fallbacks: IntProperty(default=0)
+    tower_nominal_footprints: IntProperty(default=0)
+    cell_display: EnumProperty(name='Cells / clusters',items=[('points','Points','Default point glyphs'),('signal towers','Signal towers','Height from measured EMC/PHOS energy or CPV amplitude; missing/nonpositive signals remain points'),('fixed towers','Fixed-height towers','Display glyphs with a fixed height; no implied signal magnitude')],default='points',update=selection_update)
+    tower_height_scale: FloatProperty(name='Tower height scale',description='cm per GeV for EMC; PHOS: per input unit (raw ADC or calibrated GeV); CPV: per native amplitude',min=.0001,max=10000,default=20.,update=selection_update)
     components: CollectionProperty(type=GeometryComponent)
     show_components: BoolProperty(name='Detector components',default=False)
     component_filter: StringProperty(name='Filter components')
@@ -270,6 +279,10 @@ def viewport_renderer_update(self,context):
     use_scene_lighting()
 
 class SceneSettings(bpy.types.PropertyGroup):
+    tower_fixed_height_cm: FloatProperty(name='Fixed tower height (cm)',min=.001,max=10000,default=10.,update=selection_update)
+    tower_max_height_cm: FloatProperty(name='Maximum tower height (cm)',min=.001,max=10000,default=100.,update=selection_update)
+    tower_width_scale: FloatProperty(name='Tower footprint scale',min=.001,max=10,default=.95,update=selection_update)
+    tower_direction: EnumProperty(name='Tower direction',items=[('inward','Towards beam','Extend from the measured position towards the beam'),('outward','Away from beam','Extend from the measured position away from the beam')],default='inward',update=selection_update)
     viewport_renderer: EnumProperty(name='Viewport renderer',items=[('BLENDER_EEVEE','Fast (Eevee)','Responsive preview; transparency and lighting are approximate'),('CYCLES','Accurate (Cycles)','Progressive preview using the final renderer; slower on CPU')],default='CYCLES',update=viewport_renderer_update)
     detectors: CollectionProperty(type=DetectorSettings)
     geometry_lod: EnumProperty(name='Geometry detail',items=[('full','Full aligned surfaces','Preserve the actual detector geometry'),('proxy','Cached approximate surfaces','Reviewed low-complexity detector surfaces; no source mesh import'),('structural','Large surfaces (cached, fast)','Prebuilt ITS/TPC display surfaces; no heavy source import'),('simplified','Coarse cells','Reduce complexity; approximate bounding cells')])
@@ -344,7 +357,11 @@ class ApplyData(bpy.types.Operator):
                 from worker import collection
                 collection('Tracks')
                 context.scene.alice_eve.displayed_tracks=0
-            clusters(cs,cfg);JOB['applied_track_signature']=track_signature(context.scene.alice_eve);appearance_update(self,context)
+            cluster_legend=clusters(cs,cfg)
+            for item in context.scene.alice_eve.detectors:
+                info=cluster_legend.get('calorimeter_towers',{}).get(item.name,{})
+                item.tower_count=info.get('towers',0);item.tower_point_fallbacks=info.get('point_fallbacks',0);item.tower_nominal_footprints=info.get('approximate_footprints',0)
+            JOB['applied_track_signature']=track_signature(context.scene.alice_eve);appearance_update(self,context)
             context.scene.alice_eve.displayed_clusters=len(cs)
             self.report({'INFO'},'Data selection and fixed colour ranges applied')
             return {'FINISHED'}
@@ -757,6 +774,8 @@ class EVEPanel(bpy.types.Panel):
         layout.operator('alice_eve.opaque_geometry');layout.operator('alice_eve.apply_geometry')
         layout.label(text=ui.render_status);row=layout.row();row.enabled=False;row.prop(ui,'render_percent',slider=True)
         layout.prop(ui,'tpc_cluster_profile');layout.prop(ui,'tpc_profile_scale');layout.prop(ui,'tpc_profile_thickness_cm')
+        tower_box=layout.box();tower_box.label(text='Calorimeter towers (per detector below)')
+        for key in ('tower_fixed_height_cm','tower_max_height_cm','tower_width_scale','tower_direction'):tower_box.prop(ui,key)
         layout.prop(ui,'mode');layout.prop(ui,'track_width_cm');layout.prop(ui,'cluster_radius_cm');layout.prop(ui,'clip_tracks');layout.prop(ui,'track_color');layout.prop(ui,'cluster_color')
         box=layout.box();box.label(text='Track emphasis / decay chain');box.prop(ui,'highlight_ids')
         if ui.picking_active:box.operator('alice_eve.stop_picking',text='Stop picking (Esc)')
@@ -768,6 +787,13 @@ class EVEPanel(bpy.types.Panel):
         for item in ui.detectors:
             box=layout.box();box.label(text=f'{item.name}: {item.event_track_count} tracks / {item.event_cluster_count} clusters' if item.data_available else item.name)
             row=box.row();row.enabled=item.data_available;row.prop(item,'data');row.prop(item,'mode')
+            if item.name in ('EMC','PHS','CPV'):
+                row=box.row();row.enabled=item.data_available;row.prop(item,'cell_display')
+                if item.cell_display=='signal towers':box.prop(item,'tower_height_scale',text='Height (cm / input unit)' if item.name=='PHS' else 'Height (cm / amplitude)' if item.name=='CPV' else 'Height (cm / GeV)')
+                if item.cell_display!='points':
+                    box.label(text=f'{item.tower_count} towers / {item.tower_point_fallbacks} point fallbacks')
+                    if item.tower_nominal_footprints:box.label(text=f'{item.tower_nominal_footprints} nominal footprints (older export)')
+                if item.name=='CPV':box.label(text='CPV reconstructed clusters remain cluster glyphs')
             row=box.row();row.enabled=item.geometry_available;row.prop(item,'visible')
             box.prop(item,'asset_path')
             if not item.geometry_available:box.label(text='Choose an aligned asset to add this surface')
@@ -823,6 +849,7 @@ def start_editor(job,event,metadata):
     # Suppress updates during property initialization.
     from worker import rgb
     ui.tpc_cluster_profile=settings.get('tpc_cluster_profile','sphere');ui.tpc_profile_scale=settings.get('tpc_profile_scale',1.);ui.tpc_profile_thickness_cm=settings.get('tpc_profile_thickness_cm',.03)
+    for key,default in (('tower_fixed_height_cm',10.),('tower_max_height_cm',100.),('tower_width_scale',.95),('tower_direction','inward')):setattr(ui,key,settings.get(key,default))
     ui.cluster_radius_cm=settings['cluster_radius_cm'];ui.highlight_ids=', '.join(settings.get('highlight_track_ids',[]));ui.highlight_width_cm=settings.get('highlight_track_radius_cm',.35)*2;ui.highlight_cluster_radius_cm=settings.get('highlight_cluster_radius_cm',1.);ui.highlight_override=settings.get('highlight_override_color',True);ui.highlight_track_color=rgb(settings.get('highlight_track_color','#ffcc33'));ui.highlight_cluster_color=rgb(settings.get('highlight_cluster_color','#ff6633'))
     ui.track_width_cm=settings['track_radius_cm']*2;ui.clip_tracks=settings.get('clip_tracks',True);ui.include_ambiguous_tracks=settings.get('include_ambiguous_tracks',True)
     ui.geometry_lod=settings.get('geometry_lod','full')
@@ -839,6 +866,11 @@ def start_editor(job,event,metadata):
         item.display=settings.get('geometry_display',{}).get(name,'surfaces')
         item.detail='inherit' if is_schematic(settings,name) else settings.get('geometry_lods',{}).get(name,'inherit')
         item.event_track_count=track_counts.get(name,0);item.event_cluster_count=cluster_counts.get(name,0)
+        if name in ('EMC','PHS','CPV'):
+            item.cell_display=settings.get('calorimeter_display',{}).get(name,'points')
+            item.tower_height_scale=settings.get('tower_height_scales',{}).get(name,20. if name=='EMC' else .2)
+            info=metadata.get('cluster_legend',{}).get('calorimeter_towers',{}).get(name,{})
+            item.tower_count=info.get('towers',0);item.tower_point_fallbacks=info.get('point_fallbacks',0);item.tower_nominal_footprints=info.get('approximate_footprints',0)
         item.opening=settings['geometry_openings'].get(name,180 if settings['cutaway'] else 0);item.opacity=settings['geometry_opacities'].get(name,settings['geometry_opacity']);item.color=settings.get('colors_linear',{}).get('magnet' if name=='L3' else name,rgb(settings['colors'].get('magnet' if name=='L3' else name,'#243a82')))
         item.opening_direction=settings.get('geometry_opening_directions',{}).get(name,-90.);item.exclusions=', '.join(settings.get('geometry_exclusions',{}).get(name,[]))
         populate_components(item,settings.get('geometry_components',{}).get(name,{}))

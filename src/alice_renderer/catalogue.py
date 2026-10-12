@@ -69,7 +69,8 @@ class Catalogue:
         cache.mkdir(parents=True,exist_ok=True)
         key = fingerprint(source)
         destination = cache/key
-        if (destination/'catalogue.sqlite').exists(): return cls(destination)
+        if (destination/'catalogue.sqlite').exists():
+            existing=cls(destination);existing.refresh_calorimeter_capabilities(progress,cancelled);return existing
         staging = Path(tempfile.mkdtemp(prefix='index-',dir=cache))
         connection=None
         try:
@@ -91,6 +92,7 @@ class Catalogue:
             if not count: raise ValueError('No events found; reconstruction/export may have produced no collisions')
             connection.execute('INSERT INTO metadata VALUES (?,?)',('source',str(source.resolve())))
             connection.execute('INSERT INTO metadata VALUES (?,?)',('source_fingerprint',key))
+            connection.execute('INSERT INTO metadata VALUES (?,?)',('calorimeter_capabilities','2'))
             connection.commit(); connection.close();connection=None
             if source.is_file() and fingerprint(source)!=key: raise ValueError('Input changed while being read; wait for copying/download to finish')
             if destination.exists(): shutil.rmtree(staging)
@@ -101,6 +103,27 @@ class Catalogue:
             if connection is not None:connection.close()
             shutil.rmtree(staging,ignore_errors=True)
             raise
+
+    def refresh_calorimeter_capabilities(self,progress=lambda s:None,cancelled=lambda:False):
+        """Update old scalar indices once, retaining their cached event payloads."""
+        import ijson
+        from .calorimeter_towers import CALORIMETERS
+        from .cluster_colors import value
+        with sqlite3.connect(self.db) as db:
+            if db.execute("SELECT 1 FROM metadata WHERE key='calorimeter_capabilities' AND value='2'").fetchone():return
+            progress('Checking existing calorimeter energy / amplitude fields')
+            for ordinal,detectors,count,filename,fields in db.execute('SELECT ordinal,detectors,nclusters,filename,cluster_fields FROM events').fetchall():
+                if cancelled():raise InterruptedError('Calorimeter indexing cancelled')
+                if not count or not set(json.loads(detectors)).intersection(CALORIMETERS):continue
+                supported=set(json.loads(fields))-{'energy','amplitude'};path=self.folder/filename
+                with gzip.open(path,'rb') as stream:
+                    for index,cluster in enumerate(ijson.items(stream,'clusters.item',use_float=True)):
+                        if index%10000==0 and cancelled():raise InterruptedError('Calorimeter indexing cancelled')
+                        for field in ('energy','amplitude'):
+                            if field not in supported and value(cluster,field) is not None:supported.add(field)
+                        if {'energy','amplitude'}<=supported:break
+                db.execute('UPDATE events SET cluster_fields=? WHERE ordinal=?',(json.dumps(sorted(supported)),ordinal))
+            db.execute("INSERT OR REPLACE INTO metadata VALUES ('calorimeter_capabilities','2')")
 
     def rows(self) -> list[dict]:
         with sqlite3.connect(self.db) as db:

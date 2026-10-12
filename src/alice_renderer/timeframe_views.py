@@ -25,13 +25,13 @@ def export_views(source: Path, output: Path) -> dict:
                         identity=tuple(metadata[k] for k in ('run','timeframe','orbit'))
                         if identity in identities:raise ValueError('Duplicate timeframe in spatial archive')
                         identities.add(identity)
-                    elif prefix=='spatial_objects.item' and event=='start_map':obj={}
+                    elif prefix=='spatial_objects.item' and event=='start_map':
+                        builder=ijson.ObjectBuilder();builder.event(event,value)
+                    elif prefix=='spatial_objects.item' and event=='map_key':builder.event(event,value)
                     elif prefix.startswith('spatial_objects.item.'):
-                        key=prefix.removeprefix('spatial_objects.item.')
-                        if key=='position' and event=='start_array':obj['position']=[]
-                        elif key=='position.item' and event in ('number','null'):obj['position'].append(value)
-                        elif '.' not in key and event in ('string','number','boolean','null'):obj[key]=value
+                        builder.event(event,value)
                     elif prefix=='spatial_objects.item' and event=='end_map':
+                        builder.event(event,value);obj=builder.value
                         detector=obj['detector']
                         if detector not in files:
                             path=temporary/f'{len(identities):08d}-{detector}.jsonl.gz';stream=gzip.open(path,'wt',compresslevel=1)

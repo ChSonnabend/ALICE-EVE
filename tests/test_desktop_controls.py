@@ -25,6 +25,21 @@ def settle(w,application):
     application.processEvents()
     assert not (w.task and w.task.isRunning())
 
+def test_calorimeter_controls_round_trip_into_exported_scene(window):
+    from alice_renderer.scene_config import recipe,resolve_settings
+    w,application,root=window
+    w.calorimeter_displays['EMC'].setCurrentText('signal towers')
+    w.calorimeter_displays['PHS'].setCurrentText('fixed towers')
+    w.calorimeter_displays['CPV'].setCurrentText('signal towers')
+    w.tower_scales['EMC'].setValue(27);w.tower_scales['CPV'].setValue(.3)
+    w.tower_fixed_height.setValue(18);w.tower_max_height.setValue(150);w.tower_width_scale.setValue(.8);w.tower_direction.setCurrentText('outward')
+    cfg=w.settings();cfg.schematic=True
+    data=recipe(cfg);restored=resolve_settings(data,'unused.json',asset_overrides=cfg.geometry_assets);w.apply_scene(restored)
+    assert w.settings().calorimeter_display=={'EMC':'signal towers','PHS':'fixed towers','CPV':'signal towers'}
+    assert w.settings().tower_height_scales['EMC']==27 and w.settings().tower_height_scales['CPV']==.3
+    assert w.settings().tower_fixed_height_cm==18 and w.settings().tower_width_scale==.8
+    assert w.settings().tower_direction=='outward'
+
 
 def test_pasted_folder_loaded_by_enter_action_without_file_dialog(window,monkeypatch):
     w,application,root=window;folder=root/'events';generate(folder/'events.jsonl')

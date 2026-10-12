@@ -6,6 +6,7 @@
 #include "DataFormatsFV0/RecPoints.h"
 #include "DataFormatsFDD/RecPoint.h"
 #include "DataFormatsCPV/Cluster.h"
+#include "CPVBase/Geometry.h"
 #include "HMPIDBase/Param.h"
 #include "DataFormatsHMP/Cluster.h"
 #include "DataFormatsTRD/Tracklet64.h"
@@ -34,14 +35,19 @@ inline uint64_t writeTimeframe(const std::filesystem::path& path,o2::event_visua
   w.Key("spatial_objects");w.StartArray();
   uint64_t invalidSpatial=0;
   auto add=[&](const char* detector,size_t index,float x,float y,float z,const char* basis,
-              double energy=std::numeric_limits<double>::quiet_NaN(),double time=std::numeric_limits<double>::quiet_NaN()){
+              double energy=std::numeric_limits<double>::quiet_NaN(),double time=std::numeric_limits<double>::quiet_NaN(),
+              const decltype(helper.mExportClusters)::value_type* footprint=nullptr,
+              double amplitude=std::numeric_limits<double>::quiet_NaN(),int module=-1){
     bool valid=std::isfinite(x)&&std::isfinite(y)&&std::isfinite(z);if(!valid)++invalidSpatial;
     w.StartObject();w.Key("detector");w.String(detector);w.Key("index");w.Uint64(index);
     w.Key("position");w.StartArray();for(double value:{double(x),double(y),double(z)}){if(std::isfinite(value))w.Double(value);else w.Null();}w.EndArray();
     w.Key("coordinate_status");w.String(valid?"valid":"nonfinite_conversion_not_renderable");
     w.Key("coordinate_basis");w.String(basis);
-    if(std::isfinite(energy)){w.Key("measurement_kind");w.String("calorimeter_cell");w.Key("energy");w.Double(energy);}
+    if(std::isfinite(energy)){bool phos=std::string(detector)=="PHS";w.Key("measurement_kind");w.String("calorimeter_cell");w.Key(phos?"amplitude":"energy");w.Double(energy);w.Key(phos?"amplitude_unit":"energy_unit");w.String(phos?"ADC":"GeV");}
     if(std::isfinite(time)){w.Key("trigger_time_us");w.Double(time);}
+    if(footprint)cellGeometry(w,*footprint);
+    if(std::isfinite(amplitude)){w.Key("measurement_kind");w.String("cpv_cluster");w.Key("amplitude");w.Double(amplitude);w.Key("amplitude_basis");w.String("O2 CPV reconstructed cluster getEnergy(), native signal units; not calorimeter GeV");}
+    if(module>=0){w.Key("module_id");w.Int(module);}
     w.EndObject();};
   size_t index=0;
   if(mask[GID::ITS])for(const auto& c:helper.mITSClustersArray.getClusters()){
@@ -64,11 +70,16 @@ inline uint64_t writeTimeframe(const std::filesystem::path& path,o2::event_visua
     std::string node="/cave_1/barrel_1/CPV_"+std::to_string(int(c.getModule()));
     if(!gGeoManager->cd(node.c_str()))throw std::runtime_error("Aligned CPV module path is missing");
     float x,z;c.getLocalPosition(x,z);double local[]={x,0.,z},global[3];gGeoManager->GetCurrentMatrix()->LocalToMaster(local,global);
-    add("CPV",index++,global[0],global[1],global[2],"O2 CPV local (x,0,z) module-plane convention; complete aligned module transformation");}}
+    decltype(helper.mExportClusters)::value_type footprint{};footprint.detector="CPV";footprint.moduleID=c.getModule();
+    double localU[]={o2::cpv::Geometry::kCPVPadSizePhi,0.,0.},localV[]={0.,0.,o2::cpv::Geometry::kCPVPadSizeZ},globalU[3],globalV[3];
+    gGeoManager->GetCurrentMatrix()->LocalToMasterVect(localU,globalU);gGeoManager->GetCurrentMatrix()->LocalToMasterVect(localV,globalV);
+    for(int axis=0;axis<3;++axis){footprint.cellU[axis]=globalU[axis];footprint.cellV[axis]=globalV[axis];}
+      add("CPV",index++,global[0],global[1],global[2],"O2 CPV local (x,0,z) module-plane convention; complete aligned module transformation",
+          std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::quiet_NaN(),&footprint,c.getEnergy());}}
   if(mask[GID::PHS])for(size_t i=0;i<reco.getPHOSTriggers().size();++i)helper.drawPHS(GID(i,GID::PHS));
   if(mask[GID::EMC])for(size_t i=0;i<reco.getEMCALTriggers().size();++i)helper.drawEMC(GID(i,GID::EMC));
   index=0;for(const auto& c:helper.mExportClusters){const auto& cell=helper.mEvent.getCalorimetersSpan()[index];
-    add(c.detector.c_str(),index++,c.xyz[0],c.xyz[1],c.xyz[2],"Calorimeter cell, not a fitted track cluster; O2 cell converter and aligned geometry",cell.getEnergy(),cell.getTime());}
+    add(c.detector.c_str(),index++,c.xyz[0],c.xyz[1],c.xyz[2],"Calorimeter cell, not a fitted track cluster; O2 cell converter and aligned geometry",cell.getEnergy(),cell.getTime(),&c);}
   helper.clear();
   w.EndArray();
   // An unassociated TPC cluster has no measured collision t0. Preserve native

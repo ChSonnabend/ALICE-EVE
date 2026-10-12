@@ -189,15 +189,35 @@ def clusters(objects,settings):
     from mathutils import Matrix
     mode=settings.get('tpc_cluster_profile','sphere')
     legend['tpc_profile']=mode;legend['profiled_clusters']=0;legend['missing_tpc_profiles']=0
+    from alice_renderer.calorimeter_towers import tower,report_entry,DEFAULT_SCALES
+    legend['calorimeter_towers']={name:dict(report_entry(),display=display,
+        height_scale=settings.get('tower_height_scales',{}).get(name,DEFAULT_SCALES[name]),signal_units={})
+        for name,display in settings.get('calorimeter_display',{}).items() if display!='points'}
+    legend['tower_direction']=settings.get('tower_direction','inward')
+    legend['tower_max_height_cm']=settings.get('tower_max_height_cm',100.)
     expanded={}
     for key,group in groups.items():
-        plain=[];shaped=[]
+        plain=[];shaped=[];tower_vertices=[];tower_faces=[]
         for c in group['items']:
+            glyph=tower(c,settings)
+            tower_report=legend['calorimeter_towers'].get(c['detector'])
+            if glyph:
+                offset=len(tower_vertices);tower_vertices.extend(glyph['vertices']);tower_faces.extend(tuple(offset+i for i in f) for f in glyph['faces'])
+                tower_report['towers']+=1;tower_report['approximate_footprints']+=int(glyph['approximate']);tower_report['clipped_heights']+=int(glyph['clipped'])
+                kinds=tower_report['measurement_kinds'];kind=glyph['measurement_kind'];kinds[kind]=kinds.get(kind,0)+1
+                units=tower_report['signal_units'];unit=glyph['signal_unit'];units[unit]=units.get(unit,0)+1
+                continue
+            if tower_report is not None:tower_report['point_fallbacks']+=1
             axes=profile_axes(c,settings.get('tpc_profile_thickness_cm',.03)) if mode!='sphere' else None
             if axes:shaped.append((c,axes));legend['profiled_clusters']+=1
             else:
                 plain.append(c)
                 if mode!='sphere' and c['detector']=='TPC':legend['missing_tpc_profiles']+=1
+        if tower_vertices:
+            mesh=bpy.data.meshes.new('Cell towers '+key);mesh.from_pydata(tower_vertices,[],tower_faces);mesh.update()
+            obj=bpy.data.objects.new('Cell towers '+key,mesh);coll.objects.link(obj)
+            obj['alice_highlighted']=group['highlighted'];obj['alice_towers']=True
+            mesh.materials.append(materials('Cluster towers '+key,group['color'],emission=settings.get('cluster_emission',1.),settings=settings))
         if plain:expanded[key]=dict(group,items=plain)
         # Gaussian display approximation: nested 0.5, 1, 1.5, 2, 2.5, 3 sigma
         # translucent shells with exp(-r²/2) weights; not a fitted 3D density.

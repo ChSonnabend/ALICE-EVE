@@ -38,7 +38,7 @@ def prepare(reference,destination,templates):
     text,n=re.subn(r'  void drawAOD[^\n]*\n','',text)
     if n!=3:raise ValueError('AOD method declarations anchor mismatch')
     extra='''
-  struct ExportCluster {std::array<float,3> xyz;std::string detector;int track;float sigmaPad=0,sigmaTime=0,qTot=0,qMax=0;std::array<float,3> sigmaPadXYZ{},sigmaTimeXYZ{};};
+  struct ExportCluster {std::array<float,3> xyz;std::string detector;int track;float sigmaPad=0,sigmaTime=0,qTot=0,qMax=0;std::array<float,3> sigmaPadXYZ{},sigmaTimeXYZ{};std::array<float,3> cellU{},cellV{};int cellID=-1,moduleID=-1;};
   std::vector<ExportCluster> mExportClusters;
   std::vector<GID> mExportTrackGIDs;
   GID mExportCurrentGID;
@@ -125,8 +125,19 @@ def prepare(reference,destination,templates):
         return '\n  if(!mExportTPCMap)throw std::runtime_error("Calibrated per-TF TPC map is missing");'+section
     text=function(text,'void EveWorkflowHelper::drawTPCClusters(',tpc)
     text=function(text,'void EveWorkflowHelper::drawHMP(',lambda s:replace(s,'drawGlobalPoint(vec3, gid, time);','float xyz[]={float(vec3.X()),float(vec3.Y()),float(vec3.Z())};recordPoint(xyz,"HMP",false);'))
-    text=function(text,'void EveWorkflowHelper::drawPHS(',lambda s:replace(s,'auto vCalo = mEvent.addCalo(','float xyz[]={float(gPos.X()),float(gPos.Y()),float(gPos.Z())};recordPoint(xyz,"PHS",false);\n    auto vCalo = mEvent.addCalo('))
-    text=function(text,'void EveWorkflowHelper::drawEMC(',lambda s:replace(s,'auto vCalo = mEvent.addCalo(','float xyz[]={float(gPos[0]),float(gPos[1]),float(gPos[2])};recordPoint(xyz,"EMC",false);\n    auto vCalo = mEvent.addCalo('))
+    text=function(text,'void EveWorkflowHelper::drawPHS(',lambda s:replace(replace(s,'  for (const auto& cell : cellsForTrigger) {','  for (const auto& cell : cellsForTrigger) {\n    if(cell.getTRU())continue;'),'auto vCalo = mEvent.addCalo(','''float xyz[]={float(gPos.X()),float(gPos.Y()),float(gPos.Z())};recordPoint(xyz,"PHS",false);
+    TVector3 alongX,alongZ;
+    mPHOSGeom->local2Global(relativeLocalPositionInModule[0],x+2.2f,z,alongX);
+    mPHOSGeom->local2Global(relativeLocalPositionInModule[0],x,z+2.2f,alongZ);
+    auto& footprint=mExportClusters.back();footprint.cellID=cell.getAbsId();footprint.moduleID=relativeLocalPositionInModule[0];
+    for(int axis=0;axis<3;++axis){footprint.cellU[axis]=alongX[axis]-gPos[axis];footprint.cellV[axis]=alongZ[axis]-gPos[axis];}
+    auto vCalo = mEvent.addCalo('''))
+    text=function(text,'void EveWorkflowHelper::drawEMC(',lambda s:replace(s,'auto vCalo = mEvent.addCalo(','''float xyz[]={float(gPos[0]),float(gPos[1]),float(gPos[2])};recordPoint(xyz,"EMC",false);
+    double localU[]={0.,mEMCALGeom->GetPhiTileSize(),0.},localV[]={0.,0.,mEMCALGeom->GetEtaTileSize()},globalU[3],globalV[3];
+    matrix->LocalToMasterVect(localU,globalU);matrix->LocalToMasterVect(localV,globalV);
+    auto& footprint=mExportClusters.back();footprint.cellID=id;footprint.moduleID=sm_id;
+    for(int axis=0;axis<3;++axis){footprint.cellU[axis]=globalU[axis];footprint.cellV[axis]=globalV[axis];}
+    auto vCalo = mEvent.addCalo('''))
     text,n=re.subn(r'    if \(std::abs\(cellTime\) > conf.EMCCellTimeMax\) {.*?    }\n    if \(cellEnergy < conf.EMCCellEnergyMin\) {.*?    }','',text,flags=re.S)
     if n!=1:raise ValueError('EMCAL display cut anchor mismatch')
     instrument={

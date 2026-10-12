@@ -74,6 +74,9 @@ def validate_event(raw: dict) -> dict:
         cluster['id'] = str(cluster.get('id',index))
         cluster['detector'] = detector(cluster['detector'])
         cluster['position'] = xyz(cluster['position'])
+        if 'cell_geometry' in cluster:
+            from .calorimeter_towers import validate_cell_geometry
+            validate_cell_geometry(cluster['cell_geometry'])
         if 'tpc_profile' in cluster:
             from .cluster_profiles import profile_axes
             profile_axes(cluster,.03)
@@ -155,6 +158,12 @@ class RenderSettings:
     tpc_cluster_profile: str = 'sphere'
     tpc_profile_scale: float = 1.
     tpc_profile_thickness_cm: float = .03
+    calorimeter_display: dict = field(default_factory=dict)
+    tower_height_scales: dict = field(default_factory=lambda:{'EMC':20.,'PHS':.2,'CPV':.2})
+    tower_fixed_height_cm: float = 10.
+    tower_max_height_cm: float = 100.
+    tower_width_scale: float = .95
+    tower_direction: str = 'inward'
     camera: str = 'perspective'
     camera_lens_mm: float = 48.
     camera_orbit_axis: str = 'Y'
@@ -194,6 +203,13 @@ class RenderSettings:
         {'position_m':[0.,0.,-10.], 'energy':1000., 'size_m':8., 'color':'#ffffff'}])
 
     def validate(self):
+        from .calorimeter_towers import CALORIMETERS,DISPLAY_MODES
+        if not isinstance(self.calorimeter_display,dict) or any(name not in CALORIMETERS or mode not in DISPLAY_MODES for name,mode in self.calorimeter_display.items()):raise ValueError('Invalid calorimeter display choice')
+        if not isinstance(self.tower_height_scales,dict) or any(name not in CALORIMETERS or isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) or v<=0 for name,v in self.tower_height_scales.items()):raise ValueError('Tower height scales must be positive and finite')
+        for key in ('tower_fixed_height_cm','tower_max_height_cm','tower_width_scale'):
+            v=getattr(self,key)
+            if isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) or v<=0:raise ValueError('Invalid '+key)
+        if self.tower_direction not in ('inward','outward'):raise ValueError('Invalid tower direction')
         if not isinstance(self.data_glow_lighting,bool):raise ValueError('Data glow lighting must be a boolean')
         if not isinstance(self.include_ambiguous_tracks,bool):raise ValueError('Ambiguous-track selection must be a boolean')
         if not isinstance(self.clip_tracks,bool):raise ValueError('Track clipping must be a boolean')

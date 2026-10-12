@@ -214,6 +214,19 @@ class Window(QMainWindow):
         self.exposure=number(self.base.exposure,-20,20,2);layout.addRow('Exposure (stops)',self.exposure)
         self.track_emission=number(self.base.track_emission,0,100,2);self.cluster_emission=number(self.base.cluster_emission,0,100,2);layout.addRow('Track glow',self.track_emission);layout.addRow('Cluster glow',self.cluster_emission)
         self.tpc_profile=QComboBox();self.tpc_profile.addItems(['sphere','ellipse','gaussian']);self.tpc_profile.setCurrentText(self.base.tpc_cluster_profile);layout.addRow('TPC cluster profile',self.tpc_profile)
+        from .calorimeter_towers import CALORIMETERS,DISPLAY_MODES,DEFAULT_SCALES
+        self.calorimeter_displays={};self.tower_scales={}
+        for name in CALORIMETERS:
+            choice=QComboBox();choice.addItems(DISPLAY_MODES);choice.setCurrentText(self.base.calorimeter_display.get(name,'points'))
+            scale=number(self.base.tower_height_scales.get(name,DEFAULT_SCALES[name]),.0001,10000,4)
+            self.calorimeter_displays[name]=choice;self.tower_scales[name]=scale
+            layout.addRow(('PHOS' if name=='PHS' else name)+' cells / clusters',choice)
+            layout.addRow(name+' tower height (cm / '+('input unit)' if name=='PHS' else 'amplitude)' if name=='CPV' else 'GeV)'),scale)
+        self.tower_direction=QComboBox();self.tower_direction.addItems(['inward','outward']);self.tower_direction.setCurrentText(self.base.tower_direction);layout.addRow('Tower direction',self.tower_direction)
+        self.tower_fixed_height=number(self.base.tower_fixed_height_cm,.001,10000,3);layout.addRow('Fixed tower height (cm)',self.tower_fixed_height)
+        self.tower_max_height=number(self.base.tower_max_height_cm,.001,10000,3);layout.addRow('Maximum tower height (cm)',self.tower_max_height)
+        self.tower_width_scale=number(self.base.tower_width_scale,.001,10,3);layout.addRow('Tower footprint scale',self.tower_width_scale)
+        note=QLabel('Enable clusters or both for tower data. Heights use EMC energy (GeV), PHOS input signal (raw O2 cells: ADC counts; calibrated inputs: GeV), or CPV amplitude. Missing/nonpositive signals remain points. Fixed towers are display glyphs. CPV exports currently contain reconstructed clusters, not individual pads. Older exports use nominal footprints; aligned cell frames are used when supplied.');note.setWordWrap(True);layout.addRow(note)
         self.tpc_profile.setToolTip('Measured pad/time RMS; Gaussian uses weighted translucent shells. Missing widths retain spheres.')
         self.tpc_profile_scale=number(self.base.tpc_profile_scale,.01,100,2);layout.addRow('TPC profile sigma scale',self.tpc_profile_scale)
         self.tpc_profile_thickness=number(self.base.tpc_profile_thickness_cm,.001,10,3);layout.addRow('TPC profile display thickness (cm)',self.tpc_profile_thickness)
@@ -345,6 +358,9 @@ class Window(QMainWindow):
         cfg.geometry_lod=self.geometry_lod.currentText()
         cfg.view_transform=self.view_transform.currentText();cfg.exposure=self.exposure.value();cfg.track_emission=self.track_emission.value();cfg.cluster_emission=self.cluster_emission.value()
         cfg.tpc_cluster_profile=self.tpc_profile.currentText();cfg.tpc_profile_scale=self.tpc_profile_scale.value();cfg.tpc_profile_thickness_cm=self.tpc_profile_thickness.value()
+        cfg.calorimeter_display={name:combo.currentText() for name,combo in self.calorimeter_displays.items()}
+        cfg.tower_height_scales={name:scale.value() for name,scale in self.tower_scales.items()}
+        cfg.tower_fixed_height_cm=self.tower_fixed_height.value();cfg.tower_max_height_cm=self.tower_max_height.value();cfg.tower_width_scale=self.tower_width_scale.value();cfg.tower_direction=self.tower_direction.currentText()
         cfg.data_glow_lighting=self.data_glow_lighting.isChecked()
         cfg.camera_lens_mm=self.camera_lens.value()
         if cfg.camera_pose:cfg.camera_pose={**cfg.camera_pose,'lens':cfg.camera_lens_mm}
@@ -615,6 +631,10 @@ class Window(QMainWindow):
         for name,combo in self.detector_modes.items():combo.setCurrentText(cfg.detector_modes.get(name,cfg.mode))
         self.roll.setValue(cfg.roll);self.highlight_ids.setText(', '.join(cfg.highlight_track_ids));self.highlight_width.setValue(cfg.highlight_track_radius_cm*2);self.highlight_clusters.setValue(cfg.highlight_cluster_radius_cm);self.highlight_override.setChecked(cfg.highlight_override_color);self.highlight_track_color.setText(cfg.highlight_track_color);self.highlight_cluster_color.setText(cfg.highlight_cluster_color)
         self.tpc_profile.setCurrentText(cfg.tpc_cluster_profile);self.tpc_profile_scale.setValue(cfg.tpc_profile_scale);self.tpc_profile_thickness.setValue(cfg.tpc_profile_thickness_cm)
+        from .calorimeter_towers import DEFAULT_SCALES
+        for name,combo in self.calorimeter_displays.items():
+            combo.setCurrentText(cfg.calorimeter_display.get(name,'points'));self.tower_scales[name].setValue(cfg.tower_height_scales.get(name,DEFAULT_SCALES[name]))
+        self.tower_direction.setCurrentText(cfg.tower_direction);self.tower_fixed_height.setValue(cfg.tower_fixed_height_cm);self.tower_max_height.setValue(cfg.tower_max_height_cm);self.tower_width_scale.setValue(cfg.tower_width_scale)
         self.view_transform.setCurrentText(cfg.view_transform);self.exposure.setValue(cfg.exposure);self.track_emission.setValue(cfg.track_emission);self.cluster_emission.setValue(cfg.cluster_emission)
         self.data_glow_lighting.setChecked(cfg.data_glow_lighting)
         self.camera_lens.setValue(cfg.camera_pose.get('lens',cfg.camera_lens_mm))
@@ -706,6 +726,8 @@ class Window(QMainWindow):
             if legend and legend['mode']!='solid':parts.append(f'{key.split("_")[0]}: {legend["mode"]} [{legend["min"]:.3g}, {legend["max"]:.3g}] · {legend["missing"]} unknown')
         profile=metadata.get('cluster_legend',{})
         if profile.get('tpc_profile','sphere')!='sphere':parts.append(f"TPC profiles: {profile.get('profiled_clusters',0)} measured; {profile.get('missing_tpc_profiles',0)} missing widths (spheres)")
+        for name,info in profile.get('calorimeter_towers',{}).items():
+            parts.append(f"{name}: {info['towers']} towers · {info['point_fallbacks']} point fallbacks · {info['approximate_footprints']} nominal footprints · {info['clipped_heights']} capped heights")
         if any(v['type']=='schematic' for v in metadata['geometry'].values()):parts.append('Approximate schematic geometry')
         self.legend.setText(' | '.join(parts))
     def resizeEvent(self,event):
