@@ -741,6 +741,9 @@ class Window(QMainWindow):
         note=QLabel(rec['reason']);note.setWordWrap(True);form.addRow(note)
         quality=QComboBox();quality.addItems(['draft','balanced','final','publication','custom']);quality.setCurrentText(rec['quality']);form.addRow('Sampling preset',quality)
         backend=QComboBox();backend.addItems(list(dict.fromkeys(d['type'] for d in devices['devices'])));backend.setCurrentText(rec['backend']);form.addRow('Available backend',backend)
+        geometry_preset=QComboBox();geometry_preset.setObjectName('renderGeometryPreset')
+        for label,value in (('Full geometry','full'),('Simplified geometry (fast surfaces)','simplified'),('Use interactive geometry','current')):geometry_preset.addItem(label,value)
+        form.addRow('Geometry to render',geometry_preset)
         slider=QSlider(Qt.Horizontal);slider.setObjectName('resolutionPercent');slider.setRange(math.ceil(minimum_percent(cfg.frame_aspect)*10),1000);slider.setTickInterval(250);slider.setTickPosition(QSlider.TicksBelow);slider.setValue(round(PRESET_PERCENT[rec['quality']]*10))
         form.addRow('Resolution (% of 8K)',slider);resolution=QLabel();form.addRow(resolution)
         milestones=QWidget();row=QHBoxLayout(milestones);row.setContentsMargins(0,0,0,0)
@@ -762,6 +765,15 @@ class Window(QMainWindow):
             combo.setCurrentIndex(combo.findData('full'))
         if geometry_details:
             note=QLabel('Explicit geometry choices override the preview type and appearance. Full and simplified aligned geometry require their assets.');note.setWordWrap(True);form.addRow(note)
+        def apply_geometry_preset():
+            from .geometry_selection import render_geometry_preset,detail,is_schematic
+            value=geometry_preset.currentData();settings=render_geometry_preset(cfg,value).to_dict()
+            for name,combo in geometry_details.items():
+                choice='current' if value=='current' else 'schematic' if is_schematic(settings,name) else detail(settings,name)
+                index=combo.findData(choice)
+                if index<0:raise ValueError(name+': unavailable render geometry choice')
+                combo.setCurrentIndex(index)
+        geometry_preset.currentIndexChanged.connect(apply_geometry_preset)
         def toggle():
             samples.setEnabled(quality.currentText()=='custom');slider.setValue(round(PRESET_PERCENT[quality.currentText()]*10))
         quality.currentTextChanged.connect(toggle);toggle()

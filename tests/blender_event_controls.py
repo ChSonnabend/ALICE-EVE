@@ -113,6 +113,12 @@ with tempfile.TemporaryDirectory(prefix='alice-controls-qa-') as tmp:
         ui.detectors[name].asset_path=str(asset)
     editor.JOB['python']=sys.executable
     original=editor.current_settings().geometry_lods
+    operator.geometry_preset='simplified';editor.render_geometry_preset_update(operator,bpy.context)
+    assert {i.name:i.detail for i in operator.geometry_details}=={'TPC':'simplified','L3':'simplified'}
+    operator.geometry_preset='current';editor.render_geometry_preset_update(operator,bpy.context)
+    assert {i.name:i.detail for i in operator.geometry_details}=={'TPC':'current','L3':'current'}
+    operator.geometry_details['TPC'].detail='simplified';operator.geometry_details['L3'].detail='full'
+    assert editor.render_geometry_settings(editor.current_settings(),[],preset='simplified').geometry_lods=={'TPC':'simplified','L3':'simplified'}
     with patch.object(editor.subprocess,'Popen') as spawn:
         assert bpy.ops.alice_eve.render_full(quality='draft',resolution_percent=50,backend='CPU',output=operator.output,
             geometry_details=[{'name':i.name,'detail':i.detail} for i in operator.geometry_details])=={'FINISHED'}

@@ -24,6 +24,15 @@ detail or **Keep current scene** must be selected explicitly for that render.
 Missing aligned assets stop at preflight; simplified geometry is never substituted.
 This applies to both final images and videos.
 
+The last render dialog has a **Geometry to render** selector: **Full geometry**,
+**Simplified geometry (fast surfaces)** or **Use interactive geometry**. Simplified
+uses compatible fast surface caches, with aligned coarse cells when no compatible
+cache is available or a fine component selection cannot be represented by the
+cache. Use interactive geometry reproduces the current preview detail exactly.
+The selector applies to all selected detectors and L3; individual detail rows
+below it can override the preset. This choice affects the new render, without
+changing the interactive scene.
+
 `render-config` and non-preview `render` commands also default to full aligned
 geometry. Use `--geometry-detail current` to preserve the exact per-detector detail
 stored in a recipe, or choose an explicit reduced detail. `edit-config` and preview

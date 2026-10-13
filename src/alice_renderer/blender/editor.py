@@ -7,7 +7,7 @@ from alice_renderer.model import RenderSettings, COLOR_FIELDS, capabilities
 from alice_renderer.cluster_colors import CLUSTER_COLOR_FIELDS, DESCRIPTIONS
 from alice_renderer.object_selection import parse_track_ids,selected_tracks,selected_clusters,enabled_detectors,event_counts
 from alice_renderer.palettes import names as palette_names
-from alice_renderer.geometry_selection import is_schematic,final_render_choices,description as geometry_description
+from alice_renderer.geometry_selection import is_schematic,final_render_choices,render_geometry_preset,description as geometry_description
 from alice_renderer.scene_config import recipe, save_config, recommended_quality
 from alice_renderer.resolution import PRESET_PERCENT, percentage_size
 
@@ -674,8 +674,14 @@ def initialize_render_geometry(operator,cfg):
     for name in cfg.geometry+(['L3'] if cfg.magnet else []):
         item=operator.geometry_details.add();item.name=name;item.detail='full'
 
-def render_geometry_settings(cfg,items):
-    return final_render_choices(cfg,{i.name:i.detail for i in items})
+def render_geometry_settings(cfg,items,preset='full'):
+    return final_render_choices(cfg,{i.name:i.detail for i in items}) if items else render_geometry_preset(cfg,preset)
+
+def render_geometry_preset_update(self,context):
+    if not JOB or not self.geometry_details:return
+    cfg=render_geometry_preset(current_settings(),self.geometry_preset);values=cfg.to_dict()
+    from alice_renderer.geometry_selection import detail
+    for item in self.geometry_details:item.detail='current' if self.geometry_preset=='current' else 'schematic' if is_schematic(values,item.name) else detail(values,item.name)
 
 def render_preset_update(self,context):
     self.resolution_percent=PRESET_PERCENT[self.quality]
@@ -684,6 +690,7 @@ class RenderFull(bpy.types.Operator):
     bl_idname='alice_eve.render_full';bl_label='Render full'
     bl_description='Choose image quality and geometry detail for each selected detector and L3, then start a full render'
     geometry_details: CollectionProperty(type=RenderGeometryDetail)
+    geometry_preset: EnumProperty(name='Geometry to render',items=[('full','Full geometry','Full aligned surfaces for all selected detectors and L3'),('simplified','Simplified geometry (fast surfaces)','Use compatible fast interactive caches; otherwise aligned coarse cells'),('current','Use interactive geometry','Use exactly the surface detail currently displayed in the interactive scene')],default='full',update=render_geometry_preset_update)
     quality: EnumProperty(name='Sampling preset',items=[(v,v.title(),'') for v in ('draft','balanced','final','publication','custom')],update=render_preset_update)
     resolution_percent: FloatProperty(name='Resolution (% of 8K)',min=1,max=100,default=25,precision=2,subtype='PERCENTAGE')
     backend: EnumProperty(name='Backend',items=[('AUTO','Recommended','')]+[(v,v,'') for v in ('CPU','METAL','HIP','CUDA','OPTIX')])
@@ -695,12 +702,14 @@ class RenderFull(bpy.types.Operator):
         return context.window_manager.invoke_props_dialog(self,width=480)
     def draw(self,context):
         layout=self.layout;layout.label(text=RECOMMENDATION['reason']);layout.prop(self,'quality');layout.prop(self,'backend')
+        layout.prop(self,'geometry_preset')
         layout.prop(self,'resolution_percent',slider=True)
         layout.label(text='25% = 1080p · 50% = 4K · 100% = 8K (16:9)')
         w,h=percentage_size(self.resolution_percent or PRESET_PERCENT[self.quality],current_settings().frame_aspect)
         layout.label(text=f'{w} × {h} px; retains camera aspect')
         if self.quality=='custom':layout.prop(self,'samples')
         box=layout.box();box.label(text='Geometry detail for this render')
+        box.label(text='Preset applies to all surfaces; override individual detectors below.')
         cfg=current_settings().to_dict()
         for item in self.geometry_details:
             box.prop(item,'detail',text=item.name);box.label(text='Current: '+geometry_description(cfg,item.name))
@@ -716,7 +725,7 @@ class RenderFull(bpy.types.Operator):
             from alice_renderer.runtime import preflight
             from alice_renderer.scene_config import quality_settings
             check=quality_settings(current_settings(),'balanced' if self.quality=='custom' else self.quality,backend=backend,samples=self.samples if self.quality=='custom' else None,resolution_percent=self.resolution_percent or PRESET_PERCENT[self.quality])
-            check=render_geometry_settings(check,self.geometry_details)
+            check=render_geometry_settings(check,self.geometry_details,self.geometry_preset)
             if check.video_enabled:
                 from alice_renderer.runtime import prepare_video,check_encoder
                 encoder=check_encoder(JOB.get('ffmpeg'));check,_=prepare_video(check,[Path(p) for p in JOB.get('events',[])],DEVICES,Path(bpy.path.abspath(self.output)))

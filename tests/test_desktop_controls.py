@@ -179,6 +179,23 @@ def test_render_dialog_chooses_detail_per_surface_and_magnet(window,monkeypatch)
     assert chosen.geometry_schematics=={'ITS':False,'TPC':False,'L3':False}
     assert cfg.geometry_lods=={'TPC':'full'} # render-only choices do not mutate editor settings
 
+def test_last_render_menu_has_full_simplified_and_interactive_presets(window,monkeypatch):
+    from PySide6.QtWidgets import QDialog,QComboBox
+    w,application,root=window
+    cfg=RenderSettings(geometry=['ITS','TPC'],magnet=True,geometry_lod='full')
+    def accept(dialog):
+        preset=dialog.findChild(QComboBox,'renderGeometryPreset');assert preset.currentData()=='full'
+        form=dialog.layout();choices={form.labelForField(c).text():c for c in dialog.findChildren(QComboBox) if form.labelForField(c)}
+        preset.setCurrentIndex(preset.findData('current'))
+        assert all(choices[d+' geometry detail'].currentData()=='current' for d in ('ITS','TPC','L3'))
+        preset.setCurrentIndex(preset.findData('simplified'))
+        assert all(choices[d+' geometry detail'].currentData()=='simplified' for d in ('ITS','TPC','L3'))
+        choices['TPC geometry detail'].setCurrentIndex(choices['TPC geometry detail'].findData('full'))
+        return QDialog.Accepted
+    monkeypatch.setattr(QDialog,'exec',accept)
+    chosen=w.render_quality_dialog(cfg,{'devices':[{'type':'CPU'}]})
+    assert chosen.geometry_lods=={'ITS':'simplified','TPC':'full','L3':'simplified'} and cfg.geometry_lods=={}
+
 
 def test_camera_orbit_axis_preserved_in_desktop_controls(window):
     w,application,root=window

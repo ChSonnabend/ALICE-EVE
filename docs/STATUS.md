@@ -2,6 +2,13 @@
 
 ## Final geometry defaults
 
+The final dialog now prominently offers Geometry to render: Full, Simplified
+(fast surfaces), or Use interactive geometry. The preset applies to selected
+detectors and L3, with per-detector overrides. Simplified uses compatible fast
+caches and otherwise aligned coarse cells; unsupported fine component choices
+retain their masks through coarse aligned geometry. The interactive scene stays
+unchanged. Desktop and native Blender dialog/handoff checks passed.
+
 Desktop and Blender full-render dialogs now select full aligned geometry by
 default for all selected detectors and L3. This also covers direct/scripted
 Render full calls without a detail list. CLI final renders default to full;

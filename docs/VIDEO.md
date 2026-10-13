@@ -26,6 +26,10 @@ camera and colours remain unchanged. The final-render dialog still permits an
 explicit reduced detail choice. Command-line `render-config` uses full detail by
 default; `--geometry-detail current` preserves a recipe's deliberate mixed detail.
 
+In the last render menu, **Geometry to render → Simplified geometry (fast surfaces)**
+selects reduced detail for the movie. **Use interactive geometry** keeps exactly
+the current preview surfaces. Per-detector overrides remain available below.
+
 **Pause viewport** independently suspends live viewport rendering. Cycles freezes
 its progressive preview; fast Eevee changes to inexpensive solid inspection until
 **Resume viewport** restores rendered shading. Pause both controls to stop collision

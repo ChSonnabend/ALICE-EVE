@@ -1,7 +1,7 @@
 from pathlib import Path
 import pytest
 from alice_renderer.model import RenderSettings
-from alice_renderer.geometry_selection import render_choices,final_render_choices,is_schematic
+from alice_renderer.geometry_selection import render_choices,final_render_choices,render_geometry_preset,is_schematic
 from alice_renderer.scene_config import recipe,resolve_settings,save_config,load_config
 from alice_renderer.runtime import preflight
 
@@ -37,6 +37,19 @@ def test_final_config_does_not_require_unused_preview_cache(tmp_path):
     full=resolve_settings(data,tmp_path/'scene.json',geometry_detail='full')
     assert full.geometry_lods['TPC']=='full' and data==original
     with pytest.raises(ValueError,match='fast surface cache'):resolve_settings(data,tmp_path/'scene.json',geometry_detail='current')
+
+def test_simplified_final_preset_uses_fast_caches_and_aligned_fallback_without_mutating_preview(tmp_path):
+    from test_surface_proxy import fixture_cache
+    asset,_=fixture_cache(tmp_path,'L3')
+    preview=RenderSettings(geometry=['ITS'],magnet=True,schematic=True,geometry_assets={'L3':str(asset)},geometry_units='m',geometry_openings={'ITS':90})
+    chosen=render_geometry_preset(preview,'simplified')
+    assert chosen.geometry_lods=={'ITS':'simplified','L3':'proxy'}
+    assert not is_schematic(chosen.to_dict(),'ITS') and not is_schematic(chosen.to_dict(),'L3')
+    assert chosen.geometry_openings==preview.geometry_openings and preview.geometry_lods=={}
+    assert render_geometry_preset(preview,'current').to_dict()==preview.to_dict()
+    preview.geometry_components={'L3':{'elements/small-support':False}}
+    assert render_geometry_preset(preview,'simplified').geometry_lods['L3']=='simplified'
+    with pytest.raises(ValueError,match='preset'):render_geometry_preset(preview,'unknown')
 
 def test_mixed_detector_and_magnet_modes_and_current_are_unambiguous(tmp_path):
     cfg=RenderSettings(geometry=['ITS','TPC'],magnet=True,schematic=True,geometry_display={'TPC':'outline'})
