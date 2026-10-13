@@ -2,18 +2,18 @@
 
 Load an input and select at least two **collision** events. In the **Video** tab,
 enable **Play / render selected collisions as a video**. **Play collisions…**
-opens a looping Blender session; **Preview video** exports a small MP4;
+opens a looping Blender session for preview and editing;
 **Render video** asks for resolution, samples, geometry detail and hardware,
 then writes `video.mp4` in the reported output folder.
 
-For interactive playback, use the **Play collisions…** button above the desktop
+For interactive playback, use the **Play collisions…** button beside **Interactive scene…** below the desktop
 event list. It enables playback directly, even when a loaded favourite has video
 disabled. Opening **Interactive scene…** also retains all selected event references;
 Blender's **Play collisions** can start playback later without reopening a prepared
 event dataset. AO2D events are materialized only as needed for the still scene;
 use desktop **Play collisions…** to prepare the entire selection for playback.
 
-The Blender **ALICE EVE → Collision video** box contains **Play collisions** and
+The Blender **ALICE EVE → Collision playback** section contains **Play collisions** and
 **Pause collisions**. Pause freezes immediately at the current frame. Play resumes;
 reaching the end loops to the first selected collision. Camera, lights, colours,
 detector surfaces and data choices can be edited during playback or while paused.
@@ -173,3 +173,9 @@ frame also leave the dependency graph alone. Actual geometry rebuilds are logged
 as `Rebuilding detector geometry: NAME`. This preserves geometry datablocks; it
 does not freeze detector pixels. Moving event data, transparency, lighting and
 camera changes still require viewport rendering.
+
+The desktop uses Blender for all visual previews. There is no embedded image
+preview or separate Preview video button; the event-selection table fills the
+freed space. Use Interactive scene for a single scene, Play collisions for live
+playback, and Render for image or MP4 export. CLI low-resolution preview rendering
+remains available.

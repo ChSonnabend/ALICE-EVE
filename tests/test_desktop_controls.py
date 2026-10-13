@@ -3,7 +3,6 @@ os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 from pathlib import Path
 import pytest
 from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QPixmap
 from alice_renderer import app as app_module
 from alice_renderer.demo import generate
 from alice_renderer.model import RenderSettings
@@ -134,11 +133,17 @@ def test_missing_exported_geometry_preserves_valid_setup_asset(window):
     assert w.asset_fields['ITS'].text()==str(asset)
 
 
-def test_preview_and_long_status_do_not_resize_window(window):
+def test_interactive_preview_replaces_embedded_image_and_expands_events(window):
+    from PySide6.QtWidgets import QLabel,QPushButton
     w,application,root=window
-    before=w.size();image=root/'render.png';pixmap=QPixmap(3840,2160);pixmap.fill();pixmap.save(str(image))
-    (root/'metadata.json').write_text(json.dumps({'event_id':'E','kind':'synthetic','rendered_tracks':1,'rendered_clusters':0,'geometry':{}}))
-    w.show_image(image);w.message('Completed: /'+('very-long-folder-name/'*40)+'render.png')
+    before=w.size()
+    assert w.findChild(QLabel,'preview') is None
+    assert not any(button.text().startswith('Preview') for button in w.findChildren(QPushButton))
+    assert w.table.height()>360 and w.table.maximumHeight()>10000
+    initial_height=w.table.height();w.resize(w.size().width(),w.size().height()+150);application.processEvents()
+    assert w.table.height()>initial_height
+    w.resize(before);application.processEvents()
+    w.message('Completed: /'+('very-long-folder-name/'*40)+'render.png')
     for _ in range(4):application.processEvents()
     assert w.size()==before
 
@@ -435,7 +440,7 @@ def test_failed_load_does_not_enter_recent_inputs(window,monkeypatch):
 def test_geometry_only_controls_and_dispatch(window,monkeypatch):
     w,application,root=window
     w.model.selected.clear();w.geometry_checks['TPC'].setChecked(True);w.update_availability()
-    assert w.render_button.isEnabled() and w.preview_button.isEnabled() and w.editor_button.isEnabled()
+    assert w.render_button.isEnabled() and w.editor_button.isEnabled()
     assert w.render_button.text()=='Render geometry only'
     calls=[]
     monkeypatch.setattr(app_module,'render_events',lambda blender,paths,cfg,output,**kw:calls.append(('render',paths)) or output)

@@ -4,7 +4,7 @@ import json, threading, sqlite3, math, os
 from pathlib import Path
 import PySide6
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QThread, Signal, QTimer
-from PySide6.QtGui import QColor, QPixmap
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QFormLayout,QLabel,QPushButton,QLineEdit,QCheckBox,QComboBox,QSpinBox,QDoubleSpinBox,QTabWidget,QScrollArea,QSplitter,QTableView,QFileDialog,QMessageBox,QPlainTextEdit,QHeaderView,QDialog,QDialogButtonBox,QSizePolicy,QInputDialog,QSlider,QListWidget,QListWidgetItem,QTreeWidget,QTreeWidgetItem,QProgressBar)
 from .catalogue import Catalogue
 from .converters import convert
@@ -69,7 +69,7 @@ def number(value,minimum,maximum,decimals=0):
 class Window(QMainWindow):
     def __init__(self):
         super().__init__();self.setWindowTitle('ALICE · Event Renderer');self.resize(1440,980)
-        self.catalogue=None;self.loaded_input=None;self.task=None;self.device_info=None;self.base=startup_settings();self.images=[];self.close_pending=False
+        self.catalogue=None;self.loaded_input=None;self.task=None;self.device_info=None;self.base=startup_settings();self.close_pending=False
         self.scene_overrides={};self.timeframe_source=None;self.collision_source=None;self.showing_timeframes=False;self.collision_mode='tracks'
         self.library=SceneLibrary(ROOT/'scene-library.local.sqlite');self.library_signature=None;self.scene_detector_selection=None;self.requested_modes=None
         self.library.ensure_default_favourites(ROOT)
@@ -114,10 +114,7 @@ class Window(QMainWindow):
         self.selection_label=QLabel('0 events selected');tools.addWidget(self.selection_label,1)
         self.model=EventsModel();self.model.changed.connect(self.update_availability)
         self.all_button.clicked.connect(lambda:self.model.select_all(True));self.none_button.clicked.connect(lambda:self.model.select_all(False))
-        self.table=QTableView();self.table.setModel(self.model);self.table.setAlternatingRowColors(True);self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents);self.table.horizontalHeader().setStretchLastSection(True);self.table.setMaximumHeight(290);right_layout.addWidget(self.table)
-        self.image=QLabel('Preview will appear here');self.image.setAlignment(Qt.AlignCenter);self.image.setMinimumSize(400,260);self.image.setObjectName('preview');self.image.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Ignored)
-        right_layout.addWidget(self.image,1)
-        self.legend=QLabel('');self.legend.setWordWrap(True);right_layout.addWidget(self.legend)
+        self.table=QTableView();self.table.setModel(self.model);self.table.setAlternatingRowColors(True);self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents);self.table.horizontalHeader().setStretchLastSection(True);self.table.setMinimumHeight(360);self.table.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Expanding);right_layout.addWidget(self.table,1)
         self.log=QPlainTextEdit();self.log.setReadOnly(True);self.log.setMaximumHeight(120);right_layout.addWidget(self.log)
         bottom=QHBoxLayout();layout.addLayout(bottom)
         self.render_progress=QProgressBar();self.render_progress.setRange(0,100);self.render_progress.setValue(0);bottom.addWidget(self.render_progress)
@@ -126,8 +123,7 @@ class Window(QMainWindow):
         self.load_config_button=QPushButton('Load config…');self.load_config_button.clicked.connect(self.import_scene);bottom.addWidget(self.load_config_button)
         self.export_config_button=QPushButton('Export config…');self.export_config_button.clicked.connect(self.export_scene);bottom.addWidget(self.export_config_button)
         self.fast_interactive=QCheckBox('Fast interactive');self.fast_interactive.setChecked(self.saved.get('fast_interactive',True));self.fast_interactive.setToolTip('Use reviewed cached approximate surfaces for detectors and magnet, with a 32-sample Eevee viewport. Full detail remains available in the editor.');bottom.addWidget(self.fast_interactive)
-        self.editor_button=QPushButton('Interactive scene…');self.editor_button.clicked.connect(self.open_editor);bottom.addWidget(self.editor_button);bottom.addWidget(self.play_button)
-        self.preview_button=QPushButton('Preview first selected event');self.preview_button.clicked.connect(lambda:self.start_render(True));bottom.addWidget(self.preview_button)
+        self.editor_button=QPushButton('Interactive scene…');self.editor_button.setToolTip('Preview and edit the selected event or geometry in Blender');self.editor_button.clicked.connect(self.open_editor);bottom.addWidget(self.editor_button);bottom.addWidget(self.play_button)
         self.render_button=QPushButton('Render selected events');self.render_button.setObjectName('primary');self.render_button.clicked.connect(lambda:self.start_render(False));bottom.addWidget(self.render_button)
         self.update_availability()
         self.library.discover(Path(self.output.text()));self.refresh_library()
@@ -135,7 +131,7 @@ class Window(QMainWindow):
         for field in self.asset_fields.values():field.editingFinished.connect(self.refresh_components)
         self.refresh_components()
         self.library_timer=QTimer(self);self.library_timer.timeout.connect(self.refresh_library);self.library_timer.start(2000)
-        self.setStyleSheet('''QWidget{background:#101724;color:#e2e8f2;font-size:13px;} QLabel#title{font-size:24px;font-weight:700;color:#94e5ff;margin:12px 0;} QLabel#preview{background:#070b14;border:1px solid #25334b;border-radius:8px;} QPushButton{background:#26334b;border:1px solid #40516f;padding:8px 12px;border-radius:5px;} QPushButton:hover{background:#344763;} QPushButton#primary{background:#147b89;border-color:#5ccdde;} QPushButton:disabled,QCheckBox:disabled{color:#586276;} QLineEdit,QSpinBox,QDoubleSpinBox,QComboBox,QPlainTextEdit{background:#182236;border:1px solid #34435d;padding:6px;border-radius:4px;} QHeaderView::section{background:#26334b;padding:5px;border:0;} QTableView{alternate-background-color:#172034;gridline-color:#27344a;} QTabBar::tab{padding:10px;background:#182236;} QTabBar::tab:selected{background:#2b3b55;} QCheckBox{padding:4px;}''')
+        self.setStyleSheet('''QWidget{background:#101724;color:#e2e8f2;font-size:13px;} QLabel#title{font-size:24px;font-weight:700;color:#94e5ff;margin:12px 0;} QPushButton{background:#26334b;border:1px solid #40516f;padding:8px 12px;border-radius:5px;} QPushButton:hover{background:#344763;} QPushButton#primary{background:#147b89;border-color:#5ccdde;} QPushButton:disabled,QCheckBox:disabled{color:#586276;} QLineEdit,QSpinBox,QDoubleSpinBox,QComboBox,QPlainTextEdit{background:#182236;border:1px solid #34435d;padding:6px;border-radius:4px;} QHeaderView::section{background:#26334b;padding:5px;border:0;} QTableView{alternate-background-color:#172034;gridline-color:#27344a;} QTabBar::tab{padding:10px;background:#182236;} QTabBar::tab:selected{background:#2b3b55;} QCheckBox{padding:4px;}''')
 
     def tab(self,name):
         widget=QWidget();scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setWidget(widget);self.tabs.addTab(scroll,name);return widget
@@ -418,7 +414,7 @@ class Window(QMainWindow):
         return {'conditions':self.aod_conditions.text(),'bz_kG':self.aod_bz.value() if self.aod_use_bz.isChecked() else None}
     def busy(self,on):
         self.render_progress.setRange(0,0 if on else 100)
-        for w in (self.fast_interactive,self.input_recent_picker,self.input_recent_load,self.input_recent_clear,self.tabs,self.source,self.open_button,self.browse_button,self.folder_button,self.demo_button,self.table,self.all_button,self.none_button,self.preview_button,self.render_button,self.editor_button,self.play_button,self.export_config_button,self.load_config_button,self.recent_picker,self.favourite_picker,self.reuse_recent_button,self.reuse_favourite_button):w.setEnabled(not on)
+        for w in (self.fast_interactive,self.input_recent_picker,self.input_recent_load,self.input_recent_clear,self.tabs,self.source,self.open_button,self.browse_button,self.folder_button,self.demo_button,self.table,self.all_button,self.none_button,self.render_button,self.editor_button,self.play_button,self.export_config_button,self.load_config_button,self.recent_picker,self.favourite_picker,self.reuse_recent_button,self.reuse_favourite_button):w.setEnabled(not on)
         self.cancel_button.setEnabled(on)
         self.timeframe_button.setEnabled(not on and self.timeframe_source is not None)
         if not on:self.update_availability();self.refresh_recent_inputs()
@@ -434,7 +430,6 @@ class Window(QMainWindow):
         match=re.search(r'Render progress: (\d+)%',text)
         if match:self.render_progress.setRange(0,100);self.render_progress.setValue(int(match[1]))
         self.status.setText(text);self.status.setToolTip(text);self.log.appendPlainText(text)
-        if text.endswith('/render.png') and Path(text).exists():self.show_image(Path(text))
     def failure(self,text):
         self.status.setText('Action stopped — see prerequisites or details');self.log.appendPlainText(text)
         if not self.close_pending:QMessageBox.warning(self,'Unable to continue',text)
@@ -560,11 +555,10 @@ class Window(QMainWindow):
             if combo.currentText() not in supported and not self.requested_modes:combo.setCurrentText('solid')
         self.selection_label.setText(f'{len(rows)} / {len(self.model.rows)} selected')
         renderable=bool(rows) or any(c.isChecked() for c in self.geometry_checks.values()) or self.magnet.isChecked()
-        self.preview_button.setEnabled(renderable);self.render_button.setEnabled(renderable);self.editor_button.setEnabled(renderable)
-        self.preview_button.setText('Preview first selected event' if rows else 'Preview geometry only')
+        self.render_button.setEnabled(renderable);self.editor_button.setEnabled(renderable)
         self.render_button.setText('Render selected events' if rows else 'Render geometry only')
         self.play_button.setEnabled(len(rows)>=2)
-        if self.video_enabled.isChecked():self.preview_button.setText('Preview video');self.render_button.setText('Render video')
+        if self.video_enabled.isChecked():self.render_button.setText('Render video')
         self.editor_button.setText('Interactive scene…')
     def check_devices(self):
         def done(info):
@@ -805,21 +799,6 @@ class Window(QMainWindow):
                 from PySide6.QtCore import QTimer
                 QTimer.singleShot(0,lambda:run(self.render_quality_dialog(cfg,info)))
             self.start_task(lambda p,c:probe(blender),ready)
-    def show_image(self,path):
-        self.images.append(path);self.current_pixmap=QPixmap(str(path));self.image.setPixmap(self.current_pixmap.scaled(self.image.size(),Qt.KeepAspectRatio,Qt.SmoothTransformation))
-        metadata=json.loads((path.parent/'metadata.json').read_text());parts=[f'{metadata["event_id"]} · {metadata["kind"]}',f'{metadata["rendered_tracks"]} tracks · {metadata["rendered_clusters"]} clusters']
-        for key in ('track_legend','cluster_legend'):
-            legend=metadata.get(key)
-            if legend and legend['mode']!='solid':parts.append(f'{key.split("_")[0]}: {legend["mode"]} [{legend["min"]:.3g}, {legend["max"]:.3g}] · {legend["missing"]} unknown')
-        profile=metadata.get('cluster_legend',{})
-        if profile.get('tpc_profile','sphere')!='sphere':parts.append(f"TPC profiles: {profile.get('profiled_clusters',0)} measured; {profile.get('missing_tpc_profiles',0)} missing widths (spheres)")
-        for name,info in profile.get('calorimeter_towers',{}).items():
-            parts.append(f"{name}: {info['towers']} towers · {info['point_fallbacks']} point fallbacks · {info['approximate_footprints']} nominal footprints · {info['clipped_heights']} capped heights")
-        if any(v['type']=='schematic' for v in metadata['geometry'].values()):parts.append('Approximate schematic geometry')
-        self.legend.setText(' | '.join(parts))
-    def resizeEvent(self,event):
-        super().resizeEvent(event)
-        if hasattr(self,'current_pixmap'):self.image.setPixmap(self.current_pixmap.scaled(self.image.size(),Qt.KeepAspectRatio,Qt.SmoothTransformation))
     def closeEvent(self,event):
         if self.task and self.task.isRunning():
             self.close_pending=True;self.task.cancel.set();event.ignore();self.status.setText('Cancelling active work; the window will close when cleanup finishes.');return
