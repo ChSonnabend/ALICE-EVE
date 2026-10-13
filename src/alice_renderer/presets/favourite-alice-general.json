@@ -140,14 +140,18 @@
     "data_glow_lighting": false,
     "detector_modes": {
       "TRD": "both",
-      "TOF": "both"
+      "TOF": "both",
+      "MCH": "both",
+      "MID": "both"
     },
     "detector_setup": "ALICE2",
     "detectors": [
       "ITS",
       "TPC",
       "TRD",
-      "TOF"
+      "TOF",
+      "MCH",
+      "MID"
     ],
     "distance_cm": 3800,
     "elevation": 20,

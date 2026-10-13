@@ -42,6 +42,6 @@ def test_alice_general_default_data_modes_and_cluster_scale():
     cfg=detector_settings('ALICE2')
     general=load_config(Path(__file__).parents[1]/'src/alice_renderer/presets/favourite-alice-general.json')['scene']
     for scene in (cfg.to_dict(),general):
-        assert {'TRD','TOF'}<=set(scene['detectors'])
-        assert all(scene['detector_modes'][d]=='both' for d in ('TRD','TOF'))
+        assert {'TRD','TOF','MCH','MID'}<=set(scene['detectors'])
+        assert all(scene['detector_modes'][d]=='both' for d in ('TRD','TOF','MCH','MID'))
         assert all(scene['cluster_size_scales'][d]==5 for d in scene['detectors'])

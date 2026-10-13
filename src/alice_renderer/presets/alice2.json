@@ -223,7 +223,9 @@
       "ITS",
       "TPC",
       "TRD",
-      "TOF"
+      "TOF",
+      "MCH",
+      "MID"
     ],
     "distance_cm": 268.4,
     "elevation": 19.6,

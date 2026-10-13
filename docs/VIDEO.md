@@ -166,3 +166,10 @@ logged before sampling so preparation is visible even before the first frame.
 For a reproducible stopped frame from a video-enabled portable recipe, pass
 `--video-frame N` to `alice-render render-config` with the same `--event-files`
 selection. The index is zero-based and saved in the output metadata.
+
+Unchanged RNA property assignments are skipped so event-only appearance edits do
+not mark detector meshes or materials dirty. Repeated playback ticks at the same
+frame also leave the dependency graph alone. Actual geometry rebuilds are logged
+as `Rebuilding detector geometry: NAME`. This preserves geometry datablocks; it
+does not freeze detector pixels. Moving event data, transparency, lighting and
+camera changes still require viewport rendering.

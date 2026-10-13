@@ -23,16 +23,50 @@ with tempfile.TemporaryDirectory(prefix='alice-proxy-qa-') as tmp:
  assert bpy.context.scene.alice_eve.viewport_samples==32
  assert bpy.ops.alice_eve.fast_surfaces()=={'FINISHED'}
  assert all(m.surface_render_method=='DITHERED' for m in bpy.data.materials if m.get('alice_proxy'))
- # Appearance changes and unchanged Apply geometry calls retain GPU mesh identities.
+ # Appearance changes and unchanged Apply geometry calls retain mesh datablock identities.
  def buffers():return {(n,o.name):(o.as_pointer(),o.data.as_pointer()) for n in assets for o in bpy.data.collections[n].objects}
  identities=buffers()
  ui=bpy.context.scene.alice_eve
  from unittest.mock import patch
  with patch.object(worker,'imported_geometry',side_effect=AssertionError('Unchanged geometry must not reload')):
-  for name in ('ITS','TPC','L3'):
+  for name in assets:
    item=ui.detectors[name];item.opacity=.25;item.color=(.2,.3,.6);item.opening=120;item.opening_direction=45
    assert bpy.ops.alice_eve.apply_geometry()=={'FINISHED'}
    assert buffers()==identities
+ # A no-op appearance refresh must not dirty any detector datablock.
+ import editor
+ detector_ids=set()
+ for name in assets:
+  for obj in bpy.data.collections[name].objects:
+   detector_ids.update((obj.as_pointer(),obj.data.as_pointer()))
+   for mat in obj.data.materials:
+    detector_ids.update((mat.as_pointer(),mat.node_tree.as_pointer()))
+ bpy.context.view_layer.update()
+ for _ in range(3):
+  editor.appearance_update(ui,bpy.context)
+  bpy.context.view_layer.update()
+  dirty={u.id.original.as_pointer() for u in bpy.context.evaluated_depsgraph_get().updates}
+  assert not dirty&detector_ids, 'An unchanged appearance refresh dirtied detector data'
+ ui.track_color=(.3,.6,.9);ui.cluster_color=(.9,.6,.3)
+ bpy.context.view_layer.update()
+ dirty={u.id.original.as_pointer() for u in bpy.context.evaluated_depsgraph_get().updates}
+ assert not dirty&detector_ids, 'Event-only appearance changes dirtied detector data'
+ # Playback advances only event data. All 16 detector/magnet buffers persist.
+ from alice_renderer.video import schedule,header
+ from video_player import VideoPlayer
+ events=[];paths=[]
+ for i in range(2):
+  event=dict(schema_version=1,units='cm',kind='synthetic',id=str(i),vertex=[0,0,0],tracks=[dict(id=str(i),detectors=['TPC'],points=[[0,0,0],[100,i,0],[200,i,0]])],clusters=[])
+  event_path=root/f'collision-{i}.json';event_path.write_text(json.dumps(event));paths.append(str(event_path));events.append(event)
+ settings=cfg.to_dict();settings.update(detectors=['TPC'],video_enabled=True,video_interval_s=1.,video_fps=4)
+ playback=dict(job,events=paths,video_headers=[header(e) for e in events],video_plan=schedule(events,settings))
+ player=VideoPlayer(playback,settings,editor.JOB['track_regions'])
+ with patch.object(worker,'imported_geometry',side_effect=AssertionError('Playback must reuse detector geometry and bounds')):
+  for frame in (0,1,1,3,4,5,7,0):
+   player.set_frame(frame)
+   assert buffers()==identities
+  bpy.context.view_layer.update();player.set_frame(0)
+  assert not list(bpy.context.evaluated_depsgraph_get().updates), 'Same-frame playback dirtied the dependency graph'
  # Cache clipping bounds bypass mesh import, even for non-ITS/TPC tracks.
  region=worker.imported_geometry('HMP',assets['HMP'],cfg.to_dict(),bounds_only=True)
  assert region['units']=='cm' and len(region['planes'])==66

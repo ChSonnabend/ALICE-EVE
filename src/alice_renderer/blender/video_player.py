@@ -83,7 +83,9 @@ class VideoPlayer:
         if hold and self.held_at is None:self.held_at=now
         elif not hold and self.held_at is not None:self.anchor+=now-self.held_at;self.held_at=None
     def set_frame(self,frame):
-        self.frame=max(0,min(int(frame),self.plan['frames']-1));index,age=event_at(self.plan,self.frame)
+        frame=max(0,min(int(frame),self.plan['frames']-1))
+        if frame==self.frame and self.index>=0:return
+        self.frame=frame;index,age=event_at(self.plan,self.frame)
         if index!=self.index:self.load(index)
         self.age=age
         for collname in ('Tracks','Clusters'):

@@ -142,6 +142,20 @@ def save_session():
     return 2.
 
 
+def set_if_changed(owner,name,value):
+    """Avoid tagging Blender datablocks dirty when an RNA value is unchanged."""
+    current=getattr(owner,name)
+    def equal(a,b):
+        if isinstance(a,(int,float)) and isinstance(b,(int,float)):
+            return math.isclose(a,b,rel_tol=1.e-7,abs_tol=1.e-7)
+        return a==b
+    if isinstance(value,(tuple,list)):
+        same=len(current)==len(value) and all(equal(a,b) for a,b in zip(current,value))
+    else:same=equal(current,value)
+    if not same:setattr(owner,name,value)
+    return not same
+
+
 def appearance_update(self,context):
     if not JOB or not hasattr(context.scene,'alice_eve'):return
     ui=context.scene.alice_eve
@@ -149,13 +163,13 @@ def appearance_update(self,context):
     coll=bpy.data.collections.get('Tracks')
     if coll:
         for obj in coll.objects:
-            if obj.type=='CURVE':obj.data.bevel_depth=(ui.highlight_width_cm if obj.get('alice_highlighted') else ui.track_width_cm)*.005
-    world=context.scene.world.node_tree.nodes['Background'];world.inputs[0].default_value=(*ui.background,1);world.inputs[1].default_value=ui.world_strength
-    context.scene.view_settings.view_transform=ui.view_transform;context.scene.view_settings.look='None';context.scene.view_settings.exposure=ui.exposure
+            if obj.type=='CURVE':set_if_changed(obj.data,'bevel_depth',(ui.highlight_width_cm if obj.get('alice_highlighted') else ui.track_width_cm)*.005)
+    world=context.scene.world.node_tree.nodes['Background'];set_if_changed(world.inputs[0],'default_value',(*ui.background,1));set_if_changed(world.inputs[1],'default_value',ui.world_strength)
+    set_if_changed(context.scene.view_settings,'view_transform',ui.view_transform);set_if_changed(context.scene.view_settings,'look','None');set_if_changed(context.scene.view_settings,'exposure',ui.exposure)
     for mat in bpy.data.materials:
         if not mat.use_nodes:continue
         bsdf=mat.node_tree.nodes.get('Principled BSDF')
-        if bsdf:bsdf.inputs['Roughness'].default_value=ui.roughness;bsdf.inputs['Metallic'].default_value=ui.metallic
+        if bsdf:set_if_changed(bsdf.inputs['Roughness'],'default_value',ui.roughness);set_if_changed(bsdf.inputs['Metallic'],'default_value',ui.metallic)
     for obj in context.scene.objects:
         if obj.type=='MESH':
             smooth=not obj.get('alice_towers',False) and ui.shading=='smooth' and ('alice_lod' not in obj or obj.get('alice_structural_smooth',False))
@@ -165,7 +179,7 @@ def appearance_update(self,context):
     for item in ui.detectors:
         coll=bpy.data.collections.get(item.name)
         if coll:
-            coll.hide_render=not (item.visible and item.geometry_available);coll.hide_viewport=coll.hide_render
+            set_if_changed(coll,'hide_render',not (item.visible and item.geometry_available));set_if_changed(coll,'hide_viewport',coll.hide_render)
         signature=json.dumps([list(item.color),item.opacity,item.opening,item.opening_direction])
         if coll and coll.get('alice_material_signature')==signature:continue
         if coll:coll['alice_material_signature']=signature
@@ -174,21 +188,21 @@ def appearance_update(self,context):
             if not mat.use_nodes:continue
             bsdf=mat.node_tree.nodes.get('Principled BSDF')
             if not bsdf:continue
-            bsdf.inputs['Base Color'].default_value=(*item.color,1)
+            set_if_changed(bsdf.inputs['Base Color'],'default_value',(*item.color,1))
             opening=mat.node_tree.nodes.get('ALICE opening')
-            if opening:opening.inputs[1].default_value=math.radians(item.opening)/2
+            if opening:set_if_changed(opening.inputs[1],'default_value',math.radians(item.opening)/2)
             direction=mat.node_tree.nodes.get('ALICE opening direction')
-            if direction:direction.inputs[1].default_value=-math.radians(item.opening_direction)
+            if direction:set_if_changed(direction.inputs[1],'default_value',-math.radians(item.opening_direction))
             for node in mat.node_tree.nodes:
-                if node.bl_idname=='ShaderNodeMixShader' and not node.inputs[0].is_linked:node.inputs[0].default_value=item.opacity
-            mat.diffuse_color=(*item.color,item.opacity)
+                if node.bl_idname=='ShaderNodeMixShader' and not node.inputs[0].is_linked:set_if_changed(node.inputs[0],'default_value',item.opacity)
+            set_if_changed(mat,'diffuse_color',(*item.color,item.opacity))
             from worker import configure_surface_material
             configure_surface_material(mat,item.opacity,True)
     for kind in ('Tracks','Clusters'):
         coll=bpy.data.collections.get(kind)
         if not coll:continue
         # Object selection is already per detector; no global hide masks.
-        coll.hide_render=coll.hide_viewport=False
+        set_if_changed(coll,'hide_render',False);set_if_changed(coll,'hide_viewport',False)
         for obj in coll.objects:
             emphasis=obj.get('alice_highlighted',False)
             base=ui.track_color if kind=='Tracks' else ui.cluster_color
@@ -201,12 +215,12 @@ def appearance_update(self,context):
                         if node.bl_idname=='GeometryNodeSetMaterial' and node.inputs['Material'].default_value:mats.append(node.inputs['Material'].default_value)
             color=special if emphasis and ui.highlight_override else base
             for mat in mats:
-                mat.cycles.emission_sampling='AUTO' if ui.data_glow_lighting else 'NONE'
+                set_if_changed(mat.cycles,'emission_sampling','AUTO' if ui.data_glow_lighting else 'NONE')
                 bsdf=mat.node_tree.nodes.get('Principled BSDF')
                 if bsdf:
-                    bsdf.inputs['Emission Strength'].default_value=ui.track_emission if kind=='Tracks' else ui.cluster_emission
+                    set_if_changed(bsdf.inputs['Emission Strength'],'default_value',ui.track_emission if kind=='Tracks' else ui.cluster_emission)
                     if emphasis and ui.highlight_override or mode=='solid':
-                        bsdf.inputs['Base Color'].default_value=(*color,1);bsdf.inputs['Emission Color'].default_value=(*color,1)
+                        set_if_changed(bsdf.inputs['Base Color'],'default_value',(*color,1));set_if_changed(bsdf.inputs['Emission Color'],'default_value',(*color,1))
 
 def populate_components(item,requested=None):
     from alice_renderer.geometry_components import load_components,component_visibility
@@ -475,6 +489,7 @@ class ApplyGeometry(bpy.types.Operator):
                 same_inner=old and old.get('alice_inner_mask','{}')==json.dumps(inner_rule,sort_keys=True) and same_direction
                 if old and same_asset and same_exclusions and same_components and same_inner and old.get('alice_display')==item.display and old.get('alice_geometry_lod')==cfg['geometry_lods'].get(item.name,cfg['geometry_lod']) and old.get('alice_schematic',False)==is_schematic(cfg,item.name):continue
                 changed_regions|=bool(old and (not same_asset or old.get('alice_schematic',False)!=is_schematic(cfg,item.name)))
+                print('ALICE_STAGE Rebuilding detector geometry: '+item.name,flush=True)
                 if old:remove_owned_collection(old)
                 if is_schematic(cfg,item.name):envelope(item.name,cfg)
                 else:
