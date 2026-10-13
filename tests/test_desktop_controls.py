@@ -34,7 +34,7 @@ def test_video_controls_round_trip_and_keep_all_selected_events_for_preview(wind
     assert w.render_button.text()=='Render video' and w.editor_button.text()=='Interactive scene…' and w.play_button.isEnabled()
     captured=[]
     def rendered(blender,paths,settings,output,**kwargs):captured.extend(paths);return root/'fake-video'
-    monkeypatch.setattr(app_module,'render_events',rendered)
+    monkeypatch.setattr('alice_renderer.render_jobs.submit_scene',rendered)
     w.start_render(True);settle(w,application)
     assert len(captured)==3
 
@@ -446,7 +446,7 @@ def test_geometry_only_controls_and_dispatch(window,monkeypatch):
     assert w.render_button.isEnabled() and w.editor_button.isEnabled()
     assert w.render_button.text()=='Render geometry only'
     calls=[]
-    monkeypatch.setattr(app_module,'render_events',lambda blender,paths,cfg,output,**kw:calls.append(('render',paths)) or output)
+    monkeypatch.setattr('alice_renderer.render_jobs.submit_scene',lambda blender,paths,cfg,output,**kw:calls.append(('render',paths)) or output)
     w.start_render(True);settle(w,application)
     assert calls==[('render',[])]
     monkeypatch.setattr(app_module,'launch_editor',lambda blender,path,cfg,output,**kw:calls.append(('editor',path,kw['fast'])) or (output,1))
@@ -466,3 +466,23 @@ def test_final_dialog_can_override_video_and_renderer(window,monkeypatch):
     chosen=w.render_quality_dialog(RenderSettings(video_enabled=True),{'devices':[{'type':'CPU'}]})
     assert not chosen.video_enabled and chosen.render_engine=='BLENDER_EEVEE'
     assert w.editor_button.parentWidget() is w.play_button.parentWidget()
+
+
+def test_background_jobs_have_one_row_and_controls_survive_window_close(window,monkeypatch):
+    from alice_renderer import render_jobs
+    w,application,root=window
+    monkeypatch.setattr(render_jobs,'start_supervisor',lambda *args:None)
+    identity=render_jobs.submit(['unused'],library=w.library.path,title='Video')
+    render_jobs.update(w.library.path,identity,status='running',progress=42)
+    w.refresh_render_jobs();w.refresh_render_jobs()
+    assert w.jobs_view.topLevelItemCount()==1
+    row,buttons=w.job_rows[identity]
+    assert row.text(2)=='42%' and buttons['stop'].isEnabled() and not buttons['continue'].isEnabled()
+    buttons['stop'].click()
+    assert render_jobs.get(w.library.path,identity)['request']=='stop'
+    with render_jobs.connect(w.library.path) as db:db.execute('UPDATE render_jobs SET request=NULL')
+    render_jobs.update(w.library.path,identity,status='paused')
+    w.refresh_render_jobs()
+    assert buttons['continue'].isEnabled() and not buttons['stop'].isEnabled()
+    w.close()
+    assert render_jobs.get(w.library.path,identity)['state']['status']=='paused'

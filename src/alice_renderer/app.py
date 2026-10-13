@@ -3,7 +3,7 @@ from __future__ import annotations
 import json, threading, sqlite3, math, os
 from pathlib import Path
 import PySide6
-from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QThread, Signal, QTimer
+from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QThread, Signal, QTimer, QSize
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QFormLayout,QLabel,QPushButton,QLineEdit,QCheckBox,QComboBox,QSpinBox,QDoubleSpinBox,QTabWidget,QScrollArea,QSplitter,QTableView,QFileDialog,QMessageBox,QPlainTextEdit,QHeaderView,QDialog,QDialogButtonBox,QSizePolicy,QInputDialog,QSlider,QListWidget,QListWidgetItem,QTreeWidget,QTreeWidgetItem,QProgressBar)
 from .catalogue import Catalogue
@@ -12,7 +12,7 @@ from .demo import generate
 from .inputs import inspect_input,run_ingest_profile
 from .model import DETECTORS,COLOR_FIELDS,RenderSettings
 from .cluster_colors import CLUSTER_COLOR_FIELDS,DESCRIPTIONS
-from .runtime import find_blender,probe,render_events,launch_editor
+from .runtime import find_blender,probe,launch_editor
 from .scene_config import recipe,save_config,load_config,resolve_settings,recommended_quality,quality_settings
 from .catalogue import load_event
 from .object_selection import parse_track_ids
@@ -115,6 +115,8 @@ class Window(QMainWindow):
         self.model=EventsModel();self.model.changed.connect(self.update_availability)
         self.all_button.clicked.connect(lambda:self.model.select_all(True));self.none_button.clicked.connect(lambda:self.model.select_all(False))
         self.table=QTableView();self.table.setModel(self.model);self.table.setAlternatingRowColors(True);self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents);self.table.horizontalHeader().setStretchLastSection(True);self.table.setMinimumHeight(360);self.table.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Expanding);right_layout.addWidget(self.table,1)
+        self.jobs_view=QTreeWidget();self.jobs_view.setHeaderLabels(['Background renders','State','Progress','Controls']);self.jobs_view.setRootIsDecorated(False);self.jobs_view.setMaximumHeight(145);self.jobs_view.setMinimumHeight(70);self.jobs_view.setUniformRowHeights(True);right_layout.addWidget(self.jobs_view)
+        self.job_rows={};self.job_discovery_time=0
         self.log=QPlainTextEdit();self.log.setReadOnly(True);self.log.setMaximumHeight(120);right_layout.addWidget(self.log)
         bottom=QHBoxLayout();layout.addLayout(bottom)
         self.render_progress=QProgressBar();self.render_progress.setRange(0,100);self.render_progress.setValue(0);bottom.addWidget(self.render_progress)
@@ -131,7 +133,36 @@ class Window(QMainWindow):
         for field in self.asset_fields.values():field.editingFinished.connect(self.refresh_components)
         self.refresh_components()
         self.library_timer=QTimer(self);self.library_timer.timeout.connect(self.refresh_library);self.library_timer.start(2000)
+        self.jobs_timer=QTimer(self);self.jobs_timer.timeout.connect(self.refresh_render_jobs);self.jobs_timer.start(1000);self.refresh_render_jobs()
         self.setStyleSheet('''QWidget{background:#101724;color:#e2e8f2;font-size:13px;} QLabel#title{font-size:24px;font-weight:700;color:#94e5ff;margin:12px 0;} QPushButton{background:#26334b;border:1px solid #40516f;padding:8px 12px;border-radius:5px;} QPushButton:hover{background:#344763;} QPushButton#primary{background:#147b89;border-color:#5ccdde;} QPushButton:disabled,QCheckBox:disabled{color:#586276;} QLineEdit,QSpinBox,QDoubleSpinBox,QComboBox,QPlainTextEdit{background:#182236;border:1px solid #34435d;padding:6px;border-radius:4px;} QHeaderView::section{background:#26334b;padding:5px;border:0;} QTableView{alternate-background-color:#172034;gridline-color:#27344a;} QTabBar::tab{padding:10px;background:#182236;} QTabBar::tab:selected{background:#2b3b55;} QCheckBox{padding:4px;}''')
+
+    def refresh_render_jobs(self):
+        from .render_jobs import jobs,discover_running
+        import time
+        try:
+            if time.monotonic()-self.job_discovery_time>10:
+                discover_running(self.library.path,ROOT);self.job_discovery_time=time.monotonic()
+            entries=jobs(self.library.path)
+            for entry in entries:
+                identity=entry['id'];state=entry['state'];spec=entry['spec']
+                if identity not in self.job_rows:
+                    row=QTreeWidgetItem(self.jobs_view);controls=QWidget();layout=QHBoxLayout(controls);layout.setContentsMargins(0,0,0,0);layout.setSpacing(3);buttons={}
+                    for action,label in (('stop','Stop'),('continue','Continue'),('restart','Restart')):
+                        button=QPushButton(label);button.setToolTip({'stop':'Pause this render and retain its in-memory state','continue':'Resume the paused render','restart':'Start a fresh attempt; keep previous output'}[action]);button.clicked.connect(lambda checked=False,i=identity,a=action:self.control_render_job(i,a));layout.addWidget(button);buttons[action]=button
+                    row.setSizeHint(0,QSize(0,42));self.jobs_view.setItemWidget(row,3,controls);self.job_rows[identity]=(row,buttons)
+                row,buttons=self.job_rows[identity];status=state['status']
+                row.setText(0,spec['title']+' · '+identity[:6]);row.setText(1,('Stopped (paused)' if status=='paused' else status.title())+('…' if entry['request'] else ''));row.setText(2,str(state['progress'])+'%')
+                tooltip=state['message']+'\nLog: '+state['log'];row.setToolTip(0,tooltip);row.setToolTip(1,tooltip);row.setToolTip(2,tooltip)
+                for action,button in buttons.items():button.setEnabled(not entry['request'] and (status in ('starting','running') if action=='stop' else status=='paused' if action=='continue' else True))
+            self.jobs_view.setVisible(bool(entries))
+            self.jobs_view.header().setSectionResizeMode(0,QHeaderView.Stretch)
+            for column in (1,2,3):self.jobs_view.header().setSectionResizeMode(column,QHeaderView.ResizeToContents)
+        except (OSError,ValueError,sqlite3.Error) as exc:self.status.setText('Render job tracking: '+str(exc))
+
+    def control_render_job(self,identity,action):
+        from .render_jobs import control
+        try:control(self.library.path,identity,action);self.refresh_render_jobs()
+        except (OSError,ValueError,sqlite3.Error) as exc:self.failure(str(exc))
 
     def tab(self,name):
         widget=QWidget();scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setWidget(widget);self.tabs.addTab(scroll,name);return widget
@@ -794,7 +825,13 @@ class Window(QMainWindow):
         blender=self.blender.text();output=Path(self.output.text())
         def run(chosen):
             if chosen is not None and chosen.video_enabled and len(ids)<2:self.failure('Video needs at least two selected collision events');return
-            if chosen is not None:self.start_task(lambda p,c:render_events(blender,[self.catalogue.event_path(i,progress=p,cancelled=c) for i in ids],chosen,output,preview=preview,progress=p,cancelled=c,library_path=self.library.path),lambda batch:(self.refresh_library(),self.message(f'Completed: {batch}')))
+            if chosen is None:return
+            def submit(p,c):
+                from .render_jobs import submit_scene
+                paths=[self.catalogue.event_path(i,progress=p,cancelled=c) for i in ids]
+                return submit_scene(blender,paths,chosen,output,preview=preview,library=self.library.path)
+            self.start_task(submit,lambda identity:(self.refresh_render_jobs(),self.message('Background render started: '+identity[:6]+' — you can close the interactive view.')))
+
         if preview:run(cfg)
         else:
             def ready(info):

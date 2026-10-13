@@ -798,31 +798,20 @@ class RenderFull(bpy.types.Operator):
                 if self.render_kind=='video':command+=['--ffmpeg',encoder]
                 else:command+=['--video-frame',str(self.playback_frame)]
             if self.quality=='custom':command+=['--samples',str(self.samples)]
-            log_path=root/('full-render-'+str(time.time_ns())+'.log')
-            with log_path.open('w') as log:process=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
-            ui.render_status='Starting render';ui.render_percent=0
-            offset=0
+            from alice_renderer.render_jobs import submit,get
+            library=JOB.get('library_path') or str(Path(__file__).resolve().parents[3]/'scene-library.local.sqlite')
+            identity=submit(command,library=library,python=JOB['python'],title='Video' if self.render_kind=='video' else 'Still frame',cwd=str(Path(__file__).resolve().parents[3]))
+            ui.render_status='Background render started — controls in desktop GUI';ui.render_percent=0
             def monitor():
-                nonlocal offset
-                import re
                 try:
-                    with log_path.open() as stream:
-                        stream.seek(offset)
-                        for line in stream:
-                            match=re.search(r'Render progress: (\d+)%',line)
-                            if match:ui.render_percent=int(match[1])
-                            if line.strip():ui.render_status=line.strip()[-160:]
-                        offset=stream.tell()
+                    state=get(library,identity)['state'];ui.render_percent=state['progress'];ui.render_status=state['message']
                     for screen in bpy.data.screens:
                         for area in screen.areas:
                             if area.type=='VIEW_3D':area.tag_redraw()
-                    if process.poll() is not None:
-                        ui.render_status='Render completed' if process.returncode==0 else 'Render failed: '+str(log_path)
-                        return None
-                    return .5
-                except ReferenceError:return None
+                    return None if state['status'] in ('completed','failed','finished','interrupted') else .5
+                except (ReferenceError,ValueError):return None
             bpy.app.timers.register(monitor,first_interval=.5)
-            self.report({'INFO'},'Full render started; progress in '+str(log_path));return {'FINISHED'}
+            self.report({'INFO'},'Background render started; closing this Blender view is safe. Manage it in the desktop GUI.');return {'FINISHED'}
         except Exception as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
 
 class PlayVideo(bpy.types.Operator):

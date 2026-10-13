@@ -119,7 +119,7 @@ with tempfile.TemporaryDirectory(prefix='alice-controls-qa-') as tmp:
     assert {i.name:i.detail for i in operator.geometry_details}=={'TPC':'current','L3':'current'}
     operator.geometry_details['TPC'].detail='simplified';operator.geometry_details['L3'].detail='full'
     assert editor.render_geometry_settings(editor.current_settings(),[],preset='simplified').geometry_lods=={'TPC':'simplified','L3':'simplified'}
-    with patch.object(editor.subprocess,'Popen') as spawn:
+    with patch('alice_renderer.render_jobs.submit',return_value='test-job') as spawn:
         assert bpy.ops.alice_eve.render_full(quality='draft',resolution_percent=50,backend='CPU',output=operator.output,
             geometry_details=[{'name':i.name,'detail':i.detail} for i in operator.geometry_details])=={'FINISHED'}
         command=spawn.call_args.args[0]

@@ -194,3 +194,29 @@ Mesh persistence and pixel stability are different: the previous persistence
 fixes prevented geometry reloads, but did not change dithered transparency.
 See Blender's [sampling documentation](https://docs.blender.org/manual/en/5.1/render/eevee/render_settings/sampling.html)
 and [Eevee material methods](https://developer.blender.org/docs/release_notes/4.2/eevee/).
+
+### Background render jobs
+
+Image and video renders launched from either interface now run under a detached
+supervisor. Close the interactive Blender window or the desktop application
+without cancelling a submitted render. Reopening the desktop restores one compact
+row per job, with status, percentage, and controls. Hover over a row for its latest
+message and log path. Scene preparation has no measurable percentage; progress
+advances once render samples or completed video frames are reported.
+
+- **Stop** pauses the entire live process tree, including Blender and the encoder.
+  It retains RAM/GPU allocations.
+- **Continue** resumes that paused attempt from its in-memory state.
+- **Restart** terminates the old attempt and launches the saved command/config
+  again, preserving earlier logs and output in separate attempt directories.
+
+Continue requires the processes to remain alive on the same machine. After a
+reboot or process failure, use Restart; there is no disk checkpoint for partially
+encoded videos. Input files and geometry must remain available.
+
+The desktop also discovers existing background ALICE renders from this project,
+without interrupting them or treating interactive Blender sessions as jobs.
+For adopted processes, their original exit code is unavailable: the row reports
+“Finished” and asks you to check the log/output, rather than claiming success.
+Job records live in the scene-library SQLite database; supervisor logs and
+immutable request snapshots are under `scene-library/jobs/`.
