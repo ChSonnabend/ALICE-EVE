@@ -50,11 +50,14 @@ def scale_color(value,low,high,palette,lut=None):
 def value(obj,mode):return color_value(obj,mode)
 
 def configure_surface_material(mat,opacity,interactive=False):
-    # BLENDED sorts whole objects; it cannot reliably order the nested faces
-    # of opaque instancers. Binary opening masks need opaque depth writes.
-    proxy=bool(mat.get('alice_proxy',False))
-    if hasattr(mat,'surface_render_method'):mat.surface_render_method='BLENDED' if interactive and opacity<1. and not proxy else 'DITHERED'
-    if hasattr(mat,'use_transparency_overlap'):mat.use_transparency_overlap=not interactive or proxy
+    # Interactive previews favor stable alpha blending over stochastic coverage.
+    # Final renders retain depth-correct dithered transparency. Alpha blending
+    # sorts objects, so intersections between detector surfaces are approximate.
+    stable=interactive and mat.get('alice_stable_preview',True)
+    method='BLENDED' if stable and opacity<1. else 'DITHERED'
+    if hasattr(mat,'surface_render_method') and mat.surface_render_method!=method:mat.surface_render_method=method
+    overlap=not interactive or bool(mat.get('alice_proxy',False))
+    if hasattr(mat,'use_transparency_overlap') and mat.use_transparency_overlap!=overlap:mat.use_transparency_overlap=overlap
 
 def materials(name,color,opacity=1.,emission=0.,cutaway=False,settings=None):
     mat=bpy.data.materials.new(name);mat.use_nodes=True

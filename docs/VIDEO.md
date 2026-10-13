@@ -179,3 +179,18 @@ preview or separate Preview video button; the event-selection table fills the
 freed space. Use Interactive scene for a single scene, Play collisions for live
 playback, and Render for image or MP4 export. CLI low-resolution preview rendering
 remains available.
+
+### Stable detector appearance during playback
+
+Fast interactive scenes now default to **Stable transparency (preview)** under
+**Geometry and viewport**. Cached detector surfaces use alpha blending instead
+of stochastic dithered transparency, so their opacity does not need to reconverge
+when collision objects are replaced. This is an Eevee preview choice: overlapping
+surfaces are sorted approximately and can look different from the final render.
+Turn the option off for depth-correct dithered transparency. Final image/video
+renders keep the existing dithered method and saved opacity values.
+
+Mesh persistence and pixel stability are different: the previous persistence
+fixes prevented geometry reloads, but did not change dithered transparency.
+See Blender's [sampling documentation](https://docs.blender.org/manual/en/5.1/render/eevee/render_settings/sampling.html)
+and [Eevee material methods](https://developer.blender.org/docs/release_notes/4.2/eevee/).

@@ -197,6 +197,7 @@ def appearance_update(self,context):
                 if node.bl_idname=='ShaderNodeMixShader' and not node.inputs[0].is_linked:set_if_changed(node.inputs[0],'default_value',item.opacity)
             set_if_changed(mat,'diffuse_color',(*item.color,item.opacity))
             from worker import configure_surface_material
+            if mat.get('alice_stable_preview')!=ui.stable_transparency:mat['alice_stable_preview']=ui.stable_transparency
             configure_surface_material(mat,item.opacity,True)
     for kind in ('Tracks','Clusters'):
         coll=bpy.data.collections.get(kind)
@@ -307,6 +308,18 @@ def use_scene_lighting():
                 shading.use_scene_lights=True;shading.use_scene_world=True
                 shading.use_scene_lights_render=True;shading.use_scene_world_render=True
 
+def preview_transparency_update(self,context):
+    if not JOB:return
+    from worker import configure_surface_material
+    ui=context.scene.alice_eve
+    for item in ui.detectors:
+        coll=bpy.data.collections.get(item.name)
+        if not coll:continue
+        mats={m for obj in coll.all_objects if obj.type in ('MESH','CURVE') for m in obj.data.materials if m}
+        for mat in mats:
+            if mat.get('alice_stable_preview')!=ui.stable_transparency:mat['alice_stable_preview']=ui.stable_transparency
+            configure_surface_material(mat,item.opacity,True)
+
 def viewport_renderer_update(self,context):
     if not JOB:return
     scene=context.scene;scene.render.engine=self.viewport_renderer
@@ -384,6 +397,7 @@ class SceneSettings(bpy.types.PropertyGroup):
     tower_max_height_cm: FloatProperty(name='Maximum tower height (cm)',min=.001,max=10000,default=100.,update=selection_update)
     tower_width_scale: FloatProperty(name='Tower footprint scale',min=.001,max=10,default=.95,update=selection_update)
     tower_direction: EnumProperty(name='Tower direction',items=[('inward','Towards beam','Extend from the measured position towards the beam'),('outward','Away from beam','Extend from the measured position away from the beam')],default='inward',update=selection_update)
+    stable_transparency: BoolProperty(name='Stable transparency (preview)',description='Avoid changing transparency noise during collision playback; overlapping surfaces use approximate object sorting. Turn off for depth-correct dithered transparency. Final renders are unaffected',default=True,update=preview_transparency_update)
     viewport_renderer: EnumProperty(name='Viewport renderer',items=[('BLENDER_EEVEE','Fast (Eevee)','Responsive preview; transparency and lighting are approximate'),('CYCLES','Accurate (Cycles)','Progressive preview using the final renderer; slower on CPU')],default='CYCLES',update=viewport_renderer_update)
     detectors: CollectionProperty(type=DetectorSettings)
     geometry_lod: EnumProperty(name='Geometry detail',items=[('full','Full aligned surfaces','Preserve the actual detector geometry'),('proxy','Cached approximate surfaces','Reviewed low-complexity detector surfaces; no source mesh import'),('structural','Large surfaces (cached, fast)','Prebuilt ITS/TPC display surfaces; no heavy source import'),('simplified','Coarse cells','Reduce complexity; approximate bounding cells')])
@@ -954,7 +968,7 @@ class EVEPanel(bpy.types.Panel):
         header.label(text='Geometry and viewport')
         if body is not None:
             layout=body
-            layout.operator('alice_eve.solid_surfaces');layout.operator('alice_eve.light_transparent_surfaces');layout.operator('alice_eve.restore_surface_exclusions');layout.operator('alice_eve.tpc_sectors_inner_wall');layout.operator('alice_eve.fast_surfaces');layout.operator('alice_eve.surround_lighting');layout.prop(ui,'viewport_renderer');layout.prop(ui,'viewport_samples')
+            layout.operator('alice_eve.solid_surfaces');layout.operator('alice_eve.light_transparent_surfaces');layout.operator('alice_eve.restore_surface_exclusions');layout.operator('alice_eve.tpc_sectors_inner_wall');layout.operator('alice_eve.fast_surfaces');layout.operator('alice_eve.surround_lighting');layout.prop(ui,'viewport_renderer');layout.prop(ui,'viewport_samples');layout.prop(ui,'stable_transparency')
             layout.prop(ui,'geometry_lod');layout.operator('alice_eve.full_geometry')
             layout.operator('alice_eve.select_no_detectors');layout.operator('alice_eve.complete_geometry')
             layout.label(text='Outer shell / outline are approximate hulls.')

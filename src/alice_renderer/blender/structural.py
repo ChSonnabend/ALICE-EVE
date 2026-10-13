@@ -23,8 +23,8 @@ def imported(name,asset,settings,bounds_only=False,*,data=None,lod="structural")
     key='magnet' if name=='L3' else name
     mat=materials(name,settings.get('colors_linear',{}).get(key,rgb(settings['colors'][key])),settings.get('geometry_opacities',{}).get(name,settings['geometry_opacity']),settings=settings)
     if lod=='proxy':
-        # Batched transparent surfaces need per-face depth ordering, rather than
-        # whole-object alpha sorting that would hide nested detector layers.
+        # Mark the cache material for diagnostics. Interactive transparency uses
+        # stable blending; final renders use depth-correct dithered coverage.
         from worker import configure_surface_material
         mat['alice_proxy']=True;configure_surface_material(mat,settings.get('geometry_opacities',{}).get(name,settings['geometry_opacity']),settings.get('_interactive',False))
     count=0;faces=0;elements=0

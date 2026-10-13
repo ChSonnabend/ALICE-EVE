@@ -22,7 +22,11 @@ with tempfile.TemporaryDirectory(prefix='alice-proxy-qa-') as tmp:
  assert bpy.context.scene.render.engine=='BLENDER_EEVEE'
  assert bpy.context.scene.alice_eve.viewport_samples==32
  assert bpy.ops.alice_eve.fast_surfaces()=={'FINISHED'}
+ assert all(m.surface_render_method=='BLENDED' for m in bpy.data.materials if m.get('alice_proxy'))
+ ui=bpy.context.scene.alice_eve;ui.stable_transparency=False
  assert all(m.surface_render_method=='DITHERED' for m in bpy.data.materials if m.get('alice_proxy'))
+ ui.stable_transparency=True
+ assert all(m.surface_render_method=='BLENDED' for m in bpy.data.materials if m.get('alice_proxy'))
  # Appearance changes and unchanged Apply geometry calls retain mesh datablock identities.
  def buffers():return {(n,o.name):(o.as_pointer(),o.data.as_pointer()) for n in assets for o in bpy.data.collections[n].objects}
  identities=buffers()
@@ -65,8 +69,14 @@ with tempfile.TemporaryDirectory(prefix='alice-proxy-qa-') as tmp:
   for frame in (0,1,1,3,4,5,7,0):
    player.set_frame(frame)
    assert buffers()==identities
+   assert all(m.surface_render_method=='BLENDED' for m in bpy.data.materials if m.get('alice_proxy'))
   bpy.context.view_layer.update();player.set_frame(0)
   assert not list(bpy.context.evaluated_depsgraph_get().updates), 'Same-frame playback dirtied the dependency graph'
+ # Final render settings always restore accurate transparency, independent of preview.
+ for mat in [m for m in bpy.data.materials if m.get('alice_proxy')]:
+  worker.configure_surface_material(mat,.25,False);assert mat.surface_render_method=='DITHERED'
+ editor.preview_transparency_update(ui,bpy.context)
+ assert all(m.surface_render_method=='BLENDED' for m in bpy.data.materials if m.get('alice_proxy'))
  # Cache clipping bounds bypass mesh import, even for non-ITS/TPC tracks.
  region=worker.imported_geometry('HMP',assets['HMP'],cfg.to_dict(),bounds_only=True)
  assert region['units']=='cm' and len(region['planes'])==66

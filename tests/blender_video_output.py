@@ -29,3 +29,23 @@ for kind in ('movie','still'):
         assert metadata['video_frame']==dict(frame=3,fps=2,event='output-1',age_s=.5)
         assert not (folder/'video.mp4').exists()
 print('FULL HD MOVIE AND STOPPED FRAME OUTPUT QA PASSED',flush=True)
+
+# Distinct collision IDs with identical displayed content must keep identical
+# detector pixels in stable interactive mode, even after event objects are rebuilt.
+import copy,numpy as np,editor
+same=copy.deepcopy(events[0]);same['id']='output-same-content';Path(paths[1]).write_text(json.dumps(same))
+folder=root/'stable-preview';folder.mkdir(exist_ok=True)
+payload=dict(event=paths[0],events=paths,video_headers=[header(events[0]),header(same)],video_plan=plan,output=str(folder),settings=cfg.to_dict(),required_track_detectors=['TPC'],fast_interactive=True,blender={'version':list(bpy.app.version),'devices':[{'type':'CPU','id':'CPU'}]})
+job=folder/'job.json';job.write_text(json.dumps(payload))
+# Production launches each job in a fresh Blender process.
+bpy.ops.wm.read_factory_settings(use_empty=False)
+worker.render(job,True)
+player=editor.JOB['video_player'];player.stop()
+assert bpy.context.scene.alice_eve.stable_transparency
+assert all(m.surface_render_method=='BLENDED' for m in bpy.data.materials if m.get('alice_proxy') and m.users)
+images=[]
+for frame in (1,3):
+    player.set_frame(frame);path=folder/f'frame-{frame}.png';bpy.context.scene.render.filepath=str(path);bpy.ops.render.render(write_still=True)
+    image=bpy.data.images.load(str(path));pixels=np.empty(len(image.pixels),dtype=np.float32);image.pixels.foreach_get(pixels);images.append(pixels);bpy.data.images.remove(image)
+assert np.array_equal(images[0],images[1]),'Identical display content changed when collision objects were replaced'
+print('FULL HD STABLE PREVIEW COLLISION PIXELS PASSED',flush=True)
