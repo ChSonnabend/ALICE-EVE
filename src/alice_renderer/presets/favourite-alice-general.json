@@ -138,11 +138,16 @@
     "colors_linear": {},
     "cutaway": false,
     "data_glow_lighting": false,
-    "detector_modes": {},
+    "detector_modes": {
+      "TRD": "both",
+      "TOF": "both"
+    },
     "detector_setup": "ALICE2",
     "detectors": [
       "ITS",
-      "TPC"
+      "TPC",
+      "TRD",
+      "TOF"
     ],
     "distance_cm": 3800,
     "elevation": 20,
@@ -1541,7 +1546,20 @@
     "track_emission": 0.8,
     "track_radius_cm": 0.045,
     "view_transform": "Standard",
-    "world_strength": 0.4
+    "world_strength": 0.4,
+    "cluster_size_scales": {
+      "EMC": 5.0,
+      "FT0": 5.0,
+      "FV0": 5.0,
+      "HMP": 5.0,
+      "ITS": 5.0,
+      "MCH": 5.0,
+      "MFT": 5.0,
+      "MID": 5.0,
+      "TOF": 5.0,
+      "TPC": 5.0,
+      "TRD": 5.0
+    }
   },
   "schema": "alice-eve-scene",
   "version": 1

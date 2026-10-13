@@ -9,6 +9,27 @@ from .palettes import materialize,sample,names
 
 WORKER=Path(__file__).parent/'blender'/'worker.py'
 
+def blender_environment():
+    """Keep Conda's Mesa-only EGL discovery override out of external Blender.
+
+    Conda activation can hide the system NVIDIA GLVND vendor. Preserve unrelated
+    custom driver directories, and never change the parent application's env.
+    """
+    env=os.environ.copy()
+    if sys.platform.startswith('linux'):
+        key='__EGL_VENDOR_LIBRARY_DIRS'
+        if key in env:
+            def conda_vendor(value):
+                path=Path(value)
+                return path.name=='egl_vendor.d' and path.parent.name=='glvnd' and path.parent.parent.name=='share' and (path.parent.parent.parent/'conda-meta').is_dir()
+            paths=env[key].split(os.pathsep)
+            kept=[p for p in paths if not conda_vendor(p)]
+            if kept!=paths:
+                if kept:env[key]=os.pathsep.join(kept)
+                else:env.pop(key)
+    return env
+
+
 def find_blender() -> str:
     value=shutil.which('blender')
     if value: return value
@@ -21,7 +42,7 @@ def probe(blender: str) -> dict:
     with tempfile.TemporaryDirectory(prefix='alice-device-check-') as tmp:
         output=Path(tmp)/'devices.json'
         command=[blender,'--background','--factory-startup','--python-exit-code','1','--python',str(WORKER),'--','--probe',str(output)]
-        result=subprocess.run(command,capture_output=True,text=True,timeout=60)
+        result=subprocess.run(command,capture_output=True,text=True,timeout=60,env=blender_environment())
         if result.returncode or not output.exists(): raise ValueError('Blender device discovery failed:\n'+result.stdout[-2000:]+result.stderr[-1000:])
         return json.loads(output.read_text())
 
@@ -192,7 +213,7 @@ def render_events(blender: str, paths: list[Path], settings: RenderSettings, out
                 progress(f'Render progress: {overall}% — event {index+1}/{len(paths)}: {percent}%')
         with (folder/'blender.log').open('w') as log, (folder/'blender.log').open() as status:
 
-            process=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+            process=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True,env=blender_environment())
             while process.poll() is None:
                 for line in status:report(line)
                 if cancelled():
@@ -243,7 +264,7 @@ def launch_editor(blender, event_path, settings, output, *, library_path=None, f
     job.write_text(json.dumps(payload,indent=2))
     log=(folder/'editor.log').open('w')
     try:
-        process=subprocess.Popen([blender,'--factory-startup','--python-exit-code','1','--python',str(WORKER),'--','--job',str(job),'--interactive'],stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+        process=subprocess.Popen([blender,'--factory-startup','--python-exit-code','1','--python',str(WORKER),'--','--job',str(job),'--interactive'],stdout=log,stderr=subprocess.STDOUT,start_new_session=True,env=blender_environment())
     finally:log.close()
     return folder,process.pid
 
@@ -303,13 +324,18 @@ def prepare_video(settings,paths,devices,output,*,cancelled=lambda:False):
         cfg.color_ranges[kind]=[lo,hi]
     return cfg,dict(events=[str(Path(p).resolve()) for p in paths],video_headers=headers,video_plan=plan,required_track_detectors=sorted(required))
 
-def render_video(blender,paths,settings,output,*,preview=False,progress=lambda s:None,cancelled=lambda:False,library_path=None,ffmpeg=None):
-    encoder=check_encoder(ffmpeg);cfg=materialize(dataclasses.replace(settings,clip_tracks=True))
+def render_video(blender,paths,settings,output,*,preview=False,progress=lambda s:None,cancelled=lambda:False,library_path=None,ffmpeg=None,frame=None):
+    if frame is not None and (isinstance(frame,bool) or not isinstance(frame,int) or frame<0):raise ValueError('Playback frame must be a nonnegative integer')
+    encoder=check_encoder(ffmpeg) if frame is None else None;cfg=materialize(dataclasses.replace(settings,clip_tracks=True))
     if preview:
         factor=min(1.,640/max(cfg.width,cfg.height));cfg.width=max(64,int(cfg.width*factor));cfg.height=max(64,int(cfg.height*factor));cfg.samples=16;cfg.denoise=True;cfg.save_blend=False
     progress('Checking video timing, selected detectors and render prerequisites')
     devices=probe(blender);cfg,payload=prepare_video(cfg,paths,devices,output,cancelled=cancelled)
-    plan=payload['video_plan'];progress(f'Video: {len(paths)} collisions, {plan["frames"]} frames, {plan["duration_s"]:.2f} seconds')
+    plan=payload['video_plan']
+    if frame is not None:
+        if frame>=plan['frames']:raise ValueError(f'Playback frame {frame} is outside 0–{plan["frames"]-1}')
+        payload['video_frame']=frame
+    progress(f'Video: {len(paths)} collisions, {plan["frames"]} frames, {plan["duration_s"]:.2f} seconds')
     if plan['time_scale'] is not None:progress(f'Collision time scale: {plan["time_scale"]:.6g} video seconds per source second')
     batch=Path(output)/(('video-preview-' if preview else 'video-')+time.strftime('%Y%m%d-%H%M%S')+'-'+os.urandom(3).hex());batch.mkdir(parents=True)
     first=payload['events'][plan['entries'][0]['source_index']]
@@ -317,7 +343,7 @@ def render_video(blender,paths,settings,output,*,preview=False,progress=lambda s
     job=batch/'job.json';job.write_text(json.dumps(payload,indent=2))
     command=[blender,'--background','--factory-startup','--python-exit-code','1','--python',str(WORKER),'--','--job',str(job)]
     with (batch/'blender.log').open('w') as log,(batch/'blender.log').open() as status:
-        process=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+        process=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True,env=blender_environment())
         def report():
             for line in status:
                 if 'ALICE_FRAME ' in line:
@@ -333,7 +359,8 @@ def render_video(blender,paths,settings,output,*,preview=False,progress=lambda s
                 raise InterruptedError('Video render cancelled')
             time.sleep(.1)
         report()
-    if process.returncode or not (batch/'video.mp4').is_file():raise ValueError(f'Video render failed. See {batch/"blender.log"}')
+    result=batch/('video.mp4' if frame is None else 'render.png')
+    if process.returncode or not result.is_file():raise ValueError(f'Video render failed. See {batch/"blender.log"}')
     from .scene_library import SceneLibrary
-    SceneLibrary(library_path).record_job(batch,kind='video preview' if preview else 'video')
-    progress(str(batch/'video.mp4'));return batch
+    SceneLibrary(library_path).record_job(batch,kind='playback frame' if frame is not None else 'video preview' if preview else 'video')
+    progress('Render progress: 100% — '+str(result));return batch

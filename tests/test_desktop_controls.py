@@ -45,7 +45,11 @@ def test_video_editor_receives_all_selected_paths_and_stop_prerequisite_is_clear
     def launched(blender,event_path,settings,output,**kwargs):captured.extend(kwargs['event_paths']);return root/'editor-video',123
     monkeypatch.setattr(app_module,'launch_editor',launched)
     w.open_editor();settle(w,application);assert len(captured)==3
-    messages=[];monkeypatch.setattr(w,'failure',messages.append);w.model.selected={0};w.start_render(False)
+    messages=[];monkeypatch.setattr(w,'failure',messages.append);w.model.selected={0}
+    monkeypatch.setattr(app_module,'probe',lambda _:dict(devices=[dict(type='CPU')]))
+    monkeypatch.setattr(w,'render_quality_dialog',lambda cfg,devices:cfg)
+    w.start_render(False);settle(w,application)
+    application.processEvents()  # queued final-dialog callback after device discovery
     assert any('at least two' in text for text in messages)
 
 def test_gui_play_is_available_without_video_checkbox_and_static_edit_retains_selection(window,monkeypatch):
@@ -80,6 +84,7 @@ def test_calorimeter_controls_round_trip_into_exported_scene(window):
 def test_detector_sizes_and_log_controls_round_trip_and_reset_to_inheritance(window):
     from alice_renderer.scene_config import recipe,resolve_settings
     w,application,root=window
+    for field in w.cluster_scales.values():field.setValue(1)
     w.cluster_scales['ITS'].setValue(3);w.cluster_scales['TPC'].setValue(.5)
     w.tower_width_factors['EMC'].setValue(.6);w.tower_fixed_heights['CPV'].setValue(13);w.tower_max_heights['EMC'].setValue(80)
     w.tower_height_mapping.setCurrentIndex(w.tower_height_mapping.findData('log'))
@@ -439,3 +444,17 @@ def test_geometry_only_controls_and_dispatch(window,monkeypatch):
     monkeypatch.setattr(app_module,'launch_editor',lambda blender,path,cfg,output,**kw:calls.append(('editor',path,kw['fast'])) or (output,1))
     w.open_editor();settle(w,application)
     assert calls[-1]==('editor',None,True)
+
+
+def test_final_dialog_can_override_video_and_renderer(window,monkeypatch):
+    from PySide6.QtWidgets import QDialog,QComboBox
+    w,application,root=window
+    def accept(dialog):
+        output=dialog.findChild(QComboBox,'renderOutputKind');assert output.currentData() is True
+        output.setCurrentIndex(0)
+        engine=dialog.findChild(QComboBox,'renderEngine');engine.setCurrentIndex(engine.findData('BLENDER_EEVEE'))
+        return QDialog.Accepted
+    monkeypatch.setattr(QDialog,'exec',accept)
+    chosen=w.render_quality_dialog(RenderSettings(video_enabled=True),{'devices':[{'type':'CPU'}]})
+    assert not chosen.video_enabled and chosen.render_engine=='BLENDER_EEVEE'
+    assert w.editor_button.parentWidget() is w.play_button.parentWidget()

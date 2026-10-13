@@ -132,3 +132,37 @@ to reuse unchanged geometry and textures between frames. This uses some addition
 memory. Detector pixels still participate in each frame's shading, depth,
 transparency and shadows, which preserves correct interaction with the changing
 tracks. Editing detector geometry explicitly rebuilds the changed surfaces.
+
+## Still frame or video
+
+The final Blender **Render…** dialog has an **Output** dropdown. Choose **Still
+image (current frame)** to save exactly the paused playback state, including
+partly grown tracks and towers, or **Video (all selected collisions)** for the
+complete MP4. Opening the dialog pauses playback and captures its frame index.
+Without playback, the still option renders the current event. Still frames do
+not require FFmpeg. The desktop final dialog also lets you choose event stills
+or a collision video; Interactive scene and Play collisions are adjacent.
+
+The final dialog exposes Eevee versus Cycles explicitly. Geometry remains an
+independent choice: full aligned surfaces, cached simplified surfaces, or the
+current scene. Blender's sidebar groups camera, geometry, data, individual
+detectors, lighting and save options into collapsible sections.
+
+On Linux, Conda may set `__EGL_VENDOR_LIBRARY_DIRS` to its Mesa-only vendor
+folder, hiding the system NVIDIA EGL driver and producing `EGL_BAD_MATCH`.
+Blender launches now remove that Conda-specific entry without altering the
+parent environment or unrelated custom driver directories. Restart the desktop
+app and open a new Blender session to use this fix; existing render processes
+retain their launch environment. Blender `use_nodes` deprecation notices are
+separate from graphics-driver errors.
+
+Geometry imports are retained across ordinary color, opacity, angular opening,
+camera, lighting and playback changes. Changing an asset, geometry detail,
+component selection or placement mask can still rebuild the affected detector.
+Unchanged shading no longer traverses every polygon, and unchanged detector
+materials are skipped. Geometry loading and the start of each video frame are
+logged before sampling so preparation is visible even before the first frame.
+
+For a reproducible stopped frame from a video-enabled portable recipe, pass
+`--video-frame N` to `alice-render render-config` with the same `--event-files`
+selection. The index is zero-based and saved in the output metadata.

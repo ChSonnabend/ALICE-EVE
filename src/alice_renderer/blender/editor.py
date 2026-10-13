@@ -158,11 +158,17 @@ def appearance_update(self,context):
         if bsdf:bsdf.inputs['Roughness'].default_value=ui.roughness;bsdf.inputs['Metallic'].default_value=ui.metallic
     for obj in context.scene.objects:
         if obj.type=='MESH':
-            for p in obj.data.polygons:p.use_smooth=not obj.get('alice_towers',False) and ui.shading=='smooth' and ('alice_lod' not in obj or obj.get('alice_structural_smooth',False))
+            smooth=not obj.get('alice_towers',False) and ui.shading=='smooth' and ('alice_lod' not in obj or obj.get('alice_structural_smooth',False))
+            if obj.get('alice_applied_smooth')!=smooth:
+                for p in obj.data.polygons:p.use_smooth=smooth
+                obj['alice_applied_smooth']=smooth
     for item in ui.detectors:
         coll=bpy.data.collections.get(item.name)
         if coll:
             coll.hide_render=not (item.visible and item.geometry_available);coll.hide_viewport=coll.hide_render
+        signature=json.dumps([list(item.color),item.opacity,item.opening,item.opening_direction])
+        if coll and coll.get('alice_material_signature')==signature:continue
+        if coll:coll['alice_material_signature']=signature
         mats={m for obj in coll.all_objects if obj.type in ('MESH','CURVE') for m in obj.data.materials if m} if coll else set()
         for mat in mats:
             if not mat.use_nodes:continue
@@ -689,6 +695,10 @@ def render_preset_update(self,context):
 class RenderFull(bpy.types.Operator):
     bl_idname='alice_eve.render_full';bl_label='Render full'
     bl_description='Choose image quality and geometry detail for each selected detector and L3, then start a full render'
+    render_kind: EnumProperty(name='Output',items=[('still','Still image (current frame)','Render the exact paused playback frame, or the current event'),('video','Video (all selected collisions)','Render the complete collision timeline as MP4')],default='still')
+    playback_frame: IntProperty(default=0,min=0,options={'HIDDEN'})
+    render_engine: EnumProperty(name='Renderer',items=[('BLENDER_EEVEE','Eevee (rasterized)','Fast rasterized rendering; requires a working graphics context'),('CYCLES','Cycles','Ray-traced rendering using the selected compute backend')],default='CYCLES')
+    show_geometry_details: BoolProperty(name='Override individual detector detail',default=False)
     geometry_details: CollectionProperty(type=RenderGeometryDetail)
     geometry_preset: EnumProperty(name='Geometry to render',items=[('full','Full geometry','Full aligned surfaces for all selected detectors and L3'),('simplified','Simplified geometry (fast surfaces)','Use compatible fast interactive caches; otherwise aligned coarse cells'),('current','Use interactive geometry','Use exactly the surface detail currently displayed in the interactive scene')],default='full',update=render_geometry_preset_update)
     quality: EnumProperty(name='Sampling preset',items=[(v,v.title(),'') for v in ('draft','balanced','final','publication','custom')],update=render_preset_update)
@@ -698,37 +708,49 @@ class RenderFull(bpy.types.Operator):
     output: StringProperty(name='Output folder',subtype='DIR_PATH')
     def invoke(self,context,event):
         self.quality=RECOMMENDATION['quality'];self.resolution_percent=PRESET_PERCENT[self.quality];self.output=JOB['render_output']
+        player=JOB.get('video_player')
+        self.render_kind='video' if player and player.playing else 'still'
+        if player:self.playback_frame=player.frame;player.stop()
+        self.render_engine=current_settings().render_engine
         initialize_render_geometry(self,current_settings())
         return context.window_manager.invoke_props_dialog(self,width=480)
     def draw(self,context):
-        layout=self.layout;layout.label(text=RECOMMENDATION['reason']);layout.prop(self,'quality');layout.prop(self,'backend')
+        layout=self.layout;layout.prop(self,'render_kind');layout.prop(self,'render_engine')
+        if self.render_kind=='still' and JOB.get('video_player'):layout.label(text=f'Paused playback frame: {self.playback_frame+1}')
+        layout.label(text=RECOMMENDATION['reason']);layout.prop(self,'quality')
+        if self.render_engine=='CYCLES':layout.prop(self,'backend')
         layout.prop(self,'geometry_preset')
         layout.prop(self,'resolution_percent',slider=True)
         layout.label(text='25% = 1080p · 50% = 4K · 100% = 8K (16:9)')
         w,h=percentage_size(self.resolution_percent or PRESET_PERCENT[self.quality],current_settings().frame_aspect)
         layout.label(text=f'{w} × {h} px; retains camera aspect')
         if self.quality=='custom':layout.prop(self,'samples')
-        box=layout.box();box.label(text='Geometry detail for this render')
-        box.label(text='Preset applies to all surfaces; override individual detectors below.')
-        cfg=current_settings().to_dict()
-        for item in self.geometry_details:
-            box.prop(item,'detail',text=item.name);box.label(text='Current: '+geometry_description(cfg,item.name))
-        if not self.geometry_details:box.label(text='No detector surfaces or magnet selected')
-        box.label(text='Full loads aligned surfaces, including from schematic previews.')
+        layout.prop(self,'show_geometry_details')
+        if self.show_geometry_details:
+            box=layout.box();box.label(text='Geometry detail for this render')
+            box.label(text='Preset applies to all surfaces; override individual detectors below.')
+            cfg=current_settings().to_dict()
+            for item in self.geometry_details:
+                box.prop(item,'detail',text=item.name);box.label(text='Current: '+geometry_description(cfg,item.name))
+            if not self.geometry_details:box.label(text='No detector surfaces or magnet selected')
+            box.label(text='Full loads aligned surfaces, including from schematic previews.')
         layout.prop(self,'output')
     def execute(self,context):
         try:
             ui=context.scene.alice_eve
             if ExportConfig.execute(self,context)!={'FINISHED'}:return {'CANCELLED'}
             backend=RECOMMENDATION['backend'] if self.backend=='AUTO' else self.backend
-            if not any(d['type']==backend for d in DEVICES['devices']):raise ValueError(f'{backend} is unavailable. Choose an available backend before rendering.')
+            if self.render_engine=='CYCLES' and not any(d['type']==backend for d in DEVICES['devices']):raise ValueError(f'{backend} is unavailable. Choose an available backend before rendering.')
             from alice_renderer.runtime import preflight
             from alice_renderer.scene_config import quality_settings
             check=quality_settings(current_settings(),'balanced' if self.quality=='custom' else self.quality,backend=backend,samples=self.samples if self.quality=='custom' else None,resolution_percent=self.resolution_percent or PRESET_PERCENT[self.quality])
+            check.render_engine=self.render_engine
+            player=JOB.get('video_player')
+            check.video_enabled=self.render_kind=='video' or player is not None
             check=render_geometry_settings(check,self.geometry_details,self.geometry_preset)
             if check.video_enabled:
                 from alice_renderer.runtime import prepare_video,check_encoder
-                encoder=check_encoder(JOB.get('ffmpeg'));check,_=prepare_video(check,[Path(p) for p in JOB.get('events',[])],DEVICES,Path(bpy.path.abspath(self.output)))
+                encoder=check_encoder(JOB.get('ffmpeg')) if self.render_kind=='video' else None;check,_=prepare_video(check,[Path(p) for p in JOB.get('events',[])],DEVICES,Path(bpy.path.abspath(self.output)))
             errors=preflight(check,[EVENT],DEVICES,Path(bpy.path.abspath(self.output)))
             if errors:raise ValueError('\n'.join(errors))
             root=Path(JOB['output']);path=root/'full-render-config.json'
@@ -743,7 +765,9 @@ class RenderFull(bpy.types.Operator):
             command=[JOB['python'],'-m','alice_renderer.cli','render-config',str(path),'--geometry-detail','current','--input',JOB['event'],'--event',str(EVENT['id']),'--assets',str(asset_map),'--blender',bpy.app.binary_path,'--backend',backend,'--quality','balanced' if self.quality=='custom' else self.quality,'--output',bpy.path.abspath(self.output)]
             command+=['--resolution-percent',str(self.resolution_percent or PRESET_PERCENT[self.quality])]
             if check.video_enabled:
-                event_list=root/('video-events-'+str(time.time_ns())+'.local.json');event_list.write_text(json.dumps(JOB['events']));command+=['--event-files',str(event_list),'--ffmpeg',encoder]
+                event_list=root/('video-events-'+str(time.time_ns())+'.local.json');event_list.write_text(json.dumps(JOB['events']));command+=['--event-files',str(event_list)]
+                if self.render_kind=='video':command+=['--ffmpeg',encoder]
+                else:command+=['--video-frame',str(self.playback_frame)]
             if self.quality=='custom':command+=['--samples',str(self.samples)]
             log_path=root/('full-render-'+str(time.time_ns())+'.log')
             with log_path.open('w') as log:process=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
@@ -885,94 +909,125 @@ class StopPicking(bpy.types.Operator):
 class EVEPanel(bpy.types.Panel):
     bl_label='ALICE-EVE scene';bl_idname='ALICE_PT_scene';bl_space_type='VIEW_3D';bl_region_type='UI';bl_category='ALICE EVE'
     def draw(self,context):
-        layout=self.layout;ui=context.scene.alice_eve
-        cfg=current_settings().to_dict()
-        layout.label(text='Detector surfaces')
+        root=self.layout;layout=root;ui=context.scene.alice_eve
+        row=layout.row();row.operator('alice_eve.render_full',text='Render…');row.operator('alice_eve.export',text='Save config')
+        layout.label(text=ui.render_status)
+        if 0<ui.render_percent<100:
+            row=layout.row();row.enabled=False;row.prop(ui,'render_percent',slider=True)
         layout.operator('alice_eve.pause_viewport',text='Resume viewport' if ui.viewport_paused else 'Pause viewport',icon='PLAY' if ui.viewport_paused else 'PAUSE')
-        if len(JOB.get('events',[]))>=2:
-            box=layout.box();box.label(text='Collision video');box.label(text=ui.video_status)
-            row=box.row();row.operator('alice_eve.play_video');row.operator('alice_eve.stop_video')
-            box.prop(ui,'pause_while_editing')
-            box.label(text='Playback waiting for sidebar editing' if JOB.get('video_player') and JOB['video_player'].held_at is not None else 'Play starts immediately; editing holds playback')
-            for key in ('video_enabled','video_timing','video_interval_s','video_time_scale','video_speed_m_s','video_tower_rise_s','video_fps'):box.prop(ui,key)
-        layout.operator('alice_eve.solid_surfaces');layout.operator('alice_eve.light_transparent_surfaces');layout.operator('alice_eve.restore_surface_exclusions');layout.operator('alice_eve.tpc_sectors_inner_wall');layout.operator('alice_eve.fast_surfaces');layout.operator('alice_eve.surround_lighting');layout.prop(ui,'viewport_renderer');layout.prop(ui,'viewport_samples')
-        layout.prop(ui,'geometry_lod');layout.operator('alice_eve.full_geometry')
-        layout.operator('alice_eve.select_no_detectors');layout.operator('alice_eve.complete_geometry')
-        layout.label(text='Outer shell / outline are approximate hulls.')
-        layout.label(text='Orbit/pan/zoom, then use view as camera.')
-        layout.operator('alice_eve.camera_from_view');layout.operator('alice_eve.level_camera');layout.prop(context.scene.camera,'rotation_euler')
-        layout.prop(context.space_data,'lock_camera',text='Navigate render camera')
-        row=layout.row();row.operator('alice_eve.roll_camera',text='Roll −15°').angle=-15;row.operator('alice_eve.roll_camera',text='Roll +15°').angle=15
-        layout.label(text='Trackball navigation permits arbitrary orientation.')
-        if EVENT.get('contributors') is not None or JOB.get('video_player'):layout.label(text='Primary vertex contributors: '+str(EVENT.get('contributors','unavailable')))
-        layout.label(text='Detector counts refer to input fitted records.')
-        counts=JOB['input_counts']
-        layout.label(text=f'Displayed: {ui.displayed_tracks} tracks / {ui.displayed_clusters} clusters')
-        flags=counts['association_flags_available'] or any(h.get('association_flags_available') for h in JOB.get('video_headers',[]))
-        if flags:layout.label(text=str(counts['ambiguous_drawable_tracks'])+' input tracks have ambiguous vertex matches')
-        row=layout.row();row.enabled=flags;row.prop(ui,'include_ambiguous_tracks')
-        layout.prop(context.scene.camera.data,'type');layout.prop(context.scene.camera.data,'lens');layout.prop(context.scene.camera.data,'ortho_scale')
-        layout.operator('alice_eve.opaque_geometry');layout.operator('alice_eve.apply_geometry')
-        layout.label(text=ui.render_status);row=layout.row();row.enabled=False;row.prop(ui,'render_percent',slider=True)
-        layout.prop(ui,'tpc_cluster_profile');layout.prop(ui,'tpc_profile_scale');layout.prop(ui,'tpc_profile_thickness_cm')
-        tower_box=layout.box();tower_box.label(text='Calorimeter towers (per detector below)')
-        for key in ('tower_fixed_height_cm','tower_max_height_cm','tower_width_scale','tower_direction','tower_height_mapping'):tower_box.prop(ui,key)
-        layout.prop(ui,'mode');layout.prop(ui,'track_width_cm');layout.prop(ui,'cluster_radius_cm');layout.prop(ui,'clip_tracks');layout.prop(ui,'track_color');layout.prop(ui,'cluster_color')
-        box=layout.box();box.label(text='Track emphasis / decay chain');box.prop(ui,'highlight_ids')
-        if ui.picking_active:box.operator('alice_eve.stop_picking',text='Stop picking (Esc)')
-        else:box.operator('alice_eve.pick_tracks')
-        box.prop(ui,'highlight_width_cm');box.prop(ui,'highlight_cluster_radius_cm');box.prop(ui,'highlight_override');box.prop(ui,'highlight_track_color');box.prop(ui,'highlight_cluster_color')
-        for kind in ('track','cluster'):
-            box=layout.box();box.prop(ui,kind+'_mode');row=box.row();row.prop(ui,kind+'_min');row.prop(ui,kind+'_max')
-        layout.prop(ui,'palette');layout.operator('alice_eve.apply_data')
-        for item in ui.detectors:
-            box=layout.box();box.label(text=f'{item.name}: {item.event_track_count} tracks / {item.event_cluster_count} clusters' if item.data_available else item.name)
-            row=box.row();row.enabled=item.data_available;row.prop(item,'data');row.prop(item,'mode')
-            if item.name!='L3':box.prop(item,'cluster_size_scale')
-            if item.name in ('EMC','PHS','CPV'):
-                row=box.row();row.enabled=item.data_available;row.prop(item,'cell_display')
-                if item.cell_display=='signal towers':box.prop(item,'tower_height_scale',text='Height (cm / input unit)' if item.name=='PHS' else 'Height (cm / amplitude)' if item.name=='CPV' else 'Height (cm / GeV)')
-                if item.cell_display!='points':
-                    box.prop(item,'tower_width_factor');box.prop(item,'tower_max_height_cm')
-                    if item.cell_display=='fixed towers':box.prop(item,'tower_fixed_height_cm')
-                    else:
-                        box.prop(item,'tower_mapping')
-                        if item.tower_mapping=='log' or item.tower_mapping=='inherit' and ui.tower_height_mapping=='log':box.prop(item,'tower_log_reference')
-                    box.label(text=f'{item.tower_count} towers / {item.tower_point_fallbacks} point fallbacks')
-                    if item.tower_nominal_footprints:box.label(text=f'{item.tower_nominal_footprints} nominal footprints (older export)')
-                if item.name=='CPV':box.label(text='CPV reconstructed clusters remain cluster glyphs')
-            row=box.row();row.enabled=item.geometry_available;row.prop(item,'visible')
-            box.prop(item,'asset_path')
-            if not item.geometry_available:box.label(text='Choose an aligned asset to add this surface')
-            if item.geometry_available:
-                kind=geometry_description(cfg,item.name)
-                box.label(text='Geometry source: '+kind)
-                if cfg['geometry_lods'].get(item.name,cfg['geometry_lod']) in ('structural','proxy'):box.label(text='Fine parts omitted; layers / walls / sectors retained')
-                box.prop(item,'detail');box.prop(item,'display');box.prop(item,'opening');box.prop(item,'opening_direction');box.prop(item,'exclusions');box.prop(item,'color');box.prop(item,'opacity')
-                box.prop(item,'show_components')
-                if item.show_components:
-                    box.operator('alice_eve.refresh_components').detector=item.name;box.prop(item,'component_category');box.prop(item,'component_filter')
-                    displayed=0;component_enabled=not is_schematic(current_settings().to_dict(),item.name)
-                    coll=bpy.data.collections.get(item.name)
-                    supported=set(json.loads(coll.get('alice_structural_components','[]'))) if coll else set()
-                    large=cfg['geometry_lods'].get(item.name,cfg['geometry_lod']) in ('structural','proxy')
-                    for component in item.components:
-                        if component.identifier.split('/')[0]!=item.component_category:continue
-                        if item.component_filter and item.component_filter.lower() not in (component.identifier+' '+component.label).lower():continue
-                        displayed+=1
-                        if displayed>200:box.label(text='Filter to show more than 200 named elements');break
-                        row=box.row();row.enabled=component_enabled and (not large or component.identifier in supported)
-                        op=row.operator('alice_eve.toggle_component',text=('  '*component.identifier.count('/'))+component.label+' ('+str(component.count)+')',icon='CHECKBOX_HLT' if component.enabled else 'CHECKBOX_DEHLT',depress=component.enabled);op.detector=item.name;op.identifier=component.identifier
-                    if not item.components:box.label(text='No hierarchy metadata for this asset')
-                box.prop(item,'inner_mask_radius')
-                if item.inner_mask_radius>0:box.prop(item,'inner_mask_patterns');box.prop(item,'inner_mask_front')
-        layout.prop(ui,'background');layout.prop(ui,'world_strength');layout.prop(ui,'view_transform');layout.prop(ui,'exposure');layout.prop(ui,'track_emission');layout.prop(ui,'cluster_emission');layout.prop(ui,'data_glow_lighting');layout.prop(ui,'roughness');layout.prop(ui,'metallic');layout.prop(ui,'shading')
-        layout.operator('alice_eve.show_scene_lighting')
-        layout.label(text='Scene area lights: '+str(sum(o.type=='LIGHT' and o.data.type=='AREA' for o in context.scene.objects)))
-        for lamp in (o for o in context.scene.objects if o.type=='LIGHT'):
-            box=layout.box();box.label(text=lamp.name);box.prop(lamp,'location');box.prop(lamp,'rotation_euler');box.prop(lamp.data,'energy');box.prop(lamp.data,'size');box.prop(lamp.data,'color')
-        layout.prop(ui,'export_path');layout.prop(ui,'include_defaults')
-        row=layout.row();row.operator('alice_eve.export');row.operator('alice_eve.render_full')
+        header,body=root.panel('alice_playback',default_closed=False)
+        header.label(text='Collision playback')
+        if body is not None:
+            layout=body
+            if len(JOB.get('events',[]))>=2:
+                box=layout.box();box.label(text='Collision video');box.label(text=ui.video_status)
+                row=box.row();row.operator('alice_eve.play_video');row.operator('alice_eve.stop_video')
+                box.prop(ui,'pause_while_editing')
+                box.label(text='Playback waiting for sidebar editing' if JOB.get('video_player') and JOB['video_player'].held_at is not None else 'Play starts immediately; editing holds playback')
+                for key in ('video_enabled','video_timing','video_interval_s','video_time_scale','video_speed_m_s','video_tower_rise_s','video_fps'):box.prop(ui,key)
+        header,body=root.panel('alice_camera',default_closed=True)
+        header.label(text='Camera')
+        if body is not None:
+            layout=body
+            layout.label(text='Orbit/pan/zoom, then use view as camera.')
+            layout.operator('alice_eve.camera_from_view');layout.operator('alice_eve.level_camera');layout.prop(context.scene.camera,'rotation_euler')
+            layout.prop(context.space_data,'lock_camera',text='Navigate render camera')
+            row=layout.row();row.operator('alice_eve.roll_camera',text='Roll −15°').angle=-15;row.operator('alice_eve.roll_camera',text='Roll +15°').angle=15
+            layout.label(text='Trackball navigation permits arbitrary orientation.')
+            layout.prop(context.scene.camera.data,'type');layout.prop(context.scene.camera.data,'lens');layout.prop(context.scene.camera.data,'ortho_scale')
+        header,body=root.panel('alice_surfaces',default_closed=True)
+        header.label(text='Geometry and viewport')
+        if body is not None:
+            layout=body
+            layout.operator('alice_eve.solid_surfaces');layout.operator('alice_eve.light_transparent_surfaces');layout.operator('alice_eve.restore_surface_exclusions');layout.operator('alice_eve.tpc_sectors_inner_wall');layout.operator('alice_eve.fast_surfaces');layout.operator('alice_eve.surround_lighting');layout.prop(ui,'viewport_renderer');layout.prop(ui,'viewport_samples')
+            layout.prop(ui,'geometry_lod');layout.operator('alice_eve.full_geometry')
+            layout.operator('alice_eve.select_no_detectors');layout.operator('alice_eve.complete_geometry')
+            layout.label(text='Outer shell / outline are approximate hulls.')
+            layout.operator('alice_eve.opaque_geometry');layout.operator('alice_eve.apply_geometry')
+        header,body=root.panel('alice_data',default_closed=True)
+        header.label(text='Tracks and clusters')
+        if body is not None:
+            layout=body
+            if EVENT.get('contributors') is not None or JOB.get('video_player'):layout.label(text='Primary vertex contributors: '+str(EVENT.get('contributors','unavailable')))
+            layout.label(text='Detector counts refer to input fitted records.')
+            counts=JOB['input_counts']
+            layout.label(text=f'Displayed: {ui.displayed_tracks} tracks / {ui.displayed_clusters} clusters')
+            flags=counts['association_flags_available'] or any(h.get('association_flags_available') for h in JOB.get('video_headers',[]))
+            if flags:layout.label(text=str(counts['ambiguous_drawable_tracks'])+' input tracks have ambiguous vertex matches')
+            row=layout.row();row.enabled=flags;row.prop(ui,'include_ambiguous_tracks')
+            layout.prop(ui,'tpc_cluster_profile');layout.prop(ui,'tpc_profile_scale');layout.prop(ui,'tpc_profile_thickness_cm')
+            tower_box=layout.box();tower_box.label(text='Calorimeter towers (per detector below)')
+            for key in ('tower_fixed_height_cm','tower_max_height_cm','tower_width_scale','tower_direction','tower_height_mapping'):tower_box.prop(ui,key)
+            layout.prop(ui,'mode');layout.prop(ui,'track_width_cm');layout.prop(ui,'cluster_radius_cm');layout.prop(ui,'clip_tracks');layout.prop(ui,'track_color');layout.prop(ui,'cluster_color')
+            box=layout.box();box.label(text='Track emphasis / decay chain');box.prop(ui,'highlight_ids')
+            if ui.picking_active:box.operator('alice_eve.stop_picking',text='Stop picking (Esc)')
+            else:box.operator('alice_eve.pick_tracks')
+            box.prop(ui,'highlight_width_cm');box.prop(ui,'highlight_cluster_radius_cm');box.prop(ui,'highlight_override');box.prop(ui,'highlight_track_color');box.prop(ui,'highlight_cluster_color')
+            for kind in ('track','cluster'):
+                box=layout.box();box.prop(ui,kind+'_mode');row=box.row();row.prop(ui,kind+'_min');row.prop(ui,kind+'_max')
+            layout.prop(ui,'palette');layout.operator('alice_eve.apply_data')
+        header,body=root.panel('alice_detectors',default_closed=True)
+        header.label(text='Detector settings')
+        if body is not None:
+            layout=body;cfg=current_settings().to_dict()
+            for item in ui.detectors:
+                header,box=layout.panel('alice_detector_'+item.name,default_closed=True)
+                header.label(text=f'{item.name}: {item.event_track_count} tracks / {item.event_cluster_count} clusters' if item.data_available else item.name)
+                if box is None:continue
+                row=box.row();row.enabled=item.data_available;row.prop(item,'data');row.prop(item,'mode')
+                if item.name!='L3':box.prop(item,'cluster_size_scale')
+                if item.name in ('EMC','PHS','CPV'):
+                    row=box.row();row.enabled=item.data_available;row.prop(item,'cell_display')
+                    if item.cell_display=='signal towers':box.prop(item,'tower_height_scale',text='Height (cm / input unit)' if item.name=='PHS' else 'Height (cm / amplitude)' if item.name=='CPV' else 'Height (cm / GeV)')
+                    if item.cell_display!='points':
+                        box.prop(item,'tower_width_factor');box.prop(item,'tower_max_height_cm')
+                        if item.cell_display=='fixed towers':box.prop(item,'tower_fixed_height_cm')
+                        else:
+                            box.prop(item,'tower_mapping')
+                            if item.tower_mapping=='log' or item.tower_mapping=='inherit' and ui.tower_height_mapping=='log':box.prop(item,'tower_log_reference')
+                        box.label(text=f'{item.tower_count} towers / {item.tower_point_fallbacks} point fallbacks')
+                        if item.tower_nominal_footprints:box.label(text=f'{item.tower_nominal_footprints} nominal footprints (older export)')
+                    if item.name=='CPV':box.label(text='CPV reconstructed clusters remain cluster glyphs')
+                row=box.row();row.enabled=item.geometry_available;row.prop(item,'visible')
+                box.prop(item,'asset_path')
+                if not item.geometry_available:box.label(text='Choose an aligned asset to add this surface')
+                if item.geometry_available:
+                    kind=geometry_description(cfg,item.name)
+                    box.label(text='Geometry source: '+kind)
+                    if cfg['geometry_lods'].get(item.name,cfg['geometry_lod']) in ('structural','proxy'):box.label(text='Fine parts omitted; layers / walls / sectors retained')
+                    box.prop(item,'detail');box.prop(item,'display');box.prop(item,'opening');box.prop(item,'opening_direction');box.prop(item,'exclusions');box.prop(item,'color');box.prop(item,'opacity')
+                    box.prop(item,'show_components')
+                    if item.show_components:
+                        box.operator('alice_eve.refresh_components').detector=item.name;box.prop(item,'component_category');box.prop(item,'component_filter')
+                        displayed=0;component_enabled=not is_schematic(current_settings().to_dict(),item.name)
+                        coll=bpy.data.collections.get(item.name)
+                        supported=set(json.loads(coll.get('alice_structural_components','[]'))) if coll else set()
+                        large=cfg['geometry_lods'].get(item.name,cfg['geometry_lod']) in ('structural','proxy')
+                        for component in item.components:
+                            if component.identifier.split('/')[0]!=item.component_category:continue
+                            if item.component_filter and item.component_filter.lower() not in (component.identifier+' '+component.label).lower():continue
+                            displayed+=1
+                            if displayed>200:box.label(text='Filter to show more than 200 named elements');break
+                            row=box.row();row.enabled=component_enabled and (not large or component.identifier in supported)
+                            op=row.operator('alice_eve.toggle_component',text=('  '*component.identifier.count('/'))+component.label+' ('+str(component.count)+')',icon='CHECKBOX_HLT' if component.enabled else 'CHECKBOX_DEHLT',depress=component.enabled);op.detector=item.name;op.identifier=component.identifier
+                        if not item.components:box.label(text='No hierarchy metadata for this asset')
+                    box.prop(item,'inner_mask_radius')
+                    if item.inner_mask_radius>0:box.prop(item,'inner_mask_patterns');box.prop(item,'inner_mask_front')
+        header,body=root.panel('alice_lighting',default_closed=True)
+        header.label(text='Lighting and materials')
+        if body is not None:
+            layout=body
+            layout.prop(ui,'background');layout.prop(ui,'world_strength');layout.prop(ui,'view_transform');layout.prop(ui,'exposure');layout.prop(ui,'track_emission');layout.prop(ui,'cluster_emission');layout.prop(ui,'data_glow_lighting');layout.prop(ui,'roughness');layout.prop(ui,'metallic');layout.prop(ui,'shading')
+            layout.operator('alice_eve.show_scene_lighting')
+            layout.label(text='Scene area lights: '+str(sum(o.type=='LIGHT' and o.data.type=='AREA' for o in context.scene.objects)))
+            for lamp in (o for o in context.scene.objects if o.type=='LIGHT'):
+                box=layout.box();box.label(text=lamp.name);box.prop(lamp,'location');box.prop(lamp,'rotation_euler');box.prop(lamp.data,'energy');box.prop(lamp.data,'size');box.prop(lamp.data,'color')
+        header,body=root.panel('alice_export',default_closed=True)
+        header.label(text='Save options')
+        if body is not None:
+            layout=body
+            layout.prop(ui,'export_path');layout.prop(ui,'include_defaults')
+
 
 CLASSES=(GeometryComponent,ToggleComponent,RefreshComponents,DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,SolidDetectorSurfaces,LightTransparentSurfaces,RestoreSurfaceExclusions,TPCSectorsInnerWall,SurroundLighting,FastStructuralSurfaces,ShowSceneLighting,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,PlayVideo,StopVideo,ToggleViewportPause,WatchPlaybackControls,ExportConfig,RenderFull,EVEPanel)
 

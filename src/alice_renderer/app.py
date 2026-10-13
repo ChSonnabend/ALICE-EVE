@@ -110,7 +110,7 @@ class Window(QMainWindow):
         right=QWidget();right_layout=QVBoxLayout(right);split.addWidget(right);split.setSizes([540,840])
         tools=QHBoxLayout();right_layout.addLayout(tools)
         self.all_button=QPushButton('Select all');self.none_button=QPushButton('Select none');tools.addWidget(self.all_button);tools.addWidget(self.none_button)
-        self.play_button=QPushButton('Play collisions…');self.play_button.setToolTip('Select at least two collisions to open looping Blender playback; no video checkbox is required');self.play_button.clicked.connect(self.play_editor);tools.addWidget(self.play_button)
+        self.play_button=QPushButton('Play collisions…');self.play_button.setToolTip('Select at least two collisions to open looping Blender playback; no video checkbox is required');self.play_button.clicked.connect(self.play_editor)
         self.selection_label=QLabel('0 events selected');tools.addWidget(self.selection_label,1)
         self.model=EventsModel();self.model.changed.connect(self.update_availability)
         self.all_button.clicked.connect(lambda:self.model.select_all(True));self.none_button.clicked.connect(lambda:self.model.select_all(False))
@@ -126,7 +126,7 @@ class Window(QMainWindow):
         self.load_config_button=QPushButton('Load config…');self.load_config_button.clicked.connect(self.import_scene);bottom.addWidget(self.load_config_button)
         self.export_config_button=QPushButton('Export config…');self.export_config_button.clicked.connect(self.export_scene);bottom.addWidget(self.export_config_button)
         self.fast_interactive=QCheckBox('Fast interactive');self.fast_interactive.setChecked(self.saved.get('fast_interactive',True));self.fast_interactive.setToolTip('Use reviewed cached approximate surfaces for detectors and magnet, with a 32-sample Eevee viewport. Full detail remains available in the editor.');bottom.addWidget(self.fast_interactive)
-        self.editor_button=QPushButton('Interactive scene…');self.editor_button.clicked.connect(self.open_editor);bottom.addWidget(self.editor_button)
+        self.editor_button=QPushButton('Interactive scene…');self.editor_button.clicked.connect(self.open_editor);bottom.addWidget(self.editor_button);bottom.addWidget(self.play_button)
         self.preview_button=QPushButton('Preview first selected event');self.preview_button.clicked.connect(lambda:self.start_render(True));bottom.addWidget(self.preview_button)
         self.render_button=QPushButton('Render selected events');self.render_button.setObjectName('primary');self.render_button.clicked.connect(lambda:self.start_render(False));bottom.addWidget(self.render_button)
         self.update_availability()
@@ -738,9 +738,12 @@ class Window(QMainWindow):
         self.start_task(launch,launched)
     def render_quality_dialog(self,cfg,devices):
         rec=recommended_quality(devices);dialog=QDialog(self);dialog.setWindowTitle('Full render quality');form=QFormLayout(dialog)
+        output_kind=QComboBox();output_kind.setObjectName('renderOutputKind');output_kind.addItem('Still images (selected events)',False);output_kind.addItem('Video (selected collisions)',True);output_kind.setCurrentIndex(int(cfg.video_enabled));form.addRow('Output',output_kind)
+        engine=QComboBox();engine.setObjectName('renderEngine');engine.addItem('Eevee (rasterized)','BLENDER_EEVEE');engine.addItem('Cycles','CYCLES');engine.setCurrentIndex(engine.findData(cfg.render_engine));form.addRow('Renderer',engine)
         note=QLabel(rec['reason']);note.setWordWrap(True);form.addRow(note)
         quality=QComboBox();quality.addItems(['draft','balanced','final','publication','custom']);quality.setCurrentText(rec['quality']);form.addRow('Sampling preset',quality)
         backend=QComboBox();backend.addItems(list(dict.fromkeys(d['type'] for d in devices['devices'])));backend.setCurrentText(rec['backend']);form.addRow('Available backend',backend)
+        engine.currentIndexChanged.connect(lambda:backend.setEnabled(engine.currentData()=='CYCLES'));backend.setEnabled(engine.currentData()=='CYCLES')
         geometry_preset=QComboBox();geometry_preset.setObjectName('renderGeometryPreset')
         for label,value in (('Full geometry','full'),('Simplified geometry (fast surfaces)','simplified'),('Use interactive geometry','current')):geometry_preset.addItem(label,value)
         form.addRow('Geometry to render',geometry_preset)
@@ -781,6 +784,7 @@ class Window(QMainWindow):
         if dialog.exec()!=QDialog.Accepted:return None
         custom=quality.currentText()=='custom'
         chosen=quality_settings(cfg,'balanced' if custom else quality.currentText(),backend=backend.currentText(),samples=samples.value() if custom else None,resolution_percent=slider.value()/10)
+        chosen.video_enabled=output_kind.currentData();chosen.render_engine=engine.currentData()
         from .geometry_selection import render_choices
         return render_choices(chosen,{name:combo.currentData() for name,combo in geometry_details.items()})
     def start_render(self,preview):
@@ -788,10 +792,11 @@ class Window(QMainWindow):
         try:cfg=self.settings();self.save_settings(cfg)
         except Exception as exc:self.failure(str(exc));return
         ids=sorted(self.model.selected)
-        if cfg.video_enabled and len(ids)<2:self.failure('Video needs at least two selected collision events');return
+        if preview and cfg.video_enabled and len(ids)<2:self.failure('Video needs at least two selected collision events');return
         if preview and not cfg.video_enabled:ids=ids[:1]
         blender=self.blender.text();output=Path(self.output.text())
         def run(chosen):
+            if chosen is not None and chosen.video_enabled and len(ids)<2:self.failure('Video needs at least two selected collision events');return
             if chosen is not None:self.start_task(lambda p,c:render_events(blender,[self.catalogue.event_path(i,progress=p,cancelled=c) for i in ids],chosen,output,preview=preview,progress=p,cancelled=c,library_path=self.library.path),lambda batch:(self.refresh_library(),self.message(f'Completed: {batch}')))
         if preview:run(cfg)
         else:

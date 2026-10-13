@@ -88,11 +88,15 @@ with tempfile.TemporaryDirectory(prefix='alice-video-qa-') as tmp:
     from unittest.mock import patch
     editor.JOB['python']=sys.executable;editor.JOB['ffmpeg']='/portable/encoder'
     with patch('alice_renderer.runtime.check_encoder',return_value='/portable/encoder'),patch.object(editor.subprocess,'Popen') as spawn:
-        assert bpy.ops.alice_eve.render_full(quality='draft',resolution_percent=1,backend='CPU',output=str(root/'movies'),geometry_details=[{'name':d,'detail':'current'} for d in cfg.geometry])=={'FINISHED'}
+        assert bpy.ops.alice_eve.render_full(render_kind='video',quality='draft',resolution_percent=1,backend='CPU',output=str(root/'movies'),geometry_details=[{'name':d,'detail':'current'} for d in cfg.geometry])=={'FINISHED'}
         command=spawn.call_args.args[0]
         assert json.loads(Path(command[command.index('--event-files')+1]).read_text())==paths
         assert command[command.index('--ffmpeg')+1]=='/portable/encoder'
         config=json.loads(Path(command[command.index('render-config')+1]).read_text())
         assert config['scene']['video_enabled'] and not config['defaults']
         assert 'events' not in config
+    with patch('alice_renderer.runtime.check_encoder',side_effect=AssertionError('Still frames need no encoder')),patch.object(editor.subprocess,'Popen') as spawn:
+        assert bpy.ops.alice_eve.render_full(render_kind='still',playback_frame=9,quality='draft',resolution_percent=1,backend='CPU',output=str(root/'still'),geometry_details=[{'name':d,'detail':'current'} for d in cfg.geometry])=={'FINISHED'}
+        command=spawn.call_args.args[0]
+        assert command[command.index('--video-frame')+1]=='9' and '--ffmpeg' not in command
     print('COLLISION VIDEO BLENDER QA PASSED')

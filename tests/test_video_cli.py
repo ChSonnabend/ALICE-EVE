@@ -52,3 +52,18 @@ def test_catalogue_render_upgrades_only_final_geometry_by_default(tmp_path,monke
     if detail:args+=['--geometry-detail',detail]
     monkeypatch.setattr(sys,'argv',args);cli.main()
     assert calls[0].geometry_lods.get('TPC',calls[0].geometry_lod)==expected
+
+
+def test_stopped_frame_cli_preserves_frame_index(tmp_path,monkeypatch):
+    config=tmp_path/'scene.json';save_config(config,recipe(RenderSettings(video_enabled=True,schematic=True)))
+    listing=tmp_path/'selection.json';listing.write_text(json.dumps(['a.json','b.json']))
+    monkeypatch.setattr(cli,'probe',lambda _:dict(version=[5,0],devices=[dict(type='CPU',id='CPU')]))
+    calls=[];monkeypatch.setattr(runtime,'render_video',lambda *a,**kw:calls.append(kw) or tmp_path)
+    monkeypatch.setattr(sys,'argv',['alice-render','render-config',str(config),'--event-files',str(listing),'--video-frame','17'])
+    cli.main();assert calls[0]['frame']==17
+
+
+@pytest.mark.parametrize('frame',[-1,True,1.5])
+def test_invalid_playback_frame_rejected_before_render(tmp_path,frame):
+    with pytest.raises(ValueError,match='nonnegative integer'):
+        runtime.render_video('unused',[],RenderSettings(),tmp_path,frame=frame)

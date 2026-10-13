@@ -23,6 +23,16 @@ with tempfile.TemporaryDirectory(prefix='alice-proxy-qa-') as tmp:
  assert bpy.context.scene.alice_eve.viewport_samples==32
  assert bpy.ops.alice_eve.fast_surfaces()=={'FINISHED'}
  assert all(m.surface_render_method=='DITHERED' for m in bpy.data.materials if m.get('alice_proxy'))
+ # Appearance changes and unchanged Apply geometry calls retain GPU mesh identities.
+ def buffers():return {(n,o.name):(o.as_pointer(),o.data.as_pointer()) for n in assets for o in bpy.data.collections[n].objects}
+ identities=buffers()
+ ui=bpy.context.scene.alice_eve
+ from unittest.mock import patch
+ with patch.object(worker,'imported_geometry',side_effect=AssertionError('Unchanged geometry must not reload')):
+  for name in ('ITS','TPC','L3'):
+   item=ui.detectors[name];item.opacity=.25;item.color=(.2,.3,.6);item.opening=120;item.opening_direction=45
+   assert bpy.ops.alice_eve.apply_geometry()=={'FINISHED'}
+   assert buffers()==identities
  # Cache clipping bounds bypass mesh import, even for non-ITS/TPC tracks.
  region=worker.imported_geometry('HMP',assets['HMP'],cfg.to_dict(),bounds_only=True)
  assert region['units']=='cm' and len(region['planes'])==66

@@ -514,6 +514,7 @@ def render(job_path,interactive=False):
     required={d for t in ts for d in selected_track_detectors(settings,t)} if settings.get('clip_tracks',True) and bool(enabled_detectors(settings,'tracks')) else set()
     if settings.get('video_enabled') and job.get('events'):required.update(job.get('required_track_detectors',[]))
     for name in settings['geometry']+(['L3'] if settings['magnet'] else []):
+        print('ALICE_STAGE Loading geometry: '+name,flush=True)
         if is_schematic(settings,name):
             envelope(name,settings);metadata['geometry'][name]={'type':'schematic'}
         else:
@@ -521,6 +522,7 @@ def render(job_path,interactive=False):
             region=info.pop('track_region',None)
             if region:regions[name]=region
             metadata['geometry'][name]={'type':'asset','path':settings['geometry_assets'][name],**info}
+    print('ALICE_STAGE Preparing track clipping and event data',flush=True)
     for name in required-set(regions):
         asset=settings['geometry_assets'].get(name)
         if asset and not is_schematic(settings,name):regions[name]=imported_geometry(name,asset,settings,bounds_only=True)

@@ -34,3 +34,14 @@ def test_startup_keeps_reviewed_camera_with_reduced_tpc_and_surround_lights():
     from alice_renderer.scene_presets import SURROUND_LIGHT_PREFIX
     assert sum(light.get('name','').startswith(SURROUND_LIGHT_PREFIX) for light in cfg.lights)==10
     assert cfg.geometry_openings.get('ITS')==90. and cfg.geometry_openings.get('TPC')==90.
+
+
+def test_alice_general_default_data_modes_and_cluster_scale():
+    from pathlib import Path
+    from alice_renderer.defaults import detector_settings
+    cfg=detector_settings('ALICE2')
+    general=load_config(Path(__file__).parents[1]/'src/alice_renderer/presets/favourite-alice-general.json')['scene']
+    for scene in (cfg.to_dict(),general):
+        assert {'TRD','TOF'}<=set(scene['detectors'])
+        assert all(scene['detector_modes'][d]=='both' for d in ('TRD','TOF'))
+        assert all(scene['cluster_size_scales'][d]==5 for d in scene['detectors'])

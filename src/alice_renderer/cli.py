@@ -27,6 +27,7 @@ def main():
         command.add_argument('--events',help='Comma-separated event IDs or ordinal:N selectors for a collision video')
         command.add_argument('--event-files',type=Path,help='Local JSON list of materialized event files; input selection stays outside the portable config')
         command.add_argument('--ffmpeg',help='Local FFmpeg executable for MP4 encoding')
+        if name=='render-config':command.add_argument('--video-frame',type=int,help='Render one zero-based playback frame as PNG instead of the MP4')
         if name=='render-config':command.add_argument('--geometry-detail',choices=['full','current','simplified','structural','proxy','schematic'],default='full',help='Final renders default to full aligned geometry; current preserves per-detector choices in the recipe')
         command.add_argument('--profile',type=Path);command.add_argument('--geometry-root',type=Path);command.add_argument('--assets',type=Path,help='Local detector-to-asset mapping; hashes still verified')
         command.add_argument('--cache',type=Path,default=Path('cache'));command.add_argument('--output',type=Path,default=Path('renders'))
@@ -82,8 +83,10 @@ def main():
             if args.command=='edit-config':print(launch_editor(args.blender,paths[0],cfg,args.output,event_paths=paths)[0])
             elif cfg.video_enabled:
                 from .runtime import render_video
-                print(render_video(args.blender,paths,cfg,args.output,progress=print,ffmpeg=args.ffmpeg))
-            else:print(render_events(args.blender,paths,cfg,args.output,progress=print))
+                print(render_video(args.blender,paths,cfg,args.output,progress=print,ffmpeg=args.ffmpeg,**({'frame':args.video_frame} if args.video_frame is not None else {})))
+            else:
+                if args.video_frame is not None:raise ValueError('--video-frame requires a video-enabled scene')
+                print(render_events(args.blender,paths,cfg,args.output,progress=print))
         elif args.command=='render':
             cat=Catalogue(args.catalogue)
             ids=[row['ordinal'] for row in cat.rows()] if args.events=='all' else [int(v) for v in args.events.split(',')]

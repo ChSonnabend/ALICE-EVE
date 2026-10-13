@@ -164,6 +164,18 @@ class VideoPlayer:
 
 def render_movie(job,settings,regions,metadata):
     output=Path(job['output']);player=VideoPlayer(job,settings,regions);plan=player.plan
+    if job.get('video_frame') is not None:
+        frame=job['video_frame']
+        if not 0<=frame<plan['frames']:raise ValueError('Playback frame is outside the video timeline')
+        player.set_frame(frame)
+        scene=bpy.context.scene;scene.render.filepath=str(output/'render.png')
+        if settings.get('save_blend'):bpy.ops.wm.save_as_mainfile(filepath=str(output/'scene.blend'))
+        print(f'ALICE_STAGE Rendering stopped frame {frame+1}/{plan["frames"]}',flush=True)
+        bpy.ops.render.render(write_still=True)
+        metadata['video_frame']={'frame':frame,'fps':plan['fps'],'event':player.event['id'],'age_s':player.age}
+        (output/'metadata.json').write_text(json.dumps(metadata,indent=2))
+        print('ALICE_FRAME 1/1',flush=True)
+        return
     command=[job['ffmpeg'],'-hide_banner','-loglevel','error','-y','-f','image2pipe','-framerate',str(plan['fps']),'-vcodec','png','-i','pipe:0','-an','-vf','pad=ceil(iw/2)*2:ceil(ih/2)*2','-c:v','libx264','-crf','18','-preset','medium','-pix_fmt','yuv420p','-movflags','+faststart',str(output/'video.part.mp4')]
     scene=bpy.context.scene;framefile=output/'frame-current.png';scene.render.image_settings.file_format='PNG';scene.render.image_settings.color_mode='RGBA';scene.render.image_settings.color_depth='8';scene.render.filepath=str(framefile)
     poster=plan['entries'][0]['frame_end']-1
@@ -171,7 +183,7 @@ def render_movie(job,settings,regions,metadata):
         encoder=subprocess.Popen(command,stdin=subprocess.PIPE,stderr=log)
         try:
             for frame in range(plan['frames']):
-                player.set_frame(frame);bpy.ops.render.render(write_still=True)
+                player.set_frame(frame);print(f'ALICE_STAGE Rendering video frame {frame+1}/{plan["frames"]}',flush=True);bpy.ops.render.render(write_still=True)
                 if frame==poster:shutil.copy2(framefile,output/'render.png')
                 if frame==poster and settings.get('save_blend'):bpy.ops.wm.save_as_mainfile(filepath=str(output/'scene.blend'))
                 encoder.stdin.write(framefile.read_bytes());encoder.stdin.flush()
