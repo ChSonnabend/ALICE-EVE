@@ -54,6 +54,12 @@ Install Blender 4.5+ (this machine has 5.0). Choose its executable in Setup if i
 
 **Recent scenes** lists completed renders and automatically saved interactive sessions. Use the recent/favourite pickers above the event list to reuse settings for the current input and selected event. The **Favourites** tab keeps named, fixed snapshots. **Reload scene and original event** restores the original event when its local data is available; **Use for current input / event** retains your new file/event selection and clears event-specific highlighted track IDs. History and favourites are local and excluded from Git.
 
+Final-render dialogs and command-line final renders default to **full aligned
+geometry**, independently of fast preview surfaces. Detector parts, exclusions,
+openings, camera and colours remain as selected. Reduced detail is an explicit
+render choice; `--geometry-detail current` keeps the recipe's exact detail. Missing
+full assets produce a prerequisite message rather than a simplified fallback.
+
 New installations include **ITS-TPC** and **ALICE general** in Favourites. These preserve the camera, detector parts, colours, transparency and lighting of the saved private-linux “TPC-ITS closeup” and “ALICE global” scenes. Choose your local input and event, select a favourite, then click **Use favourite**. Prepared geometry is resolved from the local `geometry/run-560067` bundle; input paths, events and hardware choices are not bundled. Existing favourites are preserved, and removing a starter favourite keeps it removed on restart. The portable starter recipes are included in the package under `presets/favourite-*.json`.
 
 **Calorimeter towers:** enable **clusters** or **both** for EMC, PHOS (`PHS`) or CPV. In the appearance controls, choose **signal towers** or **fixed towers** separately for each detector; points remain the default. The Blender editor exposes the same choices under each detector. Height scale, maximum height, footprint scale, fixed height and inward/outward direction are saved in portable configs and favourites, and apply to previews and full renders. Signal heights use the available measurement: EMC energy in GeV; PHOS raw O2 cells in ADC counts, or explicitly calibrated input energies in GeV; CPV in native amplitude units. Select `energy` or `amplitude` for colour coding. Missing/nonpositive signals retain point glyphs; the render legend reports these fallbacks and capped heights. Fixed towers carry no signal-height interpretation.

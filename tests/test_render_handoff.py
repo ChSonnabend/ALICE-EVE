@@ -1,7 +1,7 @@
 from pathlib import Path
 import pytest
 from alice_renderer.model import RenderSettings
-from alice_renderer.geometry_selection import render_choices,is_schematic
+from alice_renderer.geometry_selection import render_choices,final_render_choices,is_schematic
 from alice_renderer.scene_config import recipe,resolve_settings,save_config,load_config
 from alice_renderer.runtime import preflight
 
@@ -16,6 +16,27 @@ def test_full_choice_overrides_schematic_and_outline_without_changing_preview(tm
     path=tmp_path/'final.json';save_config(path,data)
     restored=resolve_settings(load_config(path),path)
     assert not is_schematic(restored.to_dict(),'TPC') and restored.geometry_lods['TPC']=='full'
+
+def test_final_defaults_upgrade_every_selected_detector_and_magnet_but_preserve_style():
+    preview=RenderSettings(geometry=['ITS','TPC'],magnet=True,schematic=True,geometry_lod='proxy',geometry_display={'TPC':'outline'},geometry_components={'ITS':{'layers/layer-0':False}},geometry_openings={'TPC':90},geometry_exclusions={'TPC':['support']})
+    final=final_render_choices(preview)
+    assert final.geometry_lods=={'ITS':'full','TPC':'full','L3':'full'}
+    assert all(not is_schematic(final.to_dict(),d) and final.geometry_display[d]=='surfaces' for d in ('ITS','TPC','L3'))
+    for key in ('geometry_components','geometry_openings','geometry_exclusions','colors','camera_pose'):assert getattr(final,key)==getattr(preview,key)
+    assert preview.geometry_lods=={} and preview.schematic
+    explicit=final_render_choices(preview,{'TPC':'current'})
+    assert explicit.geometry_lods=={'ITS':'full','L3':'full'} and is_schematic(explicit.to_dict(),'TPC')
+
+def test_final_config_does_not_require_unused_preview_cache(tmp_path):
+    import copy
+    asset=tmp_path/'TPC.blend';asset.write_bytes(b'geometry-contract-fixture')
+    cfg=RenderSettings(detectors=[],geometry=['TPC'],geometry_assets={'TPC':str(asset)})
+    data=recipe(cfg);data['scene']['geometry_lod']='proxy'
+    data['geometry']['TPC']['surface']={'file':'TPC.blend.surface.json.gz','sha256':'0'*64}
+    original=copy.deepcopy(data)
+    full=resolve_settings(data,tmp_path/'scene.json',geometry_detail='full')
+    assert full.geometry_lods['TPC']=='full' and data==original
+    with pytest.raises(ValueError,match='fast surface cache'):resolve_settings(data,tmp_path/'scene.json',geometry_detail='current')
 
 def test_mixed_detector_and_magnet_modes_and_current_are_unambiguous(tmp_path):
     cfg=RenderSettings(geometry=['ITS','TPC'],magnet=True,schematic=True,geometry_display={'TPC':'outline'})

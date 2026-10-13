@@ -88,7 +88,7 @@ with tempfile.TemporaryDirectory(prefix='alice-video-qa-') as tmp:
     from unittest.mock import patch
     editor.JOB['python']=sys.executable;editor.JOB['ffmpeg']='/portable/encoder'
     with patch('alice_renderer.runtime.check_encoder',return_value='/portable/encoder'),patch.object(editor.subprocess,'Popen') as spawn:
-        assert bpy.ops.alice_eve.render_full(quality='draft',resolution_percent=1,backend='CPU',output=str(root/'movies'))=={'FINISHED'}
+        assert bpy.ops.alice_eve.render_full(quality='draft',resolution_percent=1,backend='CPU',output=str(root/'movies'),geometry_details=[{'name':d,'detail':'current'} for d in cfg.geometry])=={'FINISHED'}
         command=spawn.call_args.args[0]
         assert json.loads(Path(command[command.index('--event-files')+1]).read_text())==paths
         assert command[command.index('--ffmpeg')+1]=='/portable/encoder'

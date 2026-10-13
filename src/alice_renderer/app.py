@@ -759,6 +759,7 @@ class Window(QMainWindow):
             from .surface_proxy import sidecar_path
             if sidecar_path(cfg.geometry_assets.get(name,'')).is_file():combo.addItem('Cached approximate surfaces (fast)','proxy')
             combo.addItem('Simplified aligned cells','simplified');combo.addItem('Schematic envelope','schematic');geometry_details[name]=combo;form.addRow(name+' geometry detail',combo)
+            combo.setCurrentIndex(combo.findData('full'))
         if geometry_details:
             note=QLabel('Explicit geometry choices override the preview type and appearance. Full and simplified aligned geometry require their assets.');note.setWordWrap(True);form.addRow(note)
         def toggle():

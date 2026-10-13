@@ -20,12 +20,14 @@ def main():
     prepare=sub.add_parser('prepare-geometry',help='Bake fast ITS/TPC large-surface caches once')
     prepare.add_argument('--geometry-root',type=Path,required=True);prepare.add_argument('--detectors',default='ITS,TPC');prepare.add_argument('--units',choices=['m','cm'],default='m');prepare.add_argument('--blender',default=find_blender())
     render=sub.add_parser('render');render.add_argument('catalogue',type=Path);render.add_argument('--events',default='all');render.add_argument('--settings',type=Path);render.add_argument('--blender',default=find_blender());render.add_argument('--output',type=Path,default=Path('renders'));render.add_argument('--preview',action='store_true')
+    render.add_argument('--geometry-detail',choices=['full','current','simplified','structural','proxy','schematic'],help='Full aligned geometry is the default for final rendering; previews retain scene geometry')
     for name in ('render-config','edit-config'):
         command=sub.add_parser(name,help='Render or interactively edit a portable scene')
         command.add_argument('config',type=Path);command.add_argument('--input',type=Path);command.add_argument('--event',help='Event ID or ordinal:N; overrides config default')
         command.add_argument('--events',help='Comma-separated event IDs or ordinal:N selectors for a collision video')
         command.add_argument('--event-files',type=Path,help='Local JSON list of materialized event files; input selection stays outside the portable config')
         command.add_argument('--ffmpeg',help='Local FFmpeg executable for MP4 encoding')
+        if name=='render-config':command.add_argument('--geometry-detail',choices=['full','current','simplified','structural','proxy','schematic'],default='full',help='Final renders default to full aligned geometry; current preserves per-detector choices in the recipe')
         command.add_argument('--profile',type=Path);command.add_argument('--geometry-root',type=Path);command.add_argument('--assets',type=Path,help='Local detector-to-asset mapping; hashes still verified')
         command.add_argument('--cache',type=Path,default=Path('cache'));command.add_argument('--output',type=Path,default=Path('renders'))
         command.add_argument('--blender',default=find_blender());command.add_argument('--backend',default='AUTO',choices=['AUTO','CPU','METAL','HIP','CUDA','OPTIX']);command.add_argument('--device',default='')
@@ -61,7 +63,7 @@ def main():
             if source is None and args.event_files is None:raise ValueError('Provide --input; this portable scene has no default input')
             if source is not None and args.input is None and not source.is_absolute():source=args.config.resolve().parent/source
             selector=args.event if args.event is not None else data.get('defaults',{}).get('event')
-            cfg=resolve_settings(data,args.config,args.geometry_root,json.loads(args.assets.read_text()) if args.assets else None)
+            cfg=resolve_settings(data,args.config,args.geometry_root,json.loads(args.assets.read_text()) if args.assets else None,geometry_detail=getattr(args,'geometry_detail',None))
             devices_info=probe(args.blender);recommendation=recommended_quality(devices_info)
             backend=recommendation['backend'] if args.backend=='AUTO' else args.backend
             cfg=quality_settings(cfg,args.quality,backend=backend,device=args.device,width=args.width,height=args.height,samples=args.samples,resolution_percent=args.resolution_percent)
@@ -86,6 +88,9 @@ def main():
             cat=Catalogue(args.catalogue)
             ids=[row['ordinal'] for row in cat.rows()] if args.events=='all' else [int(v) for v in args.events.split(',')]
             settings=RenderSettings(**json.loads(args.settings.read_text())) if args.settings else RenderSettings()
+            if not args.preview or args.geometry_detail:
+                from .geometry_selection import final_render_choices
+                settings=final_render_choices(settings,{name:args.geometry_detail or 'full' for name in settings.geometry+(['L3'] if settings.magnet else [])})
             print(render_events(args.blender,[cat.event_path(i) for i in ids],settings,args.output,preview=args.preview,progress=print))
     except (ValueError,OSError,RuntimeError) as exc:parser.exit(1,str(exc)+'\n')
 

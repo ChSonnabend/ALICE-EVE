@@ -1,4 +1,20 @@
-# Validation status — 12 October 2026
+# Validation status — 13 October 2026
+
+## Final geometry defaults
+
+Desktop and Blender full-render dialogs now select full aligned geometry by
+default for all selected detectors and L3. This also covers direct/scripted
+Render full calls without a detail list. CLI final renders default to full;
+`--geometry-detail current` retains explicitly exported mixed detail. Preview and
+interactive settings remain unchanged. Camera, colours, part masks and opening
+angles survive the upgrade, and missing aligned assets fail preflight.
+
+A real run-560067 CPU render upgraded an exported proxy ITS/TPC recipe to
+543 ITS and 243 TPC aligned meshes. Its camera matrix and detector/style selections
+match the recipe, while the source recipe still contains proxy detail. Native
+Blender checks cover default dialog selections, mixed explicit overrides and the
+video-render handoff. The final config records full detail rather than preview
+surfaces; unused preview caches are not required by that full render.
 
 ## Collision video update
 

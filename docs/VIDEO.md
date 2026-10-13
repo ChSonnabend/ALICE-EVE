@@ -20,6 +20,12 @@ detector surfaces and data choices can be edited during playback or while paused
 **Export config** saves these settings, including video controls. **Render full**
 renders all selected collisions with the exported camera and chosen quality.
 
+Final image and movie renders default to full aligned geometry for selected
+detectors and L3, even from a fast interactive scene. Component choices, openings,
+camera and colours remain unchanged. The final-render dialog still permits an
+explicit reduced detail choice. Command-line `render-config` uses full detail by
+default; `--geometry-detail current` preserves a recipe's deliberate mixed detail.
+
 **Pause viewport** independently suspends live viewport rendering. Cycles freezes
 its progressive preview; fast Eevee changes to inexpensive solid inspection until
 **Resume viewport** restores rendered shading. Pause both controls to stop collision

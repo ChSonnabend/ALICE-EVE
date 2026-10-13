@@ -7,7 +7,7 @@ from alice_renderer.model import RenderSettings, COLOR_FIELDS, capabilities
 from alice_renderer.cluster_colors import CLUSTER_COLOR_FIELDS, DESCRIPTIONS
 from alice_renderer.object_selection import parse_track_ids,selected_tracks,selected_clusters,enabled_detectors,event_counts
 from alice_renderer.palettes import names as palette_names
-from alice_renderer.geometry_selection import is_schematic,render_choices,description as geometry_description
+from alice_renderer.geometry_selection import is_schematic,final_render_choices,description as geometry_description
 from alice_renderer.scene_config import recipe, save_config, recommended_quality
 from alice_renderer.resolution import PRESET_PERCENT, percentage_size
 
@@ -667,15 +667,15 @@ class ExportConfig(bpy.types.Operator):
 DETAIL_ITEMS=[('current','Keep current scene','Preserve the current geometry type, detail and appearance'),('full','Full aligned surfaces','Load the actual aligned geometry; overrides schematic/outline/coarse-cell modes'),('proxy','Cached approximate surfaces','Reviewed low-complexity detector surfaces; no source mesh import'),('structural','Large surfaces (cached, fast)','ITS/TPC display approximation; requires its prebuilt cache'),('simplified','Simplified aligned cells','Coarse cells derived from actual aligned geometry; requires its asset'),('schematic','Schematic envelope','Approximate detector envelope; does not load aligned geometry')]
 
 class RenderGeometryDetail(bpy.types.PropertyGroup):
-    detail: EnumProperty(name='Geometry detail',items=DETAIL_ITEMS,default='current')
+    detail: EnumProperty(name='Geometry detail',items=DETAIL_ITEMS,default='full')
 
 def initialize_render_geometry(operator,cfg):
     operator.geometry_details.clear()
     for name in cfg.geometry+(['L3'] if cfg.magnet else []):
-        item=operator.geometry_details.add();item.name=name;item.detail='current'
+        item=operator.geometry_details.add();item.name=name;item.detail='full'
 
 def render_geometry_settings(cfg,items):
-    return render_choices(cfg,{i.name:i.detail for i in items})
+    return final_render_choices(cfg,{i.name:i.detail for i in items})
 
 def render_preset_update(self,context):
     self.resolution_percent=PRESET_PERCENT[self.quality]
@@ -731,7 +731,7 @@ class RenderFull(bpy.types.Operator):
             path=root/('full-render-config-'+str(time.time_ns())+'.json');save_config(path,data)
             record_scene(path,kind='render settings',cfg=check)
             asset_map=root/('render-assets-'+str(time.time_ns())+'.local.json');asset_map.write_text(json.dumps(check.geometry_assets))
-            command=[JOB['python'],'-m','alice_renderer.cli','render-config',str(path),'--input',JOB['event'],'--event',str(EVENT['id']),'--assets',str(asset_map),'--blender',bpy.app.binary_path,'--backend',backend,'--quality','balanced' if self.quality=='custom' else self.quality,'--output',bpy.path.abspath(self.output)]
+            command=[JOB['python'],'-m','alice_renderer.cli','render-config',str(path),'--geometry-detail','current','--input',JOB['event'],'--event',str(EVENT['id']),'--assets',str(asset_map),'--blender',bpy.app.binary_path,'--backend',backend,'--quality','balanced' if self.quality=='custom' else self.quality,'--output',bpy.path.abspath(self.output)]
             command+=['--resolution-percent',str(self.resolution_percent or PRESET_PERCENT[self.quality])]
             if check.video_enabled:
                 event_list=root/('video-events-'+str(time.time_ns())+'.local.json');event_list.write_text(json.dumps(JOB['events']));command+=['--event-files',str(event_list),'--ffmpeg',encoder]

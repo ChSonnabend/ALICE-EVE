@@ -119,8 +119,14 @@ def save_config(path,data):
 
 def load_config(path):return validate_recipe(json.loads(Path(path).read_text()))
 
-def resolve_settings(data,config_path,geometry_root=None,asset_overrides=None):
+def resolve_settings(data,config_path,geometry_root=None,asset_overrides=None,*,geometry_detail=None):
     validate_recipe(data);assets={};overrides=asset_overrides or {}
+    scene=dict(data['scene'])
+    if geometry_detail is not None:
+        from .geometry_selection import final_render_choices
+        base=RenderSettings(**scene);changed=final_render_choices(base,{name:geometry_detail for name in base.geometry+(['L3'] if base.magnet else [])})
+        for key in ('geometry_lods','geometry_schematics','geometry_display'):scene[key]=getattr(changed,key)
+    from .geometry_selection import detail
     roots=[Path(geometry_root)] if geometry_root else [Path(config_path).resolve().parent]
     for name,ref in data.get('geometry',{}).items():
         path=Path(overrides[name]) if name in overrides else roots[0]/ref['file']
@@ -130,11 +136,11 @@ def resolve_settings(data,config_path,geometry_root=None,asset_overrides=None):
             from .geometry_components import sidecar_path
             component_file=sidecar_path(path);component_ref=ref['components']
             if not component_file.is_file() or sha256(component_file)!=component_ref['sha256']:raise ValueError(name+': copy the identical geometry component metadata alongside the asset')
-        if 'surface' in ref:
+        if 'surface' in ref and detail(scene,name)=='proxy':
             from .surface_proxy import sidecar_path
             cache_file=sidecar_path(path)
             if not cache_file.is_file() or sha256(cache_file)!=ref['surface']['sha256']:raise ValueError(name+': copy the identical fast surface cache alongside the asset')
-        if 'structural' in ref:
+        if 'structural' in ref and detail(scene,name)=='structural':
             from .structural_geometry import sidecar_path
             cache_file=sidecar_path(path)
             if not cache_file.is_file() or sha256(cache_file)!=ref['structural']['sha256']:raise ValueError(name+': copy the identical large-surface cache alongside the asset')
@@ -145,7 +151,6 @@ def resolve_settings(data,config_path,geometry_root=None,asset_overrides=None):
     for name,value in overrides.items():
         if name!='L3':detector(name)
         if name not in assets:assets[name]=str(Path(value).resolve())
-    scene=dict(data['scene'])
     # Older recipes used azimuth around Z. Keep their exact framing when loaded.
     if 'camera_orbit_axis' not in scene:
         scene['camera_orbit_axis']='Z';scene.setdefault('elevation',22.)

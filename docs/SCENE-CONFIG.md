@@ -17,6 +17,20 @@ Fresh desktop installations use the improved [commissioning interior preset](REF
 
 The Qt application also has **Export config…** and **Load config…**. A loaded config keeps its exact camera matrix until you edit the camera position controls. Geometry detail can be selected as full or simplified. Quality and per-detector/magnet geometry detail are chosen by the full-render dialog; preview is capped at 640px, with 128 samples and denoising.
 
+Final-render dialogs default to **Full aligned surfaces** for every selected
+detector and L3, regardless of the fast interactive detail. Camera, colours,
+opacity, openings, component selections and exclusions remain the same. Reduced
+detail or **Keep current scene** must be selected explicitly for that render.
+Missing aligned assets stop at preflight; simplified geometry is never substituted.
+This applies to both final images and videos.
+
+`render-config` and non-preview `render` commands also default to full aligned
+geometry. Use `--geometry-detail current` to preserve the exact per-detector detail
+stored in a recipe, or choose an explicit reduced detail. `edit-config` and preview
+renders retain their existing detail. Full upgrades do not require an unused
+preview surface cache; the original aligned asset hash and component metadata
+still have to match.
+
 Full aligned surfaces preserve the native detector structures and can be heavier to navigate. For a look similar to the run-560067 reference images, use full ITS/TPC geometry, an approximately 180° opening and opacity around 0.035 (or increase opacity to make surfaces more solid).
 
 The optional simplified mode derives spatial cell bounds from the actual aligned surfaces. It reduces each detector to one mesh with at most 256 coarse cells, rather than millions of repeated small shapes. It is explicitly an approximation: small structures and curved surface detail are lost. Exported scenes retain that detail choice so the final render has the same surfaces. Choose full geometry and export another recipe when physical surface detail is needed. Simplifying geometry does not reduce the number of event objects; dense cluster displays can still need substantial memory.

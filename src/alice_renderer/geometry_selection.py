@@ -26,3 +26,8 @@ def render_choices(cfg,choices):
         if choice!='schematic':lods[name]=choice
         styles[name]='surfaces'
     return replace(cfg,geometry_lods=lods,geometry_schematics=schematics,geometry_display=styles).validate()
+
+def final_render_choices(cfg,choices=None):
+    """Full aligned surfaces by default; explicit per-detector choices still win."""
+    names=cfg.geometry+(['L3'] if cfg.magnet else [])
+    return render_choices(cfg,{name:(choices or {}).get(name,'full') for name in names})

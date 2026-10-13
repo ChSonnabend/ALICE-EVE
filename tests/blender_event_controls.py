@@ -103,7 +103,7 @@ with tempfile.TemporaryDirectory(prefix='alice-controls-qa-') as tmp:
         ui.detectors[name].geometry_available=True;ui.detectors[name].visible=True
     operator=SimpleNamespace(geometry_details=bpy.context.scene.alice_render_detail_qa,quality='draft',backend='CPU',output=str(root/'render-output'),report=lambda *args:None)
     editor.initialize_render_geometry(operator,editor.current_settings())
-    assert {i.name:i.detail for i in operator.geometry_details}=={'TPC':'current','L3':'current'}
+    assert {i.name:i.detail for i in operator.geometry_details}=={'TPC':'full','L3':'full'}
     operator.geometry_details['TPC'].detail='simplified'
     operator.geometry_details['L3'].detail='full'
     # Config/launch contract fixtures; actual aligned assets are covered separately.
@@ -118,6 +118,7 @@ with tempfile.TemporaryDirectory(prefix='alice-controls-qa-') as tmp:
             geometry_details=[{'name':i.name,'detail':i.detail} for i in operator.geometry_details])=={'FINISHED'}
         command=spawn.call_args.args[0]
         assert float(command[command.index('--resolution-percent')+1])==50
+        assert command[command.index('--geometry-detail')+1]=='current'
         rendered=json.loads(Path(command[command.index('render-config')+1]).read_text())['scene']
     assert rendered['geometry_lods']=={'TPC':'simplified','L3':'full'}
     assert rendered['geometry_schematics']=={'TPC':False,'L3':False}
