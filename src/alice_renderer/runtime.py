@@ -232,7 +232,7 @@ def render_events(blender: str, paths: list[Path], settings: RenderSettings, out
         progress(str(folder/'render.png'))
     return batch
 
-def launch_editor(blender, event_path, settings, output, *, library_path=None, fast=True, event_paths=None,event_headers=None):
+def launch_editor(blender, event_path, settings, output, *, library_path=None, fast=True, event_paths=None,event_headers=None,window_size=None):
     """Launch native Blender editing; quality is chosen only by Render full."""
     import copy
     cfg=materialize(fast_editor_settings(settings) if fast else copy.deepcopy(settings))
@@ -264,7 +264,8 @@ def launch_editor(blender, event_path, settings, output, *, library_path=None, f
     job.write_text(json.dumps(payload,indent=2))
     log=(folder/'editor.log').open('w')
     try:
-        process=subprocess.Popen([blender,'--factory-startup','--python-exit-code','1','--python',str(WORKER),'--','--job',str(job),'--interactive'],stdout=log,stderr=subprocess.STDOUT,start_new_session=True,env=blender_environment())
+        window_args=[] if window_size is None else ['--window-border','--window-geometry','0','0',str(window_size[0]),str(window_size[1])]
+        process=subprocess.Popen([blender,'--factory-startup',*window_args,'--python-exit-code','1','--python',str(WORKER),'--','--job',str(job),'--interactive'],stdout=log,stderr=subprocess.STDOUT,start_new_session=True,env=blender_environment())
     finally:log.close()
     return folder,process.pid
 

@@ -719,6 +719,9 @@ class Window(QMainWindow):
             self.refresh_library();self.message('Interactive Blender scene started. Open the ALICE EVE sidebar; export or render from there. Log: '+str(result[0]/'editor.log'))
         blender=self.blender.text();output=Path(self.output.text())
         fast=self.fast_interactive.isChecked()
+        # Query Qt on the GUI thread; Blender's window geometry uses pixels.
+        screen=self.screen() or QApplication.primaryScreen()
+        window_size=(max(1,round(screen.size().width()*screen.devicePixelRatio()/2)),max(1,round(screen.size().height()*screen.devicePixelRatio()/2))) if screen else None
         rows=[dict(r) for r in self.model.rows if r['ordinal'] in self.model.selected] if has_event else []
         def launch(p,c):
             headers=None
@@ -728,7 +731,7 @@ class Window(QMainWindow):
                 if rows:paths[0]=self.catalogue.event_path(rows[0]['ordinal'],progress=p,cancelled=c)
                 headers=[dict(id=r['event_id'],kind=r['kind'],available_detectors=json.loads(r['detectors']),track_fields=json.loads(r['track_fields']),cluster_fields=json.loads(r['cluster_fields'])) for r in rows]
             if cfg.video_enabled and len(paths)<2:raise ValueError('Video needs at least two selected collisions')
-            return launch_editor(blender,paths[0] if paths else None,cfg,output,library_path=self.library.path,fast=fast,event_paths=paths,event_headers=headers)
+            return launch_editor(blender,paths[0] if paths else None,cfg,output,library_path=self.library.path,fast=fast,event_paths=paths,event_headers=headers,window_size=window_size)
         self.start_task(launch,launched)
     def render_quality_dialog(self,cfg,devices):
         rec=recommended_quality(devices);dialog=QDialog(self);dialog.setWindowTitle('Full render quality');form=QFormLayout(dialog)

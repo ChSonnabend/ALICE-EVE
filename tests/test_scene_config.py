@@ -63,11 +63,14 @@ def test_interactive_launch_keeps_full_aligned_geometry(tmp_path,monkeypatch):
     class Process:pid=42
     monkeypatch.setattr(runtime,'probe',lambda _: {'version':[5,0,0],'devices':[{'type':'CPU'}]})
     monkeypatch.setattr(runtime,'preflight',lambda *args: [])
-    monkeypatch.setattr(runtime.subprocess,'Popen',lambda *args,**kwargs:Process())
+    commands=[]
+    monkeypatch.setattr(runtime.subprocess,'Popen',lambda command,**kwargs:commands.append(command) or Process())
     event=tmp_path/'event.json';event.write_text(json.dumps({'id':'fixture','tracks':[],'clusters':[]}))
     (tmp_path/'outputs').mkdir()
-    folder,pid=runtime.launch_editor('blender',event,RenderSettings(geometry_lod='full'),tmp_path/'outputs')
+    folder,pid=runtime.launch_editor('blender',event,RenderSettings(geometry_lod='full'),tmp_path/'outputs',window_size=(960,540))
     assert pid==42
+    command=commands[0];offset=command.index('--window-geometry')
+    assert command[offset+1:offset+5]==['0','0','960','540'] and '--window-border' in command
     assert json.loads((folder/'job.json').read_text())['settings']['geometry_lod']=='full'
 
 

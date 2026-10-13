@@ -61,8 +61,11 @@ def test_gui_play_is_available_without_video_checkbox_and_static_edit_retains_se
     w.open_editor();settle(w,application)
     assert not calls[0][0].video_enabled and len(calls[0][1]['event_paths'])==3 and len(calls[0][1]['event_headers'])==3
     assert materialized==[0]
+    screen=w.screen();expected=(round(screen.size().width()*screen.devicePixelRatio()/2),round(screen.size().height()*screen.devicePixelRatio()/2))
+    assert calls[0][1]['window_size']==expected
     w.play_button.click();settle(w,application)
     assert calls[-1][0].video_enabled and len(calls[-1][1]['event_paths'])==3
+    assert calls[-1][1]['window_size']==expected
     w.model.selected={0};w.update_availability();assert not w.play_button.isEnabled()
 
 def test_calorimeter_controls_round_trip_into_exported_scene(window):
