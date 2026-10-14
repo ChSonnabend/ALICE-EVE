@@ -90,6 +90,13 @@ def validate_event(raw: dict) -> dict:
     event['available_detectors'] = sorted({detector(d) for d in raw.get('data_detectors',[])} |
                                         {d for t in event['tracks'] for d in t['detectors']} |
                                         {c['detector'] for c in event['clusters']})
+    if event.get('track_representation','reconstructed') not in ('reconstructed','mc'):raise ValueError('Invalid event track representation')
+    for key in ('mc_tracks','reconstructed_tracks'):
+        if key in raw:
+            nested={k:v for k,v in raw.items() if k not in ('mc_tracks','reconstructed_tracks')}
+            nested.update(tracks=raw[key],clusters=[])
+            event[key]=validate_event(nested)['tracks']
+            event['available_detectors']=sorted(set(event['available_detectors'])|{d for t in event[key] for d in t['detectors']})
     from .object_selection import annotate_matching
     return annotate_matching(event)
 
@@ -155,7 +162,9 @@ class RenderSettings:
     track_radius_cm: float = 0.12
     include_ambiguous_tracks: bool = False
     clip_tracks: bool = True
+    track_representation: str = 'reconstructed'
     highlight_track_ids: list = field(default_factory=list)
+    highlight_tracks_by_event: dict = field(default_factory=dict)
     highlight_track_radius_cm: float = .35
     highlight_cluster_radius_cm: float = 1.
     highlight_override_color: bool = True
@@ -242,12 +251,14 @@ class RenderSettings:
         if self.detector_setup not in ('ALICE2','ALICE2 + ITS3','ALICE3'):raise ValueError('Unknown detector setup')
         if self.tpc_cluster_profile not in ('sphere','ellipse','gaussian'):raise ValueError('Invalid TPC cluster profile')
         if any(not math.isfinite(v) or v<=0 for v in (self.tpc_profile_scale,self.tpc_profile_thickness_cm)):raise ValueError('TPC profile scale/thickness must be positive')
+        if self.track_representation not in ('reconstructed','mc'):raise ValueError('Invalid track representation')
         if self.mode not in ('tracks','clusters','both'): raise ValueError('Invalid rendering mode')
         for name,mode in self.detector_modes.items():
             detector(name)
             if mode not in ('tracks','clusters','both'):raise ValueError('Invalid per-detector object mode')
-        from .object_selection import parse_track_ids
+        from .object_selection import parse_track_ids,parse_event_highlights
         self.highlight_track_ids=parse_track_ids(self.highlight_track_ids)
+        self.highlight_tracks_by_event=parse_event_highlights(self.highlight_tracks_by_event)
         for v in self.detectors+self.geometry: detector(v)
         if self.render_engine not in ('CYCLES','BLENDER_EEVEE'):raise ValueError('Invalid render engine')
         if self.backend not in ('CPU','METAL','HIP','CUDA','OPTIX'): raise ValueError('Invalid Cycles backend')

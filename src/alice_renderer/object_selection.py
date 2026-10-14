@@ -15,9 +15,19 @@ def detector_mode(settings,name):return settings.get('detector_modes',{}).get(na
 def enabled_detectors(settings,kind):
     return {d for d in settings['detectors'] if detector_mode(settings,d) in (kind,'both')}
 
+def representation_tracks(event,settings):
+    requested=settings.get('track_representation','reconstructed')
+    stored=event.get('track_representation','reconstructed')
+    if event.get('kind')=='geometry':return []
+    if requested==stored:return event['tracks']
+    key='mc_tracks' if requested=='mc' else 'reconstructed_tracks'
+    if key not in event:raise ValueError(f"Event {event['id']} has no {requested} tracks; load a dataset containing that representation")
+    return event[key]
+
+
 def selected_tracks(event,settings):
     active=enabled_detectors(settings,'tracks')
-    return [t for t in event['tracks'] if active.intersection(t['detectors']) and (settings.get('include_ambiguous_tracks',True) or not t.get('association',{}).get('ambiguous',False))]
+    return [t for t in representation_tracks(event,settings) if active.intersection(t['detectors']) and (settings.get('include_ambiguous_tracks',True) or not t.get('association',{}).get('ambiguous',False))]
 
 def selected_clusters(event,settings):
     active=enabled_detectors(settings,'clusters')
@@ -35,8 +45,25 @@ def parse_track_ids(value):
         if text not in result:result.append(text)
     return result
 
+def parse_event_highlights(value):
+    import json
+    if isinstance(value,str):value=json.loads(value or '{}')
+    if not isinstance(value,dict):raise ValueError('Event highlights must be a JSON object mapping exact event IDs to track-ID lists')
+    result={}
+    for key,ids in value.items():
+        if not isinstance(key,str) or not key or any(ord(c)<32 for c in key):raise ValueError('Invalid event ID')
+        if not isinstance(ids,list):raise ValueError('Each event must contain a list of track IDs')
+        result[key]=parse_track_ids(ids)
+    return result
+
+
+def event_highlight_ids(settings,event_id):
+    return list(dict.fromkeys([*settings.get('highlight_track_ids',[]),
+        *settings.get('highlight_tracks_by_event',{}).get(str(event_id),[])]))
+
+
 def highlighted(obj,settings,kind):
-    return str(obj.get('id') if kind=='tracks' else obj.get('track_id','')) in set(settings.get('highlight_track_ids',[]))
+    return str(obj.get('id') if kind=='tracks' else obj.get('track_id','')) in set(event_highlight_ids(settings,settings.get('_highlight_event_id','')))
 
 # These are O2 fitted-source names, not an inference from detector sets or momentum.
 SINGLE_SOURCES={'ITS','ITSAB','TPC','TRD','TOF','PHS','PHOS','CPV','EMC','EMCAL','HMP','HMPID','MFT','MCH','MID','ZDC','FT0','FV0','FDD'}

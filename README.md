@@ -189,3 +189,29 @@ Interactive loading defaults to **Fast interactive**: reviewed cached approximat
 With no event selected, the desktop render and interactive-scene actions show **geometry only**. No input dataset is required. Select detector geometry first; use **Select none** to clear event selection after loading data. Geometry-only jobs explicitly record `kind: geometry` and contain zero tracks/clusters.
 
 See [cached interactive surfaces and review workflow](docs/FAST-SURFACES.md) for geometry scope, quality limitations and rebuild commands.
+
+### SUEP projects, MC truth and event-specific video highlights
+
+The [SUEP project](projects/SUEP/README.md) provides scripts for O2 MC ancestry
+selection, explicit pion-burst heuristics, native reconstructed MC-label joins,
+and AO2D CSV/JSON highlight exports. It distinguishes MC indices from renderer
+IDs and reports missing/fake labels. Mixed cocktails require per-particle
+provenance for a confirmed HepMC-origin selection; event SubgenId alone is not
+enough. The supplied sample's burst results are explicitly labelled heuristic.
+
+Choose **Track representation → Reconstructed tracks / MC truth** in desktop
+Appearance or the Blender sidebar. MC rendering needs saved MC paths; the SUEP
+transport exporter constructs sparse polylines from TrackRefs and reports
+particles without drawable references. It does not invent missing trajectories.
+A dataset with both representations can switch in place; otherwise load its MC
+or reconstructed input. AO2D remains a fitted-track input, while the new MC event
+export uses the transported Kine stack.
+
+For video, load an event-highlight JSON file or edit the JSON text in either UI:
+
+    {"exact-event-id": ["track-id", "another-track-id"]}
+
+Highlights switch with each collision and survive config export and background
+render submission. The existing Special track IDs field remains global; leave it
+empty to use only per-event selections. See the SUEP project for commands,
+required inputs, output CSV formats and the supplied data's ancestry audit.

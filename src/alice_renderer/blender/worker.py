@@ -510,7 +510,7 @@ def render(job_path,interactive=False):
     scene.world.node_tree.nodes['Background'].inputs[1].default_value=settings.get('world_strength',.45)
     selected=set(settings['detectors'])
     ts=selected_tracks(event,settings);cs=selected_clusters(event,settings)
-    metadata={'event_id':event['id'],'kind':event['kind'],'source_warnings':event.get('warnings',[]),'rendered_tracks':0,'rendered_clusters':0,'geometry':{},'coordinates':'ALICE global XYZ, converted from centimetres to metres'}
+    metadata={'track_representation':settings.get('track_representation','reconstructed'),'event_id':event['id'],'kind':event['kind'],'source_warnings':event.get('warnings',[]),'rendered_tracks':0,'rendered_clusters':0,'geometry':{},'coordinates':'ALICE global XYZ, converted from centimetres to metres'}
     metadata['input_counts']=event_counts(event)
     regions={}
     from alice_renderer.track_clipping import selected_track_detectors
@@ -540,8 +540,8 @@ def render(job_path,interactive=False):
         metadata['track_legend']=buckets(ts,settings['track_color_mode'],settings['colors']['tracks'],settings,'tracks')[1]
         metadata['cluster_legend']=buckets(cs,settings['cluster_color_mode'],settings['colors']['clusters'],settings,'clusters')[1]
     elif bool(enabled_detectors(settings,'tracks')):
-        metadata['track_legend']=tracks(ts,settings);metadata['rendered_tracks']=metadata['track_legend']['visible_tracks']
-    if not (settings.get('video_enabled') and job.get('events')) and (interactive or bool(enabled_detectors(settings,'clusters'))):metadata['cluster_legend']=clusters(cs,settings);metadata['rendered_clusters']=len(cs)
+        metadata['track_legend']=tracks(ts,dict(settings,_highlight_event_id=str(event['id'])));metadata['rendered_tracks']=metadata['track_legend']['visible_tracks']
+    if not (settings.get('video_enabled') and job.get('events')) and (interactive or bool(enabled_detectors(settings,'clusters'))):metadata['cluster_legend']=clusters(cs,dict(settings,_highlight_event_id=str(event['id'])));metadata['rendered_clusters']=len(cs)
     from alice_renderer.camera import orbit_position
     target=Vector([v*.01 for v in settings['target_cm']]);distance=settings['distance_cm']*.01
     position=Vector(orbit_position(settings['azimuth'],settings['elevation'],distance,target,settings.get('camera_orbit_axis','Z')))
@@ -574,7 +574,9 @@ def render(job_path,interactive=False):
         lamp.rotation_euler=light.get('rotation') or (target-lamp.location).to_track_quat('-Z','Y').to_euler()
     scene.view_settings.view_transform=settings.get('view_transform','AgX')
     scene.view_settings.look='None';scene.view_settings.exposure=settings.get('exposure',0.);scene.view_settings.gamma=1.
-    metadata['highlighting']={'track_ids':settings.get('highlight_track_ids',[]),'missing_ids':sorted(set(settings.get('highlight_track_ids',[]))-{str(t['id']) for t in event['tracks']})}
+    from alice_renderer.object_selection import event_highlight_ids,representation_tracks
+    active_highlights=event_highlight_ids(settings,event['id'])
+    metadata['highlighting']={'track_ids':active_highlights,'missing_ids':sorted(set(active_highlights)-{str(t['id']) for t in representation_tracks(event,settings)})}
     metadata['settings']={k:v for k,v in settings.items() if not k.startswith('_')};metadata['source']=job['event'];metadata['blender_version']=bpy.app.version_string
     (output/'metadata.json').write_text(json.dumps(metadata,indent=2))
     if interactive:

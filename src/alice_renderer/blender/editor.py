@@ -5,7 +5,7 @@ import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, StringProperty
 from alice_renderer.model import RenderSettings, COLOR_FIELDS, capabilities
 from alice_renderer.cluster_colors import CLUSTER_COLOR_FIELDS, DESCRIPTIONS
-from alice_renderer.object_selection import parse_track_ids,selected_tracks,selected_clusters,enabled_detectors,event_counts
+from alice_renderer.object_selection import parse_event_highlights,parse_track_ids,selected_tracks,selected_clusters,enabled_detectors,event_counts
 from alice_renderer.palettes import names as palette_names
 from alice_renderer.geometry_selection import is_schematic,final_render_choices,render_geometry_preset,description as geometry_description
 from alice_renderer.scene_config import recipe, save_config, recommended_quality
@@ -71,7 +71,7 @@ def current_settings():
     cfg['tpc_cluster_profile']=ui.tpc_cluster_profile;cfg['tpc_profile_scale']=ui.tpc_profile_scale;cfg['tpc_profile_thickness_cm']=ui.tpc_profile_thickness_cm
     for key in ('tower_fixed_height_cm','tower_max_height_cm','tower_width_scale','tower_direction','tower_height_mapping'):cfg[key]=getattr(ui,key)
     cfg['track_radius_cm']=ui.track_width_cm/2;cfg['cluster_radius_cm']=ui.cluster_radius_cm;cfg['clip_tracks']=ui.clip_tracks;cfg['include_ambiguous_tracks']=ui.include_ambiguous_tracks
-    cfg['highlight_track_ids']=parse_track_ids(ui.highlight_ids);cfg['highlight_track_radius_cm']=ui.highlight_width_cm/2;cfg['highlight_cluster_radius_cm']=ui.highlight_cluster_radius_cm;cfg['highlight_override_color']=ui.highlight_override;cfg['highlight_track_color']=hex_color(ui.highlight_track_color);cfg['highlight_cluster_color']=hex_color(ui.highlight_cluster_color)
+    cfg['track_representation']=ui.track_representation;cfg['highlight_tracks_by_event']=parse_event_highlights(ui.highlight_events_json);cfg['highlight_track_ids']=parse_track_ids(ui.highlight_ids);cfg['highlight_track_radius_cm']=ui.highlight_width_cm/2;cfg['highlight_cluster_radius_cm']=ui.highlight_cluster_radius_cm;cfg['highlight_override_color']=ui.highlight_override;cfg['highlight_track_color']=hex_color(ui.highlight_track_color);cfg['highlight_cluster_color']=hex_color(ui.highlight_cluster_color)
     cfg['geometry_lod']=ui.geometry_lod
     cfg['geometry_lods']={i.name:i.detail for i in ui.detectors if i.detail!='inherit'}
     cfg['geometry_schematics']={**cfg.get('geometry_schematics',{}),**{i.name:False for i in ui.detectors if i.detail!='inherit'}}
@@ -88,7 +88,7 @@ def current_settings():
 def track_signature(ui):
     detector_sizes=tuple((i.name,i.cluster_size_scale,i.tower_width_factor,i.tower_fixed_height_cm,i.tower_max_height_cm,i.tower_mapping,i.tower_log_reference) for i in ui.detectors if i.data and i.data_available)
     detector_sizes+=(('video',ui.video_timing,ui.video_interval_s,ui.video_time_scale,ui.video_speed_m_s,ui.video_tower_rise_s,ui.video_fps),)
-    return (tuple((i.name,i.mode,i.cell_display,i.tower_height_scale) for i in ui.detectors if i.data and i.data_available),tuple(i.name for i in ui.detectors if i.visible and i.geometry_available and i.name!='L3'),ui.track_width_cm,ui.cluster_radius_cm,ui.tpc_cluster_profile,ui.tpc_profile_scale,ui.tpc_profile_thickness_cm,ui.clip_tracks,ui.include_ambiguous_tracks,ui.highlight_ids,ui.highlight_width_cm,ui.highlight_cluster_radius_cm,ui.highlight_override,tuple(ui.highlight_track_color),tuple(ui.highlight_cluster_color),ui.tower_fixed_height_cm,ui.tower_max_height_cm,ui.tower_width_scale,ui.tower_direction,ui.tower_height_mapping,detector_sizes)
+    return (tuple((i.name,i.mode,i.cell_display,i.tower_height_scale) for i in ui.detectors if i.data and i.data_available),tuple(i.name for i in ui.detectors if i.visible and i.geometry_available and i.name!='L3'),ui.track_width_cm,ui.cluster_radius_cm,ui.tpc_cluster_profile,ui.tpc_profile_scale,ui.tpc_profile_thickness_cm,ui.clip_tracks,ui.include_ambiguous_tracks,ui.highlight_ids,ui.highlight_events_json,ui.track_representation,ui.highlight_width_cm,ui.highlight_cluster_radius_cm,ui.highlight_override,tuple(ui.highlight_track_color),tuple(ui.highlight_cluster_color),ui.tower_fixed_height_cm,ui.tower_max_height_cm,ui.tower_width_scale,ui.tower_direction,ui.tower_height_mapping,detector_sizes)
 
 def set_all_modes(self,context):
     if not JOB:return
@@ -409,6 +409,8 @@ class SceneSettings(bpy.types.PropertyGroup):
     render_status: StringProperty(name='Render status',default='Ready')
     render_percent: IntProperty(name='Render progress %',min=0,max=100,default=0)
     cluster_radius_cm: FloatProperty(name='Cluster radius (cm)',min=.001,max=20,default=.35,update=selection_update)
+    track_representation: EnumProperty(name='Track representation',items=[('reconstructed','Reconstructed','Fitted reconstructed tracks'),('mc','MC truth','Saved MC transport references; dataset must contain them')],update=selection_update)
+    highlight_events_json: StringProperty(name='Event highlights JSON',default='{}',description='Exact event IDs mapped to lists of reconstructed track IDs; added to global IDs',update=selection_update)
     highlight_ids: StringProperty(name='Special track IDs',description='Comma-separated event track IDs; Ctrl-click adds, Shift-click toggles',update=selection_update)
     highlight_width_cm: FloatProperty(name='Special track linewidth (cm)',min=.002,max=20,default=.7,update=appearance_update)
     highlight_cluster_radius_cm: FloatProperty(name='Linked cluster radius (cm)',min=.001,max=20,default=1.,update=selection_update)
@@ -463,7 +465,7 @@ class ApplyData(bpy.types.Operator):
                     if not asset:raise ValueError(name+': provide its aligned geometry before selecting clipped tracks')
                     cfg['_track_regions'][name]=imported_geometry(name,asset,cfg,bounds_only=True)
                 JOB['track_regions']=cfg['_track_regions']
-            ts=selected_tracks(EVENT,cfg);cs=selected_clusters(EVENT,cfg)
+            cfg['_highlight_event_id']=str(EVENT['id']);ts=selected_tracks(EVENT,cfg);cs=selected_clusters(EVENT,cfg)
             for kind,mode,objects,active in [('tracks',cfg['track_color_mode'],ts,bool(enabled_detectors(cfg,'tracks'))),('clusters',cfg['cluster_color_mode'],cs,bool(enabled_detectors(cfg,'clusters')))]:
                 if active and selected and mode not in capabilities(objects):raise ValueError(f'{mode} is unavailable for {kind} in selected data')
             for name in ('Tracks','Clusters'):
@@ -977,7 +979,7 @@ class EVEPanel(bpy.types.Panel):
             tower_box=layout.box();tower_box.label(text='Calorimeter towers (per detector below)')
             for key in ('tower_fixed_height_cm','tower_max_height_cm','tower_width_scale','tower_direction','tower_height_mapping'):tower_box.prop(ui,key)
             layout.prop(ui,'mode');layout.prop(ui,'track_width_cm');layout.prop(ui,'cluster_radius_cm');layout.prop(ui,'clip_tracks');layout.prop(ui,'track_color');layout.prop(ui,'cluster_color')
-            box=layout.box();box.label(text='Track emphasis / decay chain');box.prop(ui,'highlight_ids')
+            box=layout.box();box.label(text='Track emphasis / decay chain');box.prop(ui,'track_representation');box.prop(ui,'highlight_ids');box.prop(ui,'highlight_events_json');box.operator('alice_eve.load_event_highlights')
             if ui.picking_active:box.operator('alice_eve.stop_picking',text='Stop picking (Esc)')
             else:box.operator('alice_eve.pick_tracks')
             box.prop(ui,'highlight_width_cm');box.prop(ui,'highlight_cluster_radius_cm');box.prop(ui,'highlight_override');box.prop(ui,'highlight_track_color');box.prop(ui,'highlight_cluster_color')
@@ -1047,7 +1049,21 @@ class EVEPanel(bpy.types.Panel):
             layout.prop(ui,'export_path');layout.prop(ui,'include_defaults')
 
 
-CLASSES=(GeometryComponent,ToggleComponent,RefreshComponents,DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,SolidDetectorSurfaces,LightTransparentSurfaces,RestoreSurfaceExclusions,TPCSectorsInnerWall,SurroundLighting,FastStructuralSurfaces,ShowSceneLighting,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,PlayVideo,StopVideo,ToggleViewportPause,WatchPlaybackControls,ExportConfig,RenderFull,EVEPanel)
+class LoadEventHighlights(bpy.types.Operator):
+    bl_idname='alice_eve.load_event_highlights'
+    bl_label='Load event highlights JSON'
+    filepath: StringProperty(subtype='FILE_PATH')
+    filter_glob: StringProperty(default='*.json',options={'HIDDEN'})
+    def invoke(self,context,event):
+        context.window_manager.fileselect_add(self);return {'RUNNING_MODAL'}
+    def execute(self,context):
+        try:
+            mapping=parse_event_highlights(Path(self.filepath).read_text())
+            context.scene.alice_eve.highlight_events_json=json.dumps(mapping)
+            self.report({'INFO'},f'Loaded highlights for {len(mapping)} events');return {'FINISHED'}
+        except (OSError,ValueError) as exc:self.report({'ERROR'},str(exc));return {'CANCELLED'}
+
+CLASSES=(LoadEventHighlights,GeometryComponent,ToggleComponent,RefreshComponents,DetectorSettings,SceneSettings,RenderGeometryDetail,ApplyData,ApplyGeometry,SelectNoDetectors,CompleteGeometry,FullAlignedGeometry,OpaqueGeometry,SolidDetectorSurfaces,LightTransparentSurfaces,RestoreSurfaceExclusions,TPCSectorsInnerWall,SurroundLighting,FastStructuralSurfaces,ShowSceneLighting,CameraFromView,LevelCamera,RollCamera,PickTracks,StopPicking,PlayVideo,StopVideo,ToggleViewportPause,WatchPlaybackControls,ExportConfig,RenderFull,EVEPanel)
 
 def start_editor(job,event,metadata):
     global JOB,EVENT,DEVICES,RECOMMENDATION,PALETTES
@@ -1072,7 +1088,7 @@ def start_editor(job,event,metadata):
     from worker import rgb
     ui.tpc_cluster_profile=settings.get('tpc_cluster_profile','sphere');ui.tpc_profile_scale=settings.get('tpc_profile_scale',1.);ui.tpc_profile_thickness_cm=settings.get('tpc_profile_thickness_cm',.03)
     for key,default in (('tower_fixed_height_cm',10.),('tower_max_height_cm',100.),('tower_width_scale',.95),('tower_direction','inward'),('tower_height_mapping','linear')):setattr(ui,key,settings.get(key,default))
-    ui.cluster_radius_cm=settings['cluster_radius_cm'];ui.highlight_ids=', '.join(settings.get('highlight_track_ids',[]));ui.highlight_width_cm=settings.get('highlight_track_radius_cm',.35)*2;ui.highlight_cluster_radius_cm=settings.get('highlight_cluster_radius_cm',1.);ui.highlight_override=settings.get('highlight_override_color',True);ui.highlight_track_color=rgb(settings.get('highlight_track_color','#ffcc33'));ui.highlight_cluster_color=rgb(settings.get('highlight_cluster_color','#ff6633'))
+    ui.cluster_radius_cm=settings['cluster_radius_cm'];ui.track_representation=settings.get('track_representation','reconstructed');ui.highlight_events_json=json.dumps(settings.get('highlight_tracks_by_event',{}));ui.highlight_ids=', '.join(settings.get('highlight_track_ids',[]));ui.highlight_width_cm=settings.get('highlight_track_radius_cm',.35)*2;ui.highlight_cluster_radius_cm=settings.get('highlight_cluster_radius_cm',1.);ui.highlight_override=settings.get('highlight_override_color',True);ui.highlight_track_color=rgb(settings.get('highlight_track_color','#ffcc33'));ui.highlight_cluster_color=rgb(settings.get('highlight_cluster_color','#ff6633'))
     ui.track_width_cm=settings['track_radius_cm']*2;ui.clip_tracks=settings.get('clip_tracks',True);ui.include_ambiguous_tracks=settings.get('include_ambiguous_tracks',True)
     ui.geometry_lod=settings.get('geometry_lod','full')
     ui.mode=settings['mode'];ui.track_mode=settings['track_color_mode'];ui.cluster_mode=settings['cluster_color_mode'];ui.palette=settings['palette']

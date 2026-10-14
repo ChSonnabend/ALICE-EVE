@@ -23,10 +23,14 @@ with tempfile.TemporaryDirectory(prefix='alice-video-qa-') as tmp:
         event=dict(schema_version=1,units='cm',kind='synthetic',id='VIDEO-QA-'+str(i),vertex=[0,i,0],tracks=[dict(id=str(i),detectors=['TPC'],points=[[0,i,0],[100,i,0],[200,i,0]])],clusters=[dict(id='hit',detector='TPC',position=[100,i,0],track_id=str(i)),dict(id='cell',detector='EMC',position=[200,i,0],energy=2,cell_geometry=dict(u_cm=[0,6,0],v_cm=[0,0,6],basis='aligned test face'))])
         if i==1:event['tracks'][0]['features']={'late_feature':7};event['clusters']=event['clusters'][:1]
         event=validate_event(event);events.append(event);path=root/(str(i)+'.json');path.write_text(json.dumps(event));paths.append(str(path))
-    cfg=RenderSettings(video_enabled=True,video_interval_s=4,video_fps=8,video_speed_m_s=1,video_tower_rise_s=1,detectors=['TPC','EMC'],geometry=['TPC','EMC'],mode='both',schematic=True,calorimeter_display={'EMC':'signal towers'})
+    cfg=RenderSettings(highlight_tracks_by_event={'VIDEO-QA-0':['0']},video_enabled=True,video_interval_s=4,video_fps=8,video_speed_m_s=1,video_tower_rise_s=1,detectors=['TPC','EMC'],geometry=['TPC','EMC'],mode='both',schematic=True,calorimeter_display={'EMC':'signal towers'})
     plan=schedule(events,cfg.to_dict());payload=dict(event=paths[0],events=paths,video_headers=[header(e) for e in events],video_plan=plan,output=str(root),settings=cfg.to_dict(),required_track_detectors=['TPC'],library_path=str(root/'history.sqlite'),blender={'version':list(bpy.app.version),'devices':[{'type':'CPU'}]})
     job=root/'job.json';job.write_text(json.dumps(payload));worker.render(job,True)
     player=editor.JOB['video_player'];assert player.playing
+    assert any(o.get('alice_highlighted',False) for o in bpy.data.collections['Tracks'].objects)
+    player.set_frame(32)
+    assert not any(o.get('alice_highlighted',False) for o in bpy.data.collections['Tracks'].objects)
+    player.set_frame(0)
     ui=bpy.context.scene.alice_eve;assert bpy.context.scene.render.use_persistent_data
     detector_buffers={(name,o.name):(o.as_pointer(),o.data.as_pointer()) for name in cfg.geometry for o in bpy.data.collections[name].objects}
     assert 'feature:late_feature' in {x[0] for x in editor.COLOR_ITEMS}

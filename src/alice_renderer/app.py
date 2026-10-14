@@ -15,7 +15,7 @@ from .cluster_colors import CLUSTER_COLOR_FIELDS,DESCRIPTIONS
 from .runtime import find_blender,probe,launch_editor
 from .scene_config import recipe,save_config,load_config,resolve_settings,recommended_quality,quality_settings
 from .catalogue import load_event
-from .object_selection import parse_track_ids
+from .object_selection import parse_event_highlights,parse_track_ids
 from .palettes import names as palette_names
 from .scene_library import SceneLibrary
 from .resolution import PRESET_PERCENT, minimum_percent, percentage_size
@@ -261,6 +261,15 @@ class Window(QMainWindow):
         self.tpc_profile_thickness=number(self.base.tpc_profile_thickness_cm,.001,10,3);layout.addRow('TPC profile display thickness (cm)',self.tpc_profile_thickness)
         self.detector_setup=QComboBox();self.detector_setup.addItems(SETUP_PRESETS);self.detector_setup.setCurrentText(self.base.detector_setup);setup_button=QPushButton('Apply detector setup defaults');setup_button.clicked.connect(self.use_detector_defaults);layout.addRow('Detector setup',self.detector_setup);layout.addRow(setup_button)
         self.data_glow_lighting=QCheckBox('Data glow lights geometry');self.data_glow_lighting.setChecked(self.base.data_glow_lighting);layout.addRow(self.data_glow_lighting)
+        self.track_representation=QComboBox();self.track_representation.addItem('Reconstructed tracks','reconstructed');self.track_representation.addItem('MC truth (saved transport references)','mc');self.track_representation.setCurrentIndex(self.track_representation.findData(self.base.track_representation));layout.addRow('Track representation',self.track_representation)
+        self.highlight_events=QPlainTextEdit(json.dumps(self.base.highlight_tracks_by_event));self.highlight_events.setMaximumHeight(70);self.highlight_events.setPlaceholderText('{"exact-event-id": ["track-id"]}');layout.addRow('Event highlights JSON',self.highlight_events)
+        load_highlights=QPushButton('Load event highlights JSON…');layout.addRow(load_highlights)
+        def load_event_highlights():
+            name,_=QFileDialog.getOpenFileName(self,'Event highlights','','JSON (*.json)')
+            if not name:return
+            try:self.highlight_events.setPlainText(json.dumps(parse_event_highlights(Path(name).read_text())))
+            except (OSError,ValueError) as exc:self.failure(str(exc))
+        load_highlights.clicked.connect(load_event_highlights)
         self.highlight_ids=QLineEdit(', '.join(self.base.highlight_track_ids));self.highlight_ids.setPlaceholderText('Track IDs: 11730, 50331650, …');layout.addRow('Special track IDs',self.highlight_ids)
         self.highlight_width=number(self.base.highlight_track_radius_cm*2,.002,20,3);layout.addRow('Special track linewidth (cm)',self.highlight_width)
         self.highlight_clusters=number(self.base.highlight_cluster_radius_cm,.001,20,3);layout.addRow('Linked cluster radius (cm)',self.highlight_clusters)
@@ -414,7 +423,7 @@ class Window(QMainWindow):
         cfg=RenderSettings(detectors=[d for d,c in self.data_checks.items() if c.isChecked() and c.isEnabled()],geometry=[d for d,c in self.geometry_checks.items() if c.isChecked()],magnet=self.magnet.isChecked(),mode=self.mode.currentText(),track_color_mode=self.track_mode.currentText(),cluster_color_mode=self.cluster_mode.currentText(),colors={k:b.text() for k,b in self.color_buttons.items()},scale_min=None if self.auto_range.isChecked() else self.minimum.value(),scale_max=None if self.auto_range.isChecked() else self.maximum.value(),palette=self.palette.currentText(),geometry_assets={k:v.text() for k,v in self.asset_fields.items() if v.text()},geometry_units=self.geometry_units.currentText(),geometry_opacity=self.opacity.value(),cutaway=self.cutaway.isChecked(),schematic=self.schematic.isChecked(),width=self.width.value(),height=self.height.value(),samples=self.samples.value(),denoise=self.denoise.isChecked(),backend=self.backend.currentText(),device=self.device.currentData() or '',threads=self.threads.value(),track_radius_cm=self.track_radius.value()/2,cluster_radius_cm=self.cluster_radius.value(),camera=self.camera.currentText(),azimuth=self.azimuth.value(),elevation=self.elevation.value(),distance_cm=self.distance.value(),target_cm=[s.value() for s in self.target],save_blend=self.save_blend.isChecked())
         for key,value in self.scene_overrides.items():setattr(cfg,key,value)
         cfg.detector_modes={name:combo.currentText() for name,combo in self.detector_modes.items()}
-        cfg.highlight_track_ids=parse_track_ids(self.highlight_ids.text());cfg.highlight_track_radius_cm=self.highlight_width.value()/2;cfg.highlight_cluster_radius_cm=self.highlight_clusters.value();cfg.highlight_override_color=self.highlight_override.isChecked();cfg.highlight_track_color=self.highlight_track_color.text();cfg.highlight_cluster_color=self.highlight_cluster_color.text();cfg.roll=self.roll.value()
+        cfg.track_representation=self.track_representation.currentData();cfg.highlight_tracks_by_event=parse_event_highlights(self.highlight_events.toPlainText());cfg.highlight_track_ids=parse_track_ids(self.highlight_ids.text());cfg.highlight_track_radius_cm=self.highlight_width.value()/2;cfg.highlight_cluster_radius_cm=self.highlight_clusters.value();cfg.highlight_override_color=self.highlight_override.isChecked();cfg.highlight_track_color=self.highlight_track_color.text();cfg.highlight_cluster_color=self.highlight_cluster_color.text();cfg.roll=self.roll.value()
         cfg.clip_tracks=self.clip_tracks.isChecked();cfg.include_ambiguous_tracks=self.include_ambiguous.isChecked()
         cfg.camera_orbit_axis=self.camera_orbit_axis.currentText()
         cfg.geometry_lod=self.geometry_lod.currentText()
@@ -702,7 +711,7 @@ class Window(QMainWindow):
         if cfg.scale_max is not None:self.maximum.setValue(cfg.scale_max)
         w,h=percentage_size(25,cfg.frame_aspect);self.width.setValue(w);self.height.setValue(h)
         for name,combo in self.detector_modes.items():combo.setCurrentText(cfg.detector_modes.get(name,cfg.mode))
-        self.roll.setValue(cfg.roll);self.highlight_ids.setText(', '.join(cfg.highlight_track_ids));self.highlight_width.setValue(cfg.highlight_track_radius_cm*2);self.highlight_clusters.setValue(cfg.highlight_cluster_radius_cm);self.highlight_override.setChecked(cfg.highlight_override_color);self.highlight_track_color.setText(cfg.highlight_track_color);self.highlight_cluster_color.setText(cfg.highlight_cluster_color)
+        self.track_representation.setCurrentIndex(self.track_representation.findData(cfg.track_representation));self.highlight_events.setPlainText(json.dumps(cfg.highlight_tracks_by_event));self.roll.setValue(cfg.roll);self.highlight_ids.setText(', '.join(cfg.highlight_track_ids));self.highlight_width.setValue(cfg.highlight_track_radius_cm*2);self.highlight_clusters.setValue(cfg.highlight_cluster_radius_cm);self.highlight_override.setChecked(cfg.highlight_override_color);self.highlight_track_color.setText(cfg.highlight_track_color);self.highlight_cluster_color.setText(cfg.highlight_cluster_color)
         self.tpc_profile.setCurrentText(cfg.tpc_cluster_profile);self.tpc_profile_scale.setValue(cfg.tpc_profile_scale);self.tpc_profile_thickness.setValue(cfg.tpc_profile_thickness_cm)
         from .calorimeter_towers import DEFAULT_SCALES
         for name,combo in self.calorimeter_displays.items():

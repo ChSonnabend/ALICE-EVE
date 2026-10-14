@@ -82,7 +82,8 @@ def arrival_distances(points,distances,positions):
 
 def prepare_event(event,settings):
     """Precompute arrivals once; unlinked cells follow a PV-centred wave."""
-    vertex=np.asarray(event['vertex'],dtype=float);paths={str(t['id']):trajectory(t,vertex) for t in event['tracks']}
+    from .object_selection import representation_tracks
+    vertex=np.asarray(event['vertex'],dtype=float);paths={str(t['id']):trajectory(t,vertex) for t in representation_tracks(event,settings)}
     clusters=selected_clusters(event,settings);arrivals=np.asarray([np.linalg.norm(np.asarray(c['position'])-vertex) for c in clusters])
     linked={};count=0
     for i,c in enumerate(clusters):

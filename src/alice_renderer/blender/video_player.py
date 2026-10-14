@@ -101,7 +101,7 @@ class VideoPlayer:
         from worker import remove_owned_collection,clusters,imported_geometry,is_schematic,schematic_region
         entry=self.plan['entries'][index];path=self.job['events'][entry['source_index']]
         with gzip.open(path,'rt') if path.endswith('.gz') else open(path) as stream:self.event=json.load(stream)
-        self.index=index;cfg=dict(self.settings);cfg['_video_active']=True;cfg['_track_regions']=dict(self.regions)
+        self.index=index;cfg=dict(self.settings);cfg['_highlight_event_id']=str(self.event['id']);cfg['_video_active']=True;cfg['_track_regions']=dict(self.regions)
         data=prepare_event(self.event,cfg)
         for track in data['tracks']:
             for name in selected_track_detectors(cfg,track):
