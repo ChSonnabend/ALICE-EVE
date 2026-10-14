@@ -371,7 +371,7 @@ class Window(QMainWindow):
                 if not entry['input'] or not Path(entry['input']).exists():raise ValueError('Original input is unavailable. Choose a local input and use “Use for current input / event”.')
                 if not entry['event']:raise ValueError('This config has no original event. Use it for the current input/event.')
             self.apply_scene(cfg)
-            if reuse:self.message('Scene settings reused. Input and event selection retained; event-specific highlighted track IDs cleared.')
+            if reuse:self.message('Scene settings reused. Input and event selection retained; global highlighted track IDs cleared, event-specific mappings retained.')
             else:self.load_input(entry['input'],event_selector=entry['event'],retain_scene_geometry=True)
         except Exception as exc:self.failure(str(exc))
     def register_scene(self,path,kind,cfg):

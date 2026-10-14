@@ -131,6 +131,26 @@ track IDs field is global and adds IDs to every event; leave it empty for purely
 event-specific selection. Associated clusters follow their explicit track_id;
 MC truth-only exports do not invent clusters.
 
+## SoftBombs scene
+
+`SoftBombs.json` is the portable visual recipe based on the reviewed
+`video-20261013-125740-7c5a44` geometry, camera, detector presentation and lighting.
+TRD and TOF show both tracks and clusters. Normal track linewidth is **2 cm**;
+selected SUEP pions and their descendants use **5 cm** (stored radii 1 and 2.5 cm).
+Cluster scale factors and detector colours follow the reference scene.
+
+For the supplied simulation, use the reconstructed TF export
+`data/SUEP/042/renderer-tf1`, not its AO2D: this preserves TRD tracklet points and
+TOF clusters. The export reuses the saved primary vertices and reconstructed
+products, with the original simulation HBFUtils timing. The local **SoftBombs**
+favourite includes the matching event-highlight map. The portable recipe does
+not embed this dataset's IDs; load its TF-specific event-highlights JSON when
+using the portable file. AO2D highlight IDs do not match native TF tracks.
+
+Load the TF export folder, select **SoftBombs → Use favourite**, and begin with
+one collision for an interactive scene or a small selection for playback.
+The ALICE general favourite shares the updated reference scene settings.
+
 ## Validation
 
 Unit tests exercise ancestry, proton-root exclusion, burst selection, label

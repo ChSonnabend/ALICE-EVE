@@ -39,11 +39,7 @@
         "sha256": "01bc248a5c21c46404b11e99db5802d60948a2c0c2ca49d1a6fae6d0c011e641"
       },
       "file": "ITS.blend",
-      "sha256": "6ac0b1ef6b37fbb2a8d7b0d175158b1870e0172f35a5bc736cb19051c8188259",
-      "structural": {
-        "file": "ITS.blend.structural.json.gz",
-        "sha256": "6568ac8afaeff1024be51e73b27d41bf45c31e3d0ee8d8b29f82a69756197e3f"
-      }
+      "sha256": "6ac0b1ef6b37fbb2a8d7b0d175158b1870e0172f35a5bc736cb19051c8188259"
     },
     "MCH": {
       "components": {
@@ -83,11 +79,7 @@
         "sha256": "c15b16340f2689e05be99230b2429f09dbb66bf24dbd60ac70244c9a97323640"
       },
       "file": "TPC.blend",
-      "sha256": "908c428a14e5000e1681caa6ec9fc2b41b78c233443c86d6ea4c05613254b0a0",
-      "structural": {
-        "file": "TPC.blend.structural.json.gz",
-        "sha256": "d8973acc9a2419a2455a5f08fa8a1419d325939b606ba0d96d412ac8fbbe9446"
-      }
+      "sha256": "908c428a14e5000e1681caa6ec9fc2b41b78c233443c86d6ea4c05613254b0a0"
     },
     "TRD": {
       "components": {
@@ -99,15 +91,69 @@
     }
   },
   "scene": {
-    "azimuth": 40,
+    "azimuth": 40.0,
+    "calorimeter_display": {
+      "CPV": "points",
+      "EMC": "points",
+      "PHS": "points"
+    },
     "camera": "perspective",
-    "camera_lens_mm": 48,
+    "camera_lens_mm": 48.0,
     "camera_orbit_axis": "Y",
-    "camera_pose": {},
+    "camera_pose": {
+      "clip_end": 2000.0,
+      "clip_start": 0.10000000149011612,
+      "lens": 48.0,
+      "matrix_world": [
+        [
+          0.8521813750267029,
+          -0.0982775092124939,
+          0.5139339566230774,
+          15.171051979064941
+        ],
+        [
+          0.08619149029254913,
+          0.9951510429382324,
+          0.047380030155181885,
+          1.5475802421569824
+        ],
+        [
+          -0.5160983204841614,
+          0.003920356743037701,
+          0.8565202951431274,
+          23.0216007232666
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "ortho_scale": 6.0,
+      "sensor_fit": "HORIZONTAL",
+      "sensor_height": 24.0,
+      "sensor_width": 36.0,
+      "shift_x": 0.0,
+      "shift_y": 0.0
+    },
     "clip_tracks": true,
     "cluster_color_mode": "solid",
     "cluster_emission": 0.800000011920929,
     "cluster_radius_cm": 0.4000000059604645,
+    "cluster_size_scales": {
+      "EMC": 5.0,
+      "FT0": 5.0,
+      "FV0": 5.0,
+      "HMP": 5.0,
+      "ITS": 5.0,
+      "MCH": 5.0,
+      "MFT": 5.0,
+      "MID": 5.0,
+      "TOF": 5.0,
+      "TPC": 5.0,
+      "TRD": 5.0
+    },
     "color_ranges": {
       "clusters": [
         0.0,
@@ -119,30 +165,218 @@
       ]
     },
     "colors": {
+      "ABS3": "#243a82",
+      "CPV": "#243a82",
+      "ECL": "#243a82",
       "EMC": "#e60926",
+      "FCT": "#243a82",
+      "FD3": "#243a82",
+      "FDD": "#243a82",
       "FT0": "#38dd57",
+      "FT3": "#243a82",
       "FV0": "#6fcd13",
       "HMP": "#d80723",
       "ITS": "#d4ec36",
+      "MAG3": "#243a82",
       "MCH": "#8b88ff",
       "MFT": "#6562ef",
+      "MI3": "#243a82",
       "MID": "#303ac8",
+      "PHS": "#243a82",
+      "PIPE3": "#243a82",
+      "RCH": "#243a82",
+      "TF3": "#243a82",
       "TOF": "#36e7df",
       "TPC": "#342bdd",
       "TRD": "#17d7cb",
+      "TRK": "#243a82",
+      "ZDC": "#243a82",
       "background": "#000000",
       "clusters": "#94e5ff",
       "magnet": "#315285",
       "tracks": "#ddefff"
     },
-    "colors_linear": {},
+    "colors_linear": {
+      "ABS3": [
+        0.017641954123973846,
+        0.0423114113509655,
+        0.22322796285152435
+      ],
+      "CPV": [
+        0.017641954123973846,
+        0.0423114113509655,
+        0.22322796285152435
+      ],
+      "ECL": [
+        0.017641954123973846,
+        0.0423114113509655,
+        0.22322796285152435
+      ],
+      "EMC": [
+        0.7912979125976562,
+        0.0027317428030073643,
+        0.019382361322641373
+      ],
+      "FCT": [
+        0.017641954123973846,
+        0.0423114113509655,
+        0.22322796285152435
+      ],
+      "FD3": [
+        0.017641954123973846,
+        0.0423114113509655,
+        0.22322796285152435
+      ],
+      "FDD": [
+        0.017641954123973846,
+        0.0423114113509655,
+        0.22322796285152435
+      ],
+      "FT0": [
+        0.039546236395835876,
+        0.7230551242828369,
+        0.09530746936798096
+      ],
+      "FT3": [
+        0.017641954123973846,
+        0.0423114113509655,
+        0.22322796285152435
+      ],
+      "FV0": [
+        0.15896083414554596,
+        0.6104955673217773,
+        0.006512090563774109
+      ],
+      "HMP": [
+        0.68668532371521,
+        0.002124688820913434,
+        0.016807375475764275
+      ],
+      "ITS": [
+        0.6583748459815979,
+        0.838798999786377,
+        0.03688944876194
+      ],
+      "MAG3": [
+        0.017641954123973846,
+        0.0423114113509655,
+        0.22322796285152435
+      ],
+      "MCH": [
+        0.2581828534603119,
+        0.2462013214826584,
+        1.0
+      ],
+      "MFT": [
+        0.13013647496700287,
+        0.12213877588510513,
+        0.8631572127342224
+      ],
+      "MI3": [
+        0.017641954123973846,
+        0.0423114113509655,
+        0.22322796285152435
+      ],
+      "MID": [
+        0.02955683507025242,
+        0.0423114113509655,
+        0.577580451965332
+      ],
+      "PHS": [
+        0.017641954123973846,
+        0.0423114113509655,
+        0.22322796285152435
+      ],
+      "PIPE3": [
+        0.017641954123973846,
+        0.0423114113509655,
+        0.22322796285152435
+      ],
+      "RCH": [
+        0.017641954123973846,
+        0.0423114113509655,
+        0.22322796285152435
+      ],
+      "TF3": [
+        0.017641954123973846,
+        0.0423114113509655,
+        0.22322796285152435
+      ],
+      "TOF": [
+        0.03688944876194,
+        0.7991027235984802,
+        0.7379103899002075
+      ],
+      "TPC": [
+        0.03433980792760849,
+        0.024157632142305374,
+        0.7230551242828369
+      ],
+      "TRD": [
+        0.008568125776946545,
+        0.6795424818992615,
+        0.5972017645835876
+      ],
+      "TRK": [
+        0.017641954123973846,
+        0.0423114113509655,
+        0.22322796285152435
+      ],
+      "ZDC": [
+        0.017641954123973846,
+        0.0423114113509655,
+        0.22322796285152435
+      ],
+      "background": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "clusters": [
+        0.2961382567882538,
+        0.7835378050804138,
+        1.0
+      ],
+      "magnet": [
+        0.03071344457566738,
+        0.08437620848417282,
+        0.2345505803823471
+      ],
+      "tracks": [
+        0.7230551242828369,
+        0.8631572127342224,
+        1.0
+      ]
+    },
     "cutaway": false,
     "data_glow_lighting": false,
     "detector_modes": {
-      "TRD": "both",
-      "TOF": "both",
+      "ABS3": "tracks",
+      "CPV": "tracks",
+      "ECL": "tracks",
+      "EMC": "tracks",
+      "FCT": "tracks",
+      "FD3": "tracks",
+      "FDD": "tracks",
+      "FT0": "tracks",
+      "FT3": "tracks",
+      "FV0": "tracks",
+      "HMP": "tracks",
+      "ITS": "tracks",
+      "MAG3": "tracks",
       "MCH": "both",
-      "MID": "both"
+      "MFT": "tracks",
+      "MI3": "tracks",
+      "MID": "both",
+      "PHS": "tracks",
+      "PIPE3": "tracks",
+      "RCH": "tracks",
+      "TF3": "tracks",
+      "TOF": "both",
+      "TPC": "tracks",
+      "TRD": "both",
+      "TRK": "tracks",
+      "ZDC": "tracks"
     },
     "detector_setup": "ALICE2",
     "detectors": [
@@ -153,67 +387,198 @@
       "MCH",
       "MID"
     ],
-    "distance_cm": 3800,
-    "elevation": 20,
-    "exposure": 0,
+    "distance_cm": 3800.0,
+    "elevation": 20.0,
+    "exposure": 0.0,
     "frame_aspect": 1.7777777777777777,
     "geometry": [
       "ITS",
       "TPC",
       "TRD",
       "TOF",
-      "EMC",
       "HMP",
-      "MFT",
+      "EMC",
       "MCH",
+      "MFT",
       "MID",
       "FT0",
       "FV0"
     ],
     "geometry_components": {},
-    "geometry_display": {},
-    "geometry_exclusions": {},
+    "geometry_display": {
+      "ABS3": "surfaces",
+      "CPV": "surfaces",
+      "ECL": "surfaces",
+      "EMC": "surfaces",
+      "FCT": "surfaces",
+      "FD3": "surfaces",
+      "FDD": "surfaces",
+      "FT0": "surfaces",
+      "FT3": "surfaces",
+      "FV0": "surfaces",
+      "HMP": "surfaces",
+      "ITS": "surfaces",
+      "L3": "surfaces",
+      "MAG3": "surfaces",
+      "MCH": "surfaces",
+      "MFT": "surfaces",
+      "MI3": "surfaces",
+      "MID": "surfaces",
+      "PHS": "surfaces",
+      "PIPE3": "surfaces",
+      "RCH": "surfaces",
+      "TF3": "surfaces",
+      "TOF": "surfaces",
+      "TPC": "surfaces",
+      "TRD": "surfaces",
+      "TRK": "surfaces",
+      "ZDC": "surfaces"
+    },
+    "geometry_exclusions": {
+      "ABS3": [],
+      "CPV": [],
+      "ECL": [],
+      "EMC": [],
+      "FCT": [],
+      "FD3": [],
+      "FDD": [],
+      "FT0": [],
+      "FT3": [],
+      "FV0": [],
+      "HMP": [],
+      "ITS": [],
+      "L3": [],
+      "MAG3": [],
+      "MCH": [],
+      "MFT": [],
+      "MI3": [],
+      "MID": [],
+      "PHS": [],
+      "PIPE3": [],
+      "RCH": [],
+      "TF3": [],
+      "TOF": [],
+      "TPC": [],
+      "TRD": [],
+      "TRK": [],
+      "ZDC": []
+    },
     "geometry_inner_masks": {},
     "geometry_lod": "full",
     "geometry_lods": {
-      "ITS": "structural",
-      "TPC": "structural"
+      "EMC": "full",
+      "FT0": "full",
+      "FV0": "full",
+      "HMP": "full",
+      "ITS": "full",
+      "MCH": "full",
+      "MFT": "full",
+      "MID": "full",
+      "TOF": "full",
+      "TPC": "full",
+      "TRD": "full"
     },
     "geometry_opacities": {
-      "EMC": 0.7,
-      "FT0": 0.6,
-      "FV0": 0.35,
-      "HMP": 0.6,
-      "ITS": 0.35,
-      "MCH": 0.025,
+      "ABS3": 1.0,
+      "CPV": 1.0,
+      "ECL": 1.0,
+      "EMC": 0.699999988079071,
+      "FCT": 1.0,
+      "FD3": 1.0,
+      "FDD": 1.0,
+      "FT0": 0.6000000238418579,
+      "FT3": 1.0,
+      "FV0": 0.3499999940395355,
+      "HMP": 0.6000000238418579,
+      "ITS": 0.3499999940395355,
+      "L3": 1.0,
+      "MAG3": 1.0,
+      "MCH": 0.02500000037252903,
       "MFT": 0.25,
-      "MID": 0.12,
-      "TOF": 0.05,
-      "TPC": 0.22,
-      "TRD": 0.035
+      "MI3": 1.0,
+      "MID": 0.11999999731779099,
+      "PHS": 1.0,
+      "PIPE3": 1.0,
+      "RCH": 1.0,
+      "TF3": 1.0,
+      "TOF": 0.05000000074505806,
+      "TPC": 0.2199999988079071,
+      "TRD": 0.03500000014901161,
+      "TRK": 1.0,
+      "ZDC": 1.0
     },
     "geometry_opacity": 1.0,
     "geometry_opening_directions": {
-      "EMC": 20,
-      "FT0": 20,
-      "HMP": 20,
-      "ITS": 20,
-      "MCH": 20,
-      "MFT": 20,
-      "MID": 20,
-      "TOF": 20,
-      "TPC": 20,
-      "TRD": 20
+      "ABS3": -90.0,
+      "CPV": -90.0,
+      "ECL": -90.0,
+      "EMC": 20.0,
+      "FCT": -90.0,
+      "FD3": -90.0,
+      "FDD": -90.0,
+      "FT0": 20.0,
+      "FT3": -90.0,
+      "FV0": -90.0,
+      "HMP": 20.0,
+      "ITS": 20.0,
+      "L3": -90.0,
+      "MAG3": -90.0,
+      "MCH": 20.0,
+      "MFT": 20.0,
+      "MI3": -90.0,
+      "MID": 20.0,
+      "PHS": -90.0,
+      "PIPE3": -90.0,
+      "RCH": -90.0,
+      "TF3": -90.0,
+      "TOF": 20.0,
+      "TPC": 20.0,
+      "TRD": 20.0,
+      "TRK": -90.0,
+      "ZDC": -90.0
     },
     "geometry_openings": {
-      "EMC": 120,
-      "HMP": 120,
-      "ITS": 120,
-      "TOF": 120,
-      "TPC": 120,
-      "TRD": 120
+      "ABS3": 0.0,
+      "CPV": 0.0,
+      "ECL": 0.0,
+      "EMC": 120.0,
+      "FCT": 0.0,
+      "FD3": 0.0,
+      "FDD": 0.0,
+      "FT0": 0.0,
+      "FT3": 0.0,
+      "FV0": 0.0,
+      "HMP": 120.0,
+      "ITS": 120.0,
+      "L3": 0.0,
+      "MAG3": 0.0,
+      "MCH": 0.0,
+      "MFT": 0.0,
+      "MI3": 0.0,
+      "MID": 0.0,
+      "PHS": 0.0,
+      "PIPE3": 0.0,
+      "RCH": 0.0,
+      "TF3": 0.0,
+      "TOF": 120.0,
+      "TPC": 120.0,
+      "TRD": 120.0,
+      "TRK": 0.0,
+      "ZDC": 0.0
     },
-    "geometry_schematics": {},
+    "geometry_schematics": {
+      "EMC": false,
+      "FT0": false,
+      "FV0": false,
+      "HMP": false,
+      "ITS": false,
+      "MCH": false,
+      "MFT": false,
+      "MID": false,
+      "TOF": false,
+      "TPC": false,
+      "TRD": false
+    },
     "geometry_units": "m",
     "highlight_cluster_color": "#ff6633",
     "highlight_cluster_radius_cm": 1.0,
@@ -225,27 +590,49 @@
     "lights": [
       {
         "color": "#ffffff",
-        "energy": 3200,
-        "position_m": [
-          8,
-          12,
-          12
+        "color_linear": [
+          1.0,
+          1.0,
+          1.0
         ],
-        "size_m": 10
+        "energy": 3200.0,
+        "name": "ALICE light 1",
+        "position_m": [
+          8.0,
+          12.0,
+          12.0
+        ],
+        "rotation": [
+          0.7618720531463623,
+          6.79828318084219e-08,
+          2.589937686920166
+        ],
+        "size_m": 10.0
       },
       {
         "color": "#cbdfff",
-        "energy": 2600,
-        "position_m": [
-          -8,
-          5,
-          -12
+        "color_linear": [
+          0.5972017645835876,
+          0.7379103899002075,
+          1.0
         ],
-        "size_m": 10
+        "energy": 2600.0,
+        "name": "ALICE light 2",
+        "position_m": [
+          -8.0,
+          5.0,
+          -12.0
+        ],
+        "rotation": [
+          2.245537281036377,
+          2.3094161250014622e-08,
+          -2.2142975330352783
+        ],
+        "size_m": 10.0
       }
     ],
     "magnet": false,
-    "metallic": 0,
+    "metallic": 0.0,
     "missing_color": "#808080",
     "mode": "tracks",
     "palette": "viridis",
@@ -1532,38 +1919,40 @@
       ]
     ],
     "render_engine": "BLENDER_EEVEE",
-    "roll": -11,
-    "roughness": 0.65,
+    "roll": -11.0,
+    "roughness": 0.6499999761581421,
     "scale_max": null,
     "scale_min": null,
     "schematic": false,
     "shading": "smooth",
     "target_cm": [
-      0,
-      -100,
-      -400
+      0.0,
+      -100.0,
+      -400.0
     ],
+    "tower_direction": "inward",
+    "tower_fixed_height_cm": 10.0,
+    "tower_fixed_heights_cm": {},
+    "tower_height_mapping": "linear",
+    "tower_height_mappings": {},
+    "tower_height_scales": {
+      "CPV": 0.20000000298023224,
+      "EMC": 20.0,
+      "PHS": 0.20000000298023224
+    },
+    "tower_log_references": {},
+    "tower_max_height_cm": 100.0,
+    "tower_max_heights_cm": {},
+    "tower_width_scale": 0.949999988079071,
+    "tower_width_scales": {},
     "tpc_cluster_profile": "sphere",
     "tpc_profile_scale": 1.0,
-    "tpc_profile_thickness_cm": 0.03,
+    "tpc_profile_thickness_cm": 0.029999999329447746,
     "track_color_mode": "solid",
-    "track_emission": 0.8,
+    "track_emission": 0.800000011920929,
     "track_radius_cm": 0.045,
     "view_transform": "Standard",
-    "world_strength": 0.4,
-    "cluster_size_scales": {
-      "EMC": 5.0,
-      "FT0": 5.0,
-      "FV0": 5.0,
-      "HMP": 5.0,
-      "ITS": 5.0,
-      "MCH": 5.0,
-      "MFT": 5.0,
-      "MID": 5.0,
-      "TOF": 5.0,
-      "TPC": 5.0,
-      "TRD": 5.0
-    }
+    "world_strength": 0.4000000059604645
   },
   "schema": "alice-eve-scene",
   "version": 1

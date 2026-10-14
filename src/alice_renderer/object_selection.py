@@ -37,12 +37,12 @@ def selected_clusters(event,settings):
 def parse_track_ids(value):
     values=value.split(',') if isinstance(value,str) else value
     if not isinstance(values,(list,tuple)):raise ValueError('Track IDs must be comma-separated text or a list')
-    result=[]
+    result=[];seen=set()
     for item in values:
         text=str(item).strip()
         if not text:continue
         if ',' in text or any(ord(c)<32 for c in text):raise ValueError('Invalid track ID')
-        if text not in result:result.append(text)
+        if text not in seen:result.append(text);seen.add(text)
     return result
 
 def parse_event_highlights(value):
