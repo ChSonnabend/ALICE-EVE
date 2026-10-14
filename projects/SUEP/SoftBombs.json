@@ -585,7 +585,7 @@
     "highlight_override_color": true,
     "highlight_track_color": "#ffcc33",
     "highlight_track_ids": [],
-    "highlight_track_radius_cm": 2.5,
+    "highlight_track_radius_cm": 0.25,
     "highlight_tracks_by_event": {},
     "include_ambiguous_tracks": false,
     "lights": [
@@ -1951,7 +1951,7 @@
     "tpc_profile_thickness_cm": 0.029999999329447746,
     "track_color_mode": "solid",
     "track_emission": 0.800000011920929,
-    "track_radius_cm": 1.0,
+    "track_radius_cm": 0.1,
     "track_representation": "reconstructed",
     "video_enabled": false,
     "view_transform": "Standard",

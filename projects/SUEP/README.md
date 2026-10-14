@@ -135,8 +135,8 @@ MC truth-only exports do not invent clusters.
 
 `SoftBombs.json` is the portable visual recipe based on the reviewed
 `video-20261013-125740-7c5a44` geometry, camera, detector presentation and lighting.
-TRD and TOF show both tracks and clusters. Normal track linewidth is **2 cm**;
-selected SUEP pions and their descendants use **5 cm** (stored radii 1 and 2.5 cm).
+TRD and TOF show both tracks and clusters. Normal track linewidth is **0.2 cm**;
+selected SUEP pions and their descendants use **0.5 cm** (stored radii 0.1 and 0.25 cm).
 Cluster scale factors and detector colours follow the reference scene.
 
 For the supplied simulation, use the reconstructed TF export
