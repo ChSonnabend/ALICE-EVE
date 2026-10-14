@@ -1,0 +1,18 @@
+{
+  "run": 560067,
+  "timestamp_ms": 1731734639982,
+  "first_orbit": 212036032,
+  "orbits_per_tf": 32,
+  "expected_timeframes": 1,
+  "condition_backend": "http://alice-ccdb.cern.ch",
+  "timing_file": "o2_tfidinfo.root",
+  "track_sources": "ITS",
+  "cluster_sources": "ITS",
+  "vertexing_sources": "ITS",
+  "vertex_matching_sources": "ITS",
+  "exporter": "/absolute/path/to/alice-complete-export-workflow",
+  "inventory": "/absolute/path/to/alice-pv-inventory-workflow",
+  "config_key_values": "",
+  "input_files": {},
+  "shared_memory_bytes": 25769803776
+}

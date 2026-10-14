@@ -127,6 +127,59 @@ The native exporter derivative retains the O2 GPL license. Project code is distr
 
 ## Local preprocessing, detector setups and profiles
 
+### Input files and incomplete datasets
+
+| Input | How to load it |
+|---|---|
+| Exported event JSON/JSONL or an export folder (including gzip) | Load directly in the desktop |
+| AO2D.root | Load directly for collision-associated fitted tracks; supply the signed run-specific magnetic field in Setup or a conditions sidecar. Detector clusters are not imported from AO2D |
+| Raw TF / CTF | Decode and reconstruct in matching O2PDPSuite, then open the resulting export folder |
+| Detector ROOT track/cluster files | Use the reconstructed-product exporter below; arbitrary ROOT folders are not desktop inputs |
+
+The entry point is **`tools/preprocess_local.py`**. In an activated O2PDPSuite,
+use `build` to build the exporters, `reconstruct --format tf` or
+`reconstruct --format ctf` for raw inputs, and `ao2d` to prepare an AO2D
+field-conditions sidecar. The run-560067 profile is an example, not a universal
+reconstruction configuration.
+
+For partial reconstructed products, first inspect what is available:
+
+```sh
+python3 tools/preprocess_local.py inspect-reco --input /path/reconstructed
+```
+
+Copy `profiles/example-reconstructed.json` and select only the track/cluster
+sources you have. Then, in O2PDPSuite:
+
+```sh
+python3 tools/preprocess_local.py reconstructed \
+  --input /path/reconstructed --config /path/reco.json \
+  --vertices reuse --work /path/new-check
+```
+
+This prepares a graph and reports the installed readers' exact file requirements
+in `exporting/input-requirements.json`. Repeat with a fresh work directory and
+`--execute` to export. Use `--vertices rebuild` to rerun primary vertexing and
+track-to-vertex association when suitable fitted tracks are available. This does
+not regenerate detector tracks or cross-detector matches.
+
+For original collision grouping, retain **`o2_primary_vertex.root`**, including its
+`PrimaryVertex`, `PVTrackIndices` and `PV2TrackRefs` branches. The installed O2
+reader stores associations in that file. Also retain the original **TF identity/timing
+file** (usually `o2_tfidinfo.root`) and complete detector products from the same
+production in the same TF order. For example, ITS uses `o2trac_its.root` and
+`o2clus_its.root`; TPC uses `tpctracks.root`,
+`tpc-native-clusters.root` and any requested trigger companion. ITS–TPC fits
+also need `o2match_itstpc.root` and their reader dependencies. Do not strip ROFs,
+indices, patterns or track–cluster references from these files.
+
+Missing detector measurements require the original TF/CTF or digits and a matching
+reconstruction. They cannot be inferred from tracks in another detector. See the
+[complete file checklist and partial-data limitations](docs/LOCAL-PREPROCESSING.md#files-to-retain).
+The reconstructed-folder mode has been tested for O2 workflow generation and
+dependency checks; a complete run on real reconstructed products remains to be
+validated.
+
 See [local TF/CTF and AO2D preprocessing](docs/LOCAL-PREPROCESSING.md), [TPC pad/time profiles](docs/TPC-PROFILES.md), and [ALICE2 / ITS3 / ALICE3 presets and render progress](docs/DETECTOR-SETUPS.md).
 
 Portable scene recipes can select `"render_engine": "BLENDER_EEVEE"` for GPU rasterization, or `"CYCLES"` (the default) for path tracing. Eevee uses the recipe’s materials, openings and geometry detail settings; rasterization itself does not remove subpixel geometry. ITS/TPC `structural` detail reduces geometry before rendering. The sample setting controls Eevee temporal antialiasing; Cycles backend/device selections do not apply to Eevee.

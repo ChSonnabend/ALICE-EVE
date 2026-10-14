@@ -15,8 +15,20 @@ def main():
     b=sub.add_parser('build');b.add_argument('--o2-source',type=Path,required=True);b.add_argument('--work',type=Path,required=True)
     r=sub.add_parser('reconstruct');r.add_argument('--input',type=Path,required=True);r.add_argument('--format',choices=['tf','ctf'],required=True);r.add_argument('--config',type=Path,required=True);r.add_argument('--work',type=Path,required=True);r.add_argument('--execute',action='store_true',help='Run after workflow and CCDB preflight; otherwise only prepare the graph')
     a=sub.add_parser('ao2d');a.add_argument('--input',type=Path,required=True);a.add_argument('--runs',type=int,nargs='+',required=True);a.add_argument('--cache',type=Path,required=True)
+    i=sub.add_parser('inspect-reco',help='List conventional ROOT products and prerequisites without O2')
+    i.add_argument('--input',type=Path,required=True)
+    r=sub.add_parser('reconstructed',help='Export reconstructed ROOT products; optionally rerun vertexing')
+    r.add_argument('--input',type=Path,required=True);r.add_argument('--config',type=Path,required=True)
+    r.add_argument('--work',type=Path,required=True);r.add_argument('--vertices',choices=['reuse','rebuild'],default='reuse')
+    r.add_argument('--execute',action='store_true')
     args=p.parse_args()
+    if args.action=='inspect-reco':
+        from reconstructed_input import inspect
+        print(json.dumps(inspect(args.input),indent=2));return
     if not os.environ.get('O2_ROOT'):p.error('Activate O2PDPSuite first (or use run_in_o2.py --pid PID -- python3 ...)')
+    if args.action=='reconstructed':
+        from reconstructed_input import process
+        process(args,run);return
     if args.action=='build':
         work=args.work.resolve();work.mkdir(parents=True,exist_ok=True);source=work/'exporter-source'
         if source.exists():p.error('Use a fresh work directory; exporter-source already exists')
