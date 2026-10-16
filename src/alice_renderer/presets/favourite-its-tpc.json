@@ -1,17 +1,69 @@
 {
   "defaults": {},
   "geometry": {
+    "CPV": {
+      "components": {
+        "file": "CPV.blend.components.json.gz",
+        "sha256": "55b3dfccd06fddaf7d1529e91623e2948a2891fdc0328fca7682a35f85b651d0"
+      },
+      "file": "CPV.blend",
+      "sha256": "123f8fc731b56eec5a71af9553435962d4dd3057291029b5f1512d3b7f091569"
+    },
+    "EMC": {
+      "components": {
+        "file": "EMC.blend.components.json.gz",
+        "sha256": "02e1835e74d25956ebbb3e8fc434857b3f786dac8df299806c7b0b774bf640d1"
+      },
+      "file": "EMC.blend",
+      "sha256": "df0df20d31584e42a823f4fd2a39a6f8cbce8d17a36d3a9b169677ddc71ab087"
+    },
+    "FDD": {
+      "components": {
+        "file": "FDD.blend.components.json.gz",
+        "sha256": "e76280067790a27e7fd12e8d6b98b4d1f6516367f4276b401a4dfd69271faa10"
+      },
+      "file": "FDD.blend",
+      "sha256": "53b75bb85149637069f54c530356bbb16327ca3da346cc01fe3f6adea456436f"
+    },
+    "FT0": {
+      "components": {
+        "file": "FT0.blend.components.json.gz",
+        "sha256": "f09079a59e6fb03fc4b6688596daa17a38dfb14b456f18b9ef030db7023d62ac"
+      },
+      "file": "FT0.blend",
+      "sha256": "d9fdf179fdc140a5cf2442e87824dbaf9fd08ed34a9b149ed30d46733a6a2080"
+    },
+    "FV0": {
+      "components": {
+        "file": "FV0.blend.components.json.gz",
+        "sha256": "4529897340cb834099ea74917b246a92d85222ed01974f4312ad52faec6a54f0"
+      },
+      "file": "FV0.blend",
+      "sha256": "32687c1031a9039e28d14f30175c405b3fae6fa88875db7103b75d9f63b18483"
+    },
     "ITS": {
       "components": {
         "file": "ITS.blend.components.json.gz",
         "sha256": "01bc248a5c21c46404b11e99db5802d60948a2c0c2ca49d1a6fae6d0c011e641"
       },
       "file": "ITS.blend",
-      "sha256": "6ac0b1ef6b37fbb2a8d7b0d175158b1870e0172f35a5bc736cb19051c8188259",
-      "structural": {
-        "file": "ITS.blend.structural.json.gz",
-        "sha256": "6568ac8afaeff1024be51e73b27d41bf45c31e3d0ee8d8b29f82a69756197e3f"
-      }
+      "sha256": "6ac0b1ef6b37fbb2a8d7b0d175158b1870e0172f35a5bc736cb19051c8188259"
+    },
+    "PHS": {
+      "components": {
+        "file": "PHS.blend.components.json.gz",
+        "sha256": "d1813b0b8945c86e767ff81e51b0850160d86b3a498dcd569fd3b08240ebe297"
+      },
+      "file": "PHS.blend",
+      "sha256": "a8bf53b08c7158c4c774b42cf69847bb0ccb3f4e03c2e7e603b5fbb26bbff1cc"
+    },
+    "TOF": {
+      "components": {
+        "file": "TOF.blend.components.json.gz",
+        "sha256": "282e2108ff39a2b431d1946c76fd7481d375bb3e6c0bdb197ac93a1e60c47332"
+      },
+      "file": "TOF.blend",
+      "sha256": "6f5dffc69dadbe4baf598f32b4d3d3a73fccf800d3abf5a458e4c06dd75b4854"
     },
     "TPC": {
       "components": {
@@ -19,40 +71,61 @@
         "sha256": "c15b16340f2689e05be99230b2429f09dbb66bf24dbd60ac70244c9a97323640"
       },
       "file": "TPC.blend",
-      "sha256": "908c428a14e5000e1681caa6ec9fc2b41b78c233443c86d6ea4c05613254b0a0",
-      "structural": {
-        "file": "TPC.blend.structural.json.gz",
-        "sha256": "d8973acc9a2419a2455a5f08fa8a1419d325939b606ba0d96d412ac8fbbe9446"
-      }
+      "sha256": "908c428a14e5000e1681caa6ec9fc2b41b78c233443c86d6ea4c05613254b0a0"
+    },
+    "TRD": {
+      "components": {
+        "file": "TRD-chambers.blend.components.json.gz",
+        "sha256": "75459c698091c2323311fec5405e00f7ca1f1408095ccd7756b8e9f92cbe5979"
+      },
+      "file": "TRD-chambers.blend",
+      "sha256": "85699147d82286d187121fddf29204285ff556023d81a4a42745c44df600dc82"
+    },
+    "ZDC": {
+      "components": {
+        "file": "ZDC.blend.components.json.gz",
+        "sha256": "956d8d21c785a638c07d52188a477082e3c92609e9f902a79e13ae72e721caa2"
+      },
+      "file": "ZDC.blend",
+      "sha256": "eda7e1d3061a73406eaa4bf8df84192cc605695f30fef5de9b842d23a93ac760"
     }
   },
   "scene": {
     "azimuth": 47.7,
+    "beampipe": true,
+    "beampipe_color": "#030060",
+    "beampipe_radius_cm": 0.9,
+    "beampipe_wall_cm": 0.08,
+    "beampipe_z_cm": [
+      -100000.0,
+      100000.0
+    ],
+    "calorimeter_display": {},
     "camera": "perspective",
     "camera_lens_mm": 16.0,
     "camera_orbit_axis": "Y",
     "camera_pose": {
       "clip_end": 2000.0,
       "clip_start": 0.004999999888241291,
-      "lens": 16.0,
+      "lens": 17,
       "matrix_world": [
         [
-          0.3109484314918518,
-          -0.4595404863357544,
-          0.8319456577301025,
-          2.516200065612793
+          0.477790768726736,
+          -0.4477622992610748,
+          0.7557942211210341,
+          3.168510940504695
         ],
         [
-          -0.07421514391899109,
-          0.8609263300895691,
-          0.5032871961593628,
-          1.521064281463623
+          0.10581877290951042,
+          0.8834199682169872,
+          0.45647732370340477,
+          1.9136212664389471
         ],
         [
-          -0.9475247859954834,
-          -0.21823932230472565,
-          0.23359881341457367,
-          0.6469196677207947
+          -0.8720770428233048,
+          -0.13812343434744587,
+          0.4694715627858908,
+          1.8973535765581184
         ],
         [
           0.0,
@@ -72,6 +145,7 @@
     "cluster_color_mode": "solid",
     "cluster_emission": 0.800000011920929,
     "cluster_radius_cm": 0.4000000059604645,
+    "cluster_size_scales": {},
     "color_ranges": {
       "clusters": [
         0.0,
@@ -83,21 +157,21 @@
       ]
     },
     "colors": {
-      "CPV": "#243a82",
-      "EMC": "#243a82",
-      "FDD": "#243a82",
-      "FT0": "#243a82",
-      "FV0": "#243a82",
+      "CPV": "#0700b5",
+      "EMC": "#0700b5",
+      "FDD": "#0700b5",
+      "FT0": "#0700b5",
+      "FV0": "#0700b5",
       "HMP": "#243a82",
       "ITS": "#0700b5",
       "MCH": "#243a82",
       "MFT": "#243a82",
       "MID": "#243a82",
-      "PHS": "#243a82",
-      "TOF": "#243a82",
+      "PHS": "#0700b5",
+      "TOF": "#0700b5",
       "TPC": "#0700b5",
-      "TRD": "#243a82",
-      "ZDC": "#243a82",
+      "TRD": "#0700b5",
+      "ZDC": "#0700b5",
       "background": "#000012",
       "clusters": "#d58bdd",
       "magnet": "#315285",
@@ -105,29 +179,29 @@
     },
     "colors_linear": {
       "CPV": [
-        0.017641954123973846,
-        0.0423114113509655,
-        0.22322796285152435
+        0.002124688820913434,
+        0.0,
+        0.46207699179649353
       ],
       "EMC": [
-        0.017641954123973846,
-        0.0423114113509655,
-        0.22322796285152435
+        0.002124688820913434,
+        0.0,
+        0.46207699179649353
       ],
       "FDD": [
-        0.017641954123973846,
-        0.0423114113509655,
-        0.22322796285152435
+        0.002124688820913434,
+        0.0,
+        0.46207699179649353
       ],
       "FT0": [
-        0.017641954123973846,
-        0.0423114113509655,
-        0.22322796285152435
+        0.002124688820913434,
+        0.0,
+        0.46207699179649353
       ],
       "FV0": [
-        0.017641954123973846,
-        0.0423114113509655,
-        0.22322796285152435
+        0.002124688820913434,
+        0.0,
+        0.46207699179649353
       ],
       "HMP": [
         0.017641954123973846,
@@ -135,9 +209,9 @@
         0.22322796285152435
       ],
       "ITS": [
-        0.002124688820913434,
+        0.0013810477335937322,
         0.0,
-        0.46207699179649353
+        0.3003500446677208
       ],
       "MCH": [
         0.017641954123973846,
@@ -155,29 +229,29 @@
         0.22322796285152435
       ],
       "PHS": [
-        0.017641954123973846,
-        0.0423114113509655,
-        0.22322796285152435
-      ],
-      "TOF": [
-        0.017641954123973846,
-        0.0423114113509655,
-        0.22322796285152435
-      ],
-      "TPC": [
         0.002124688820913434,
         0.0,
         0.46207699179649353
       ],
+      "TOF": [
+        0.002124688820913434,
+        0.0,
+        0.46207699179649353
+      ],
+      "TPC": [
+        0.0014872821746394038,
+        0.0,
+        0.32345389425754545
+      ],
       "TRD": [
-        0.017641954123973846,
-        0.0423114113509655,
-        0.22322796285152435
+        0.002124688820913434,
+        0.0,
+        0.46207699179649353
       ],
       "ZDC": [
-        0.017641954123973846,
-        0.0423114113509655,
-        0.22322796285152435
+        0.002124688820913434,
+        0.0,
+        0.46207699179649353
       ],
       "background": [
         0.0,
@@ -219,30 +293,53 @@
       "TRD": "both",
       "ZDC": "both"
     },
+    "detector_setup": "ALICE2",
     "detectors": [
       "ITS",
-      "TPC"
+      "TPC",
+      "TRD",
+      "TOF",
+      "EMC",
+      "PHS",
+      "CPV",
+      "ZDC",
+      "FT0",
+      "FV0",
+      "FDD"
     ],
     "distance_cm": 268.4,
     "elevation": 19.6,
-    "exposure": 0.0,
+    "exposure": 0,
     "frame_aspect": 1.7777777777777777,
     "geometry": [
       "ITS",
-      "TPC"
+      "TPC",
+      "TRD",
+      "TOF",
+      "EMC",
+      "PHS",
+      "CPV",
+      "ZDC",
+      "FT0",
+      "FV0",
+      "FDD"
     ],
     "geometry_components": {
+      "CPV": {},
+      "EMC": {},
+      "PHS": {},
+      "TOF": {},
       "TPC": {
-        "parts/TPC_CDCE": false,
-        "parts/TPC_CDCI": false,
-        "parts/TPC_CDR": false,
-        "parts/TPC_CDRS": false,
-        "parts/TPC_CR": false,
-        "parts/TPC_GRES1": false,
+        "parts/TPC_CDCE": true,
+        "parts/TPC_CDCI": true,
+        "parts/TPC_CDR": true,
+        "parts/TPC_CDRS": true,
+        "parts/TPC_CR": true,
+        "parts/TPC_GRES1": true,
         "parts/TPC_HSM": true,
         "parts/TPC_HSS": true,
         "parts/TPC_HV": false,
-        "parts/TPC_HV_Rod": false,
+        "parts/TPC_HV_Rod": true,
         "parts/TPC_ICGEM": true,
         "parts/TPC_ICVM": true,
         "parts/TPC_ICVS": true,
@@ -254,67 +351,68 @@
         "parts/TPC_IFEPOX1": true,
         "parts/TPC_IFEPOX2": true,
         "parts/TPC_IFEPOX3": true,
-        "parts/TPC_IGR1": false,
-        "parts/TPC_IGR2": false,
-        "parts/TPC_IGR3": false,
-        "parts/TPC_IGR4": false,
-        "parts/TPC_IHSS": false,
-        "parts/TPC_IHSTR": false,
-        "parts/TPC_IHVH": false,
-        "parts/TPC_INPLL": false,
-        "parts/TPC_IPP": false,
+        "parts/TPC_IGR1": true,
+        "parts/TPC_IGR2": true,
+        "parts/TPC_IGR3": true,
+        "parts/TPC_IGR4": true,
+        "parts/TPC_IHSS": true,
+        "parts/TPC_IHSTR": true,
+        "parts/TPC_IHVH": true,
+        "parts/TPC_INPLL": true,
+        "parts/TPC_IPP": true,
         "parts/TPC_IRCAP": true,
-        "parts/TPC_IRH": false,
+        "parts/TPC_IRH": true,
         "parts/TPC_IROCB": true,
-        "parts/TPC_ISB": false,
-        "parts/TPC_MMH1": false,
-        "parts/TPC_MMH2": false,
-        "parts/TPC_MMHC": false,
+        "parts/TPC_ISB": true,
+        "parts/TPC_MMH1": true,
+        "parts/TPC_MMH2": true,
+        "parts/TPC_MMHC": true,
         "parts/TPC_OCGEM": true,
         "parts/TPC_OCV": true,
-        "parts/TPC_OGRI": false,
-        "parts/TPC_OGRO": false,
-        "parts/TPC_OHS4": false,
-        "parts/TPC_OHS5": false,
+        "parts/TPC_OGRI": true,
+        "parts/TPC_OGRO": true,
+        "parts/TPC_OHS4": true,
+        "parts/TPC_OHS5": true,
         "parts/TPC_OHVH": true,
-        "parts/TPC_OMH1": false,
-        "parts/TPC_OMH2": false,
-        "parts/TPC_OMH5": false,
-        "parts/TPC_OMH6": false,
-        "parts/TPC_OPLL": false,
-        "parts/TPC_OPP": false,
+        "parts/TPC_OMH1": true,
+        "parts/TPC_OMH2": true,
+        "parts/TPC_OMH5": true,
+        "parts/TPC_OMH6": true,
+        "parts/TPC_OPLL": true,
+        "parts/TPC_OPP": true,
         "parts/TPC_ORCAP": true,
-        "parts/TPC_ORH": false,
+        "parts/TPC_ORH": true,
         "parts/TPC_OROCB": true,
-        "parts/TPC_OSB": false,
-        "parts/TPC_PR": false,
-        "parts/TPC_PRSTR1": false,
-        "parts/TPC_PRSTR2": false,
-        "parts/TPC_PRSTR3": false,
-        "parts/TPC_RES": false,
-        "parts/TPC_RP": false,
-        "parts/TPC_RR_CU": false,
-        "parts/TPC_SWC1": false,
-        "parts/TPC_SWSEG": false,
+        "parts/TPC_OSB": true,
+        "parts/TPC_PR": true,
+        "parts/TPC_PRSTR1": true,
+        "parts/TPC_PRSTR2": true,
+        "parts/TPC_PRSTR3": true,
+        "parts/TPC_RES": true,
+        "parts/TPC_RP": true,
+        "parts/TPC_RR_CU": true,
+        "parts/TPC_SWC1": true,
+        "parts/TPC_SWSEG": true,
         "parts/TPC_TOFC": true,
-        "parts/TPC_WBAR": false,
-        "parts/TPC_WSEG": false,
-        "parts/TPC_bcon": false,
-        "parts/TPC_clampi1v": false,
-        "parts/TPC_clampo1v": false,
-        "parts/TPC_clampo2v": false,
-        "parts/TPC_clampo3v": false,
-        "parts/TPC_clampo4v": false,
-        "parts/TPC_cliholdv": false,
-        "parts/TPC_clitrapv": false,
-        "parts/TPC_clotrapv": false,
-        "parts/TPC_hook": false,
-        "parts/TPC_mrodl": false,
-        "parts/TPC_mrods": false,
-        "parts/TPC_ring": false,
-        "parts/TPC_rodl": false,
-        "parts/TPC_rods": false
-      }
+        "parts/TPC_WBAR": true,
+        "parts/TPC_WSEG": true,
+        "parts/TPC_bcon": true,
+        "parts/TPC_clampi1v": true,
+        "parts/TPC_clampo1v": true,
+        "parts/TPC_clampo2v": true,
+        "parts/TPC_clampo3v": true,
+        "parts/TPC_clampo4v": true,
+        "parts/TPC_cliholdv": true,
+        "parts/TPC_clitrapv": true,
+        "parts/TPC_clotrapv": true,
+        "parts/TPC_hook": true,
+        "parts/TPC_mrodl": true,
+        "parts/TPC_mrods": true,
+        "parts/TPC_ring": true,
+        "parts/TPC_rodl": true,
+        "parts/TPC_rods": true
+      },
+      "TRD": {}
     },
     "geometry_display": {
       "CPV": "surfaces",
@@ -361,8 +459,17 @@
     "geometry_inner_masks": {},
     "geometry_lod": "full",
     "geometry_lods": {
-      "ITS": "structural",
-      "TPC": "structural"
+      "CPV": "full",
+      "EMC": "full",
+      "FDD": "full",
+      "FT0": "full",
+      "FV0": "full",
+      "ITS": "full",
+      "PHS": "full",
+      "TOF": "full",
+      "TPC": "full",
+      "TRD": "full",
+      "ZDC": "full"
     },
     "geometry_opacities": {
       "CPV": 1.0,
@@ -384,62 +491,105 @@
     },
     "geometry_opacity": 1.0,
     "geometry_opening_directions": {
-      "CPV": -90.0,
-      "EMC": -90.0,
-      "FDD": -90.0,
-      "FT0": -90.0,
-      "FV0": -90.0,
+      "CPV": 27.89727020263672,
+      "EMC": 27.89727020263672,
+      "FDD": 27.89727020263672,
+      "FT0": 27.89727020263672,
+      "FV0": 27.89727020263672,
       "HMP": -90.0,
       "ITS": 27.89727020263672,
       "L3": -90.0,
       "MCH": -90.0,
       "MFT": -90.0,
       "MID": -90.0,
-      "PHS": -90.0,
-      "TOF": -90.0,
+      "PHS": 27.89727020263672,
+      "TOF": 27.89727020263672,
       "TPC": 27.89727020263672,
-      "TRD": -90.0,
-      "ZDC": -90.0
+      "TRD": 27.89727020263672,
+      "ZDC": 27.89727020263672
+    },
+    "geometry_opening_z_intervals_cm": {
+      "CPV": [
+        -27.110262870788574,
+        100000.0
+      ],
+      "EMC": [
+        -27.110262870788574,
+        100000.0
+      ],
+      "FDD": [
+        -27.110262870788574,
+        100000.0
+      ],
+      "FT0": [
+        -27.110262870788574,
+        100000.0
+      ],
+      "FV0": [
+        -27.110262870788574,
+        100000.0
+      ],
+      "ITS": [
+        -27.110262870788574,
+        100000.0
+      ],
+      "PHS": [
+        -27.110262870788574,
+        100000.0
+      ],
+      "TOF": [
+        -27.110262870788574,
+        100000.0
+      ],
+      "TPC": [
+        -27.110262870788574,
+        100000.0
+      ],
+      "TRD": [
+        -27.110262870788574,
+        100000.0
+      ],
+      "ZDC": [
+        -27.110262870788574,
+        100000.0
+      ]
     },
     "geometry_openings": {
-      "CPV": 0.0,
-      "EMC": 0.0,
-      "FDD": 0.0,
-      "FT0": 0.0,
-      "FV0": 0.0,
+      "CPV": 180.0,
+      "EMC": 180.0,
+      "FDD": 180.0,
+      "FT0": 180.0,
+      "FV0": 180.0,
       "HMP": 0.0,
-      "ITS": 90.0,
+      "ITS": 180.0,
       "L3": 0.0,
       "MCH": 0.0,
       "MFT": 0.0,
       "MID": 0.0,
-      "PHS": 0.0,
-      "TOF": 0.0,
-      "TPC": 90.0,
-      "TRD": 0.0,
-      "ZDC": 0.0
+      "PHS": 180.0,
+      "TOF": 180.0,
+      "TPC": 180.0,
+      "TRD": 180.0,
+      "ZDC": 90.0
     },
     "geometry_schematics": {
       "ITS": false,
       "TPC": false
     },
     "geometry_units": "m",
+    "geometry_z_intervals_cm": {},
     "highlight_cluster_color": "#ff6633",
     "highlight_cluster_radius_cm": 1.0,
     "highlight_override_color": true,
     "highlight_track_color": "#ffcc33",
     "highlight_track_ids": [],
     "highlight_track_radius_cm": 0.3499999940395355,
+    "highlight_tracks_by_event": {},
     "include_ambiguous_tracks": false,
     "lights": [
       {
-        "color": "#ffffff",
-        "color_linear": [
-          1.0,
-          1.0,
-          1.0
-        ],
-        "energy": 25.0,
+        "color": "#5050ff",
+        "energy": 20.0,
         "name": "ALICE light 1",
         "position_m": [
           1.2999999523162842,
@@ -454,13 +604,8 @@
         "size_m": 2.0
       },
       {
-        "color": "#ffffff",
-        "color_linear": [
-          1.0,
-          1.0,
-          1.0
-        ],
-        "energy": 12.0,
+        "color": "#5050ff",
+        "energy": 9.600000000000001,
         "name": "ALICE light 2",
         "position_m": [
           -1.2000000476837158,
@@ -475,13 +620,8 @@
         "size_m": 2.0
       },
       {
-        "color": "#ffffff",
-        "color_linear": [
-          1.0,
-          1.0,
-          1.0
-        ],
-        "energy": 200.0,
+        "color": "#5050ff",
+        "energy": 160.0,
         "name": "ALICE surround light 1",
         "position_m": [
           4.242167949676514,
@@ -496,13 +636,8 @@
         "size_m": 4.0
       },
       {
-        "color": "#ffffff",
-        "color_linear": [
-          1.0,
-          1.0,
-          1.0
-        ],
-        "energy": 200.0,
+        "color": "#5050ff",
+        "energy": 160.0,
         "name": "ALICE surround light 2",
         "position_m": [
           -4.2431135177612305,
@@ -517,13 +652,8 @@
         "size_m": 4.0
       },
       {
-        "color": "#ffffff",
-        "color_linear": [
-          1.0,
-          1.0,
-          1.0
-        ],
-        "energy": 200.0,
+        "color": "#5050ff",
+        "energy": 160.0,
         "name": "ALICE surround light 3",
         "position_m": [
           -4.2431135177612305,
@@ -538,13 +668,8 @@
         "size_m": 4.0
       },
       {
-        "color": "#ffffff",
-        "color_linear": [
-          1.0,
-          1.0,
-          1.0
-        ],
-        "energy": 200.0,
+        "color": "#5050ff",
+        "energy": 160.0,
         "name": "ALICE surround light 4",
         "position_m": [
           4.242167949676514,
@@ -559,13 +684,8 @@
         "size_m": 4.0
       },
       {
-        "color": "#ffffff",
-        "color_linear": [
-          1.0,
-          1.0,
-          1.0
-        ],
-        "energy": 200.0,
+        "color": "#5050ff",
+        "energy": 160.0,
         "name": "ALICE surround light 5",
         "position_m": [
           4.242167949676514,
@@ -580,13 +700,8 @@
         "size_m": 4.0
       },
       {
-        "color": "#ffffff",
-        "color_linear": [
-          1.0,
-          1.0,
-          1.0
-        ],
-        "energy": 200.0,
+        "color": "#5050ff",
+        "energy": 160.0,
         "name": "ALICE surround light 6",
         "position_m": [
           -4.2431135177612305,
@@ -601,13 +716,8 @@
         "size_m": 4.0
       },
       {
-        "color": "#ffffff",
-        "color_linear": [
-          1.0,
-          1.0,
-          1.0
-        ],
-        "energy": 200.0,
+        "color": "#5050ff",
+        "energy": 160.0,
         "name": "ALICE surround light 7",
         "position_m": [
           -4.2431135177612305,
@@ -622,13 +732,8 @@
         "size_m": 4.0
       },
       {
-        "color": "#ffffff",
-        "color_linear": [
-          1.0,
-          1.0,
-          1.0
-        ],
-        "energy": 200.0,
+        "color": "#5050ff",
+        "energy": 160.0,
         "name": "ALICE surround light 8",
         "position_m": [
           4.242167949676514,
@@ -643,13 +748,8 @@
         "size_m": 4.0
       },
       {
-        "color": "#ffffff",
-        "color_linear": [
-          1.0,
-          1.0,
-          1.0
-        ],
-        "energy": 150.0,
+        "color": "#5050ff",
+        "energy": 120.0,
         "name": "ALICE surround light 9",
         "position_m": [
           -0.0004729613137897104,
@@ -664,13 +764,8 @@
         "size_m": 4.0
       },
       {
-        "color": "#ffffff",
-        "color_linear": [
-          1.0,
-          1.0,
-          1.0
-        ],
-        "energy": 150.0,
+        "color": "#5050ff",
+        "energy": 120.0,
         "name": "ALICE surround light 10",
         "position_m": [
           -0.0004729613137897104,
@@ -683,6 +778,17 @@
           0.0
         ],
         "size_m": 4.0
+      },
+      {
+        "color": "#8080ff",
+        "energy": 9,
+        "name": "FIT camera fill near beampipe",
+        "position_m": [
+          0.22,
+          0.13,
+          1.25
+        ],
+        "size_m": 0.35
       }
     ],
     "magnet": false,
@@ -1972,20 +2078,48 @@
         0.143936
       ]
     ],
+    "preview_preserve_geometry": true,
+    "render_engine": "CYCLES",
     "roll": 13.3,
-    "roughness": 0.5799999833106995,
+    "roughness": 0.7,
     "scale_max": null,
     "scale_min": null,
     "schematic": false,
     "shading": "smooth",
     "target_cm": [
-      0.0,
-      0.0,
-      -7.1
+      -0.047296054661273956,
+      -0.035114772617816925,
+      -7.110262870788574
     ],
+    "tower_direction": "inward",
+    "tower_fixed_height_cm": 10.0,
+    "tower_fixed_heights_cm": {},
+    "tower_height_mapping": "linear",
+    "tower_height_mappings": {},
+    "tower_height_scales": {
+      "CPV": 0.2,
+      "EMC": 20.0,
+      "PHS": 0.2
+    },
+    "tower_log_references": {},
+    "tower_max_height_cm": 100.0,
+    "tower_max_heights_cm": {},
+    "tower_width_scale": 0.95,
+    "tower_width_scales": {},
+    "tpc_cluster_profile": "sphere",
+    "tpc_profile_scale": 1.0,
+    "tpc_profile_thickness_cm": 0.03,
     "track_color_mode": "solid",
     "track_emission": 0.3499999940395355,
     "track_radius_cm": 0.02500000037252903,
+    "track_representation": "reconstructed",
+    "video_enabled": false,
+    "video_fps": 24,
+    "video_interval_s": 1.0,
+    "video_speed_m_s": 10.0,
+    "video_time_scale": 0.0,
+    "video_timing": "fixed",
+    "video_tower_rise_s": 0.2,
     "view_transform": "Standard",
     "world_strength": 0.009999999776482582
   },

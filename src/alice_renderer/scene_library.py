@@ -1,10 +1,10 @@
 """Local scene history shared by the desktop app and Blender editor.
 
 Only scene recipes and local references are stored; event/geometry data is never
-copied. Favourites are immutable snapshots until explicitly removed.
+copied. User favourites are immutable snapshots; unmodified builtins can update.
 """
 from __future__ import annotations
-import copy, json, sqlite3, time, uuid
+import copy, hashlib, json, sqlite3, time, uuid
 from pathlib import Path
 from .model import RenderSettings
 from .scene_config import load_config, recipe, save_config, resolve_settings
@@ -16,6 +16,11 @@ DEFAULT_FAVOURITES=(
     ('builtin:alice-general','ALICE general','favourite-alice-general.json'),
 )
 
+LEGACY_BUILTIN_DIGESTS={'builtin:its-tpc':'04bde30c0d431ec432ec53add96b9df0c94384c0e8d56797c6e213b0c49dee3e'}
+
+def recipe_digest(data):
+    return hashlib.sha256(json.dumps(data,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+
 class SceneLibrary:
     def __init__(self,path=None):
         self.path=Path(path or default_path());self.path.parent.mkdir(parents=True,exist_ok=True)
@@ -24,12 +29,13 @@ class SceneLibrary:
             db.execute('CREATE TABLE IF NOT EXISTS scenes (id TEXT PRIMARY KEY, config TEXT, title TEXT, kind TEXT, input TEXT, event TEXT, assets TEXT, updated REAL)')
             db.execute('CREATE TABLE IF NOT EXISTS favourites (id TEXT PRIMARY KEY, config TEXT, title TEXT, kind TEXT, input TEXT, event TEXT, assets TEXT, updated REAL)')
             db.execute('CREATE TABLE IF NOT EXISTS seeded_favourites (id TEXT PRIMARY KEY)')
+            db.execute('CREATE TABLE IF NOT EXISTS builtin_revisions (id TEXT PRIMARY KEY, digest TEXT)')
     def connect(self):
         db=sqlite3.connect(self.path,timeout=10);db.row_factory=sqlite3.Row;return db
     def ensure_default_favourites(self,project_root=None):
-        """Install portable starter snapshots once; respect later removals/edits.
+        """Install starters and refresh unmodified builtins; respect removals/edits.
 
-        Only local geometry references are refreshed on subsequent launches, so
+        Local geometry references are refreshed on subsequent launches, so
         installing a bundle later also makes the starters usable. No event or
         hardware selection comes from the machine where the recipes were saved.
         """
@@ -40,20 +46,39 @@ class SceneLibrary:
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             for identity,title,filename in DEFAULT_FAVOURITES:
+                data=load_config(Path(__file__).with_name('presets')/filename)
+                data['defaults']={}
+                digest=recipe_digest(data)
+                local_assets=dict(assets)
+                for detector,ref in data.get('geometry',{}).items():
+                    asset=root/'geometry/run-560067'/ref['file']
+                    if asset.is_file():local_assets[detector]=str(asset.resolve())
                 if db.execute('SELECT 1 FROM seeded_favourites WHERE id=?',(identity,)).fetchone():
-                    db.execute('UPDATE favourites SET assets=? WHERE id=? AND kind=?',(json.dumps(assets),identity,'builtin'))
+                    entry=db.execute('SELECT config FROM favourites WHERE id=? AND kind=?',(identity,'builtin')).fetchone()
+                    revision=db.execute('SELECT digest FROM builtin_revisions WHERE id=?',(identity,)).fetchone()
+                    previous=revision['digest'] if revision else LEGACY_BUILTIN_DIGESTS.get(identity)
+                    if entry and Path(entry['config']).is_file():
+                        saved=load_config(entry['config'])
+                        if recipe_digest(saved)==previous and previous!=digest:
+                            save_config(entry['config'],data)
+                        else:
+                            # Preserve the asset variant belonging to a customized snapshot.
+                            for detector,ref in saved.get('geometry',{}).items():
+                                asset=root/'geometry/run-560067'/ref['file']
+                                if asset.is_file():local_assets[detector]=str(asset.resolve())
+                    db.execute('UPDATE favourites SET assets=? WHERE id=? AND kind=?',(json.dumps(local_assets),identity,'builtin'))
+                    db.execute('INSERT OR REPLACE INTO builtin_revisions VALUES (?,?)',(identity,digest))
                     continue
                 # Preserve an existing favourite saved under the same name.
                 exists=db.execute('SELECT 1 FROM favourites WHERE id=? OR lower(title)=lower(?)',(identity,title)).fetchone()
                 if not exists:
-                    data=load_config(Path(__file__).with_name('presets')/filename)
-                    data['defaults']={}
                     target=self.path.parent/'scene-library'/'favourites'/filename
                     save_config(target,data)
                     db.execute('INSERT INTO favourites VALUES (?,?,?,?,?,?,?,?)',
-                               (identity,str(target.resolve()),title,'builtin','','',json.dumps(assets),time.time()))
+                               (identity,str(target.resolve()),title,'builtin','','',json.dumps(local_assets),time.time()))
                     added.append(title)
                 db.execute('INSERT INTO seeded_favourites VALUES (?)',(identity,))
+                db.execute('INSERT OR REPLACE INTO builtin_revisions VALUES (?,?)',(identity,digest))
         return added
     def recent_inputs(self):
         with self.connect() as db:

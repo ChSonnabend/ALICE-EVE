@@ -38,6 +38,32 @@ def test_default_favourites_do_not_replace_same_named_user_favourite(tmp_path):
     assert len(entries)==2
     assert lib.settings(entries['ITS-TPC']).roll==83
 
+def test_builtin_revision_updates_only_unmodified_snapshot(tmp_path):
+    from alice_renderer.scene_library import recipe_digest
+    lib=SceneLibrary(tmp_path/'history.sqlite');lib.ensure_default_favourites()
+    entry=next(e for e in lib.entries(True) if e['title']=='ITS-TPC')
+    current=load_config(entry['config']);old=json.loads(json.dumps(current))
+    old['scene']['roll']=-42;save_config(entry['config'],old)
+    with lib.connect() as db:
+        db.execute('UPDATE builtin_revisions SET digest=? WHERE id=?',(recipe_digest(old),entry['id']))
+    lib.ensure_default_favourites()
+    assert load_config(entry['config'])==current
+    old['scene']['roll']=-43;save_config(entry['config'],old)
+    lib.ensure_default_favourites()
+    assert load_config(entry['config'])==old
+
+def test_builtin_its_tpc_uses_chamber_asset_without_changing_general(tmp_path):
+    root=tmp_path/'geometry/run-560067';root.mkdir(parents=True)
+    for filename in ('TRD.blend','TRD-chambers.blend'):(root/filename).touch()
+    lib=SceneLibrary(tmp_path/'history.sqlite');lib.ensure_default_favourites()
+    entries={e['title']:e for e in lib.entries(True)}
+    assert entries['ITS-TPC']['assets']['TRD']==str(root/'TRD-chambers.blend')
+    assert entries['ALICE general']['assets']['TRD']==str(root/'TRD.blend')
+    data=load_config(entries['ITS-TPC']['config'])
+    assert data['defaults']=={} and data['scene']['beampipe']
+    assert data['scene']['geometry_lods']['TRD']=='full'
+    assert data['scene']['geometry_opening_z_intervals_cm']['TRD']
+
 def test_favourites_are_frozen_while_interactive_history_updates(tmp_path):
     lib=SceneLibrary(tmp_path/'history.sqlite');path=tmp_path/'scene.json'
     cfg=RenderSettings(schematic=True,geometry=['TPC'],roll=31)

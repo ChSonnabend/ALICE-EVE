@@ -1,0 +1,15 @@
+{
+  "source": "aligned-geometry.root (run560067-ctf-v16)",
+  "source_sha256": "3cd76fea0b9d12e67048e2e8c45c642015b165a8398147d5bff0667bf2cd24fd",
+  "chambers": 521,
+  "layers": {
+    "0": 87,
+    "1": 87,
+    "2": 87,
+    "3": 87,
+    "4": 86,
+    "5": 87
+  },
+  "placements": 3647,
+  "note": "Aligned actual UA/UZ/UP/UD/UF external chamber frames; enclosing supermodule shell and internal electronics omitted to expose six radial chamber layers."
+}
