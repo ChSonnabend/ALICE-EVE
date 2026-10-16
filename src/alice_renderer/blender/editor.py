@@ -36,6 +36,10 @@ def current_settings():
     cfg['geometry']=[];cfg['magnet']=False;cfg['detectors']=[]
     cfg['detector_modes']={};cfg['geometry_display']={};cfg['geometry_openings']={};cfg['geometry_opacities']={};cfg['colors_linear']={};cfg['geometry_assets']={}
     cfg['geometry_opening_directions']={};cfg['geometry_exclusions']={}
+    cfg['geometry_z_intervals_cm']={}
+    cfg['geometry_opening_z_intervals_cm']={}
+    cfg['beampipe']=ui.beampipe;cfg['beampipe_radius_cm']=ui.beampipe_radius_cm
+    cfg['beampipe_z_cm']=[ui.beampipe_z_min,ui.beampipe_z_max];cfg['beampipe_color']=hex_color(ui.beampipe_color)
     cfg['geometry_inner_masks']={};cfg['geometry_components']={}
     for key in ('cluster_size_scales','tower_width_scales','tower_fixed_heights_cm','tower_max_heights_cm','tower_height_mappings','tower_log_references'):cfg[key]={}
     for item in ui.detectors:
@@ -56,6 +60,8 @@ def current_settings():
             if item.tower_log_reference!=1.:cfg['tower_log_references'][item.name]=item.tower_log_reference
         cfg['geometry_display'][item.name]=item.display
         cfg['geometry_openings'][item.name]=item.opening
+        if item.z_clip:cfg['geometry_z_intervals_cm'][item.name]=[item.z_min_cm,item.z_max_cm]
+        if item.opening_z_clip:cfg['geometry_opening_z_intervals_cm'][item.name]=[item.opening_z_min_cm,item.opening_z_max_cm]
         cfg['geometry_opening_directions'][item.name]=item.opening_direction
         cfg['geometry_exclusions'][item.name]=[p.strip() for p in item.exclusions.split(',') if p.strip()]
         choices={c.identifier:c.enabled for c in item.components if c.explicit}
@@ -160,6 +166,9 @@ def appearance_update(self,context):
     if not JOB or not hasattr(context.scene,'alice_eve'):return
     ui=context.scene.alice_eve
     selection_update(self,context)
+    from beampipe import update_beampipe
+    if ui.beampipe_z_min<ui.beampipe_z_max and ui.beampipe_radius_cm>JOB['settings'].get('beampipe_wall_cm',.08):
+        update_beampipe(dict(JOB['settings'],beampipe=ui.beampipe,beampipe_radius_cm=ui.beampipe_radius_cm,beampipe_z_cm=[ui.beampipe_z_min,ui.beampipe_z_max],beampipe_color=hex_color(ui.beampipe_color)))
     coll=bpy.data.collections.get('Tracks')
     if coll:
         for obj in coll.objects:
@@ -171,7 +180,7 @@ def appearance_update(self,context):
         bsdf=mat.node_tree.nodes.get('Principled BSDF')
         if bsdf:set_if_changed(bsdf.inputs['Roughness'],'default_value',ui.roughness);set_if_changed(bsdf.inputs['Metallic'],'default_value',ui.metallic)
     for obj in context.scene.objects:
-        if obj.type=='MESH':
+        if obj.type=='MESH' and not obj.get('alice_preserve_face_normals',False):
             smooth=not obj.get('alice_towers',False) and ui.shading=='smooth' and ('alice_lod' not in obj or obj.get('alice_structural_smooth',False))
             if obj.get('alice_applied_smooth')!=smooth:
                 for p in obj.data.polygons:p.use_smooth=smooth
@@ -180,7 +189,7 @@ def appearance_update(self,context):
         coll=bpy.data.collections.get(item.name)
         if coll:
             set_if_changed(coll,'hide_render',not (item.visible and item.geometry_available));set_if_changed(coll,'hide_viewport',coll.hide_render)
-        signature=json.dumps([list(item.color),item.opacity,item.opening,item.opening_direction])
+        signature=json.dumps([list(item.color),item.opacity,item.opening,item.opening_direction,item.z_clip,item.z_min_cm,item.z_max_cm,item.opening_z_clip,item.opening_z_min_cm,item.opening_z_max_cm])
         if coll and coll.get('alice_material_signature')==signature:continue
         if coll:coll['alice_material_signature']=signature
         mats={m for obj in coll.all_objects if obj.type in ('MESH','CURVE') for m in obj.data.materials if m} if coll else set()
@@ -193,6 +202,9 @@ def appearance_update(self,context):
             if opening:set_if_changed(opening.inputs[1],'default_value',math.radians(item.opening)/2)
             direction=mat.node_tree.nodes.get('ALICE opening direction')
             if direction:set_if_changed(direction.inputs[1],'default_value',-math.radians(item.opening_direction))
+            for name,value in (('ALICE z minimum',item.z_min_cm*.01 if item.z_clip else -1.e10),('ALICE z maximum',item.z_max_cm*.01 if item.z_clip else 1.e10),('ALICE opening z minimum',item.opening_z_min_cm*.01 if item.opening_z_clip else -1.e10),('ALICE opening z maximum',item.opening_z_max_cm*.01 if item.opening_z_clip else 1.e10)):
+                node=mat.node_tree.nodes.get(name)
+                if node:set_if_changed(node.inputs[1],'default_value',value)
             for node in mat.node_tree.nodes:
                 if node.bl_idname=='ShaderNodeMixShader' and not node.inputs[0].is_linked:set_if_changed(node.inputs[0],'default_value',item.opacity)
             set_if_changed(mat,'diffuse_color',(*item.color,item.opacity))
@@ -288,6 +300,12 @@ class DetectorSettings(bpy.types.PropertyGroup):
     visible: BoolProperty(name='Surface',default=True,update=surface_update)
     detail: EnumProperty(name='Geometry detail',items=[('inherit','Use scene detail','Use the Geometry detail control above'),('full','Full geometry','Keep aligned detector surfaces'),('proxy','Cached approximate surfaces','Reviewed low-complexity detector surfaces; no source mesh import'),('structural','Large surfaces (cached, fast)','ITS stave panels and TPC walls/sectors; fine details omitted'),('simplified','Simplified geometry','Use approximate coarse spatial cells')],default='inherit')
     opening: FloatProperty(name='Opening (degrees)',min=0,max=360,default=0,update=appearance_update)
+    opening_z_clip: BoolProperty(name='Open only within Z window',default=False,update=appearance_update)
+    opening_z_min_cm: FloatProperty(name='Opening Z minimum (cm)',default=-20.,update=appearance_update)
+    opening_z_max_cm: FloatProperty(name='Opening Z maximum (cm)',default=20.,update=appearance_update)
+    z_clip: BoolProperty(name='Limit geometry along Z',default=False,update=appearance_update)
+    z_min_cm: FloatProperty(name='Z minimum (cm)',default=-250.,update=appearance_update)
+    z_max_cm: FloatProperty(name='Z maximum (cm)',default=250.,update=appearance_update)
     opening_direction: FloatProperty(name='Opening direction (degrees)',description='Wedge centre in ALICE XY: 0 is +X, 90 is +Y, −90 is −Y',min=-360,max=360,default=-90,update=appearance_update)
     exclusions: StringProperty(name='Hide component names',description='Comma-separated object-name patterns, e.g. ITSServices*, CageCover*. Apply geometry appearance to update. Recorded in the recipe; data and clipping bounds remain unchanged')
     inner_mask_radius: FloatProperty(name='Inner placement mask radius (m)',description='0 disables; hide matching placements inside this radius, retaining outer placements. Apply geometry appearance',min=0,max=100,default=0)
@@ -381,6 +399,11 @@ class ToggleViewportPause(bpy.types.Operator):
         return {'FINISHED'}
 
 class SceneSettings(bpy.types.PropertyGroup):
+    beampipe: BoolProperty(name='Central beampipe (approximate)',default=False,update=appearance_update)
+    beampipe_radius_cm: FloatProperty(name='Pipe radius (cm)',default=1.8,min=.081,update=appearance_update)
+    beampipe_z_min: FloatProperty(name='Pipe Z minimum (cm)',default=-450.,update=appearance_update)
+    beampipe_z_max: FloatProperty(name='Pipe Z maximum (cm)',default=450.,update=appearance_update)
+    beampipe_color: FloatVectorProperty(name='Pipe colour',subtype='COLOR',size=3,min=0,max=1,default=(.002,0,.46),update=appearance_update)
     viewport_paused: BoolProperty(name='Viewport rendering paused',default=False,update=viewport_pause_update)
     pause_while_editing: BoolProperty(name='Pause collisions while editing sidebar',default=True)
     video_enabled: BoolProperty(name='Render selected collisions as video',default=False)
@@ -959,6 +982,9 @@ class EVEPanel(bpy.types.Panel):
         header.label(text='Geometry and viewport')
         if body is not None:
             layout=body
+            layout.prop(ui,'beampipe')
+            if ui.beampipe:
+                for prop in ('beampipe_radius_cm','beampipe_z_min','beampipe_z_max','beampipe_color'):layout.prop(ui,prop)
             layout.operator('alice_eve.solid_surfaces');layout.operator('alice_eve.light_transparent_surfaces');layout.operator('alice_eve.restore_surface_exclusions');layout.operator('alice_eve.tpc_sectors_inner_wall');layout.operator('alice_eve.fast_surfaces');layout.operator('alice_eve.surround_lighting');layout.prop(ui,'viewport_renderer');layout.prop(ui,'viewport_samples');layout.prop(ui,'stable_transparency')
             layout.prop(ui,'geometry_lod');layout.operator('alice_eve.full_geometry')
             layout.operator('alice_eve.select_no_detectors');layout.operator('alice_eve.complete_geometry')
@@ -1015,7 +1041,12 @@ class EVEPanel(bpy.types.Panel):
                     kind=geometry_description(cfg,item.name)
                     box.label(text='Geometry source: '+kind)
                     if cfg['geometry_lods'].get(item.name,cfg['geometry_lod']) in ('structural','proxy'):box.label(text='Fine parts omitted; layers / walls / sectors retained')
-                    box.prop(item,'detail');box.prop(item,'display');box.prop(item,'opening');box.prop(item,'opening_direction');box.prop(item,'exclusions');box.prop(item,'color');box.prop(item,'opacity')
+                    box.prop(item,'detail');box.prop(item,'display');box.prop(item,'opening');box.prop(item,'opening_direction')
+                    box.prop(item,'opening_z_clip')
+                    if item.opening_z_clip:box.prop(item,'opening_z_min_cm');box.prop(item,'opening_z_max_cm')
+                    box.prop(item,'z_clip')
+                    if item.z_clip:box.prop(item,'z_min_cm');box.prop(item,'z_max_cm')
+                    box.prop(item,'exclusions');box.prop(item,'color');box.prop(item,'opacity')
                     box.prop(item,'show_components')
                     if item.show_components:
                         box.operator('alice_eve.refresh_components').detector=item.name;box.prop(item,'component_category');box.prop(item,'component_filter')
@@ -1086,6 +1117,8 @@ def start_editor(job,event,metadata):
     for key,default in (('video_enabled',False),('video_timing','fixed'),('video_interval_s',1.),('video_time_scale',0.),('video_speed_m_s',10.),('video_tower_rise_s',.2),('video_fps',24)):setattr(ui,key,settings.get(key,default))
     # Suppress updates during property initialization.
     from worker import rgb
+    ui.beampipe=settings.get('beampipe',False);ui.beampipe_radius_cm=settings.get('beampipe_radius_cm',1.8)
+    ui.beampipe_z_min,ui.beampipe_z_max=settings.get('beampipe_z_cm',[-450.,450.]);ui.beampipe_color=rgb(settings.get('beampipe_color','#0700b5'))
     ui.tpc_cluster_profile=settings.get('tpc_cluster_profile','sphere');ui.tpc_profile_scale=settings.get('tpc_profile_scale',1.);ui.tpc_profile_thickness_cm=settings.get('tpc_profile_thickness_cm',.03)
     for key,default in (('tower_fixed_height_cm',10.),('tower_max_height_cm',100.),('tower_width_scale',.95),('tower_direction','inward'),('tower_height_mapping','linear')):setattr(ui,key,settings.get(key,default))
     ui.cluster_radius_cm=settings['cluster_radius_cm'];ui.track_representation=settings.get('track_representation','reconstructed');ui.highlight_events_json=json.dumps(settings.get('highlight_tracks_by_event',{}));ui.highlight_ids=', '.join(settings.get('highlight_track_ids',[]));ui.highlight_width_cm=settings.get('highlight_track_radius_cm',.35)*2;ui.highlight_cluster_radius_cm=settings.get('highlight_cluster_radius_cm',1.);ui.highlight_override=settings.get('highlight_override_color',True);ui.highlight_track_color=rgb(settings.get('highlight_track_color','#ffcc33'));ui.highlight_cluster_color=rgb(settings.get('highlight_cluster_color','#ff6633'))
@@ -1118,6 +1151,8 @@ def start_editor(job,event,metadata):
             item.tower_count=info.get('towers',0);item.tower_point_fallbacks=info.get('point_fallbacks',0);item.tower_nominal_footprints=info.get('approximate_footprints',0)
         item.opening=settings['geometry_openings'].get(name,180 if settings['cutaway'] else 0);item.opacity=settings['geometry_opacities'].get(name,settings['geometry_opacity']);item.color=settings.get('colors_linear',{}).get('magnet' if name=='L3' else name,rgb(settings['colors'].get('magnet' if name=='L3' else name,'#243a82')))
         item.opening_direction=settings.get('geometry_opening_directions',{}).get(name,-90.);item.exclusions=', '.join(settings.get('geometry_exclusions',{}).get(name,[]))
+        item.opening_z_clip=name in settings.get('geometry_opening_z_intervals_cm',{});item.opening_z_min_cm,item.opening_z_max_cm=settings.get('geometry_opening_z_intervals_cm',{}).get(name,[-20.,20.])
+        item.z_clip=name in settings.get('geometry_z_intervals_cm',{});item.z_min_cm,item.z_max_cm=settings.get('geometry_z_intervals_cm',{}).get(name,[-250.,250.])
         populate_components(item,settings.get('geometry_components',{}).get(name,{}))
         if name=='TPC':item.component_category='parts';item.show_components=True
         inner=settings.get('geometry_inner_masks',{}).get(name,{});item.inner_mask_radius=inner.get('radius_m',0);item.inner_mask_patterns=', '.join(inner.get('patterns',[]));item.inner_mask_front=inner.get('front_only',True)

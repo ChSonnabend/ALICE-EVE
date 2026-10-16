@@ -6,7 +6,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from mathutils import Vector
 from alice_renderer.object_selection import annotate_matching,selected_tracks,selected_clusters,enabled_detectors,highlighted,event_counts
-from alice_renderer.model import color_value
+from alice_renderer.model import color_value,DETECTORS
 from alice_renderer.geometry_selection import is_schematic
 BOUND_CACHE={}
 
@@ -89,12 +89,14 @@ def materials(name,color,opacity=1.,emission=0.,cutaway=False,settings=None):
         links.new(negative.outputs[0],clip.inputs[0]);links.new(surface,clip.inputs[1]);links.new(transparent.outputs[0],clip.inputs[2])
         links.new(clip.outputs[0],output.inputs['Surface'])
     if settings and name in settings.get('geometry_openings',{}):
-        angular_cut(mat,settings['geometry_openings'][name],settings.get('geometry_opening_directions',{}).get(name,-90.))
+        angular_cut(mat,settings['geometry_openings'][name],settings.get('geometry_opening_directions',{}).get(name,-90.),settings.get('geometry_opening_z_intervals_cm',{}).get(name))
+    if settings and name in (*DETECTORS,'L3'):
+        z_interval_cut(mat,settings.get('geometry_z_intervals_cm',{}).get(name))
     mat.diffuse_color=(*color,opacity)
     configure_surface_material(mat,opacity,(settings or {}).get('_interactive',False))
     return mat
 
-def angular_cut(mat,opening,direction=-90.):
+def angular_cut(mat,opening,direction=-90.,z_interval=None):
     # Remove a wedge centred on -Y around the beam (global Z). Shader clipping
     # keeps every instance in global axes and is editable without rebuilding.
     nodes,links=mat.node_tree.nodes,mat.node_tree.links
@@ -108,7 +110,32 @@ def angular_cut(mat,opening,direction=-90.):
     transparent=nodes.new('ShaderNodeBsdfTransparent');mix=nodes.new('ShaderNodeMixShader')
     links.new(geom.outputs['Position'],sep.inputs[0]);links.new(sep.outputs['Y'],atan.inputs[0]);links.new(sep.outputs['X'],atan.inputs[1])
     links.new(atan.outputs[0],add.inputs[0]);links.new(add.outputs[0],cos.inputs[0]);links.new(cos.outputs[0],acos.inputs[0]);links.new(acos.outputs[0],less.inputs[0])
-    links.new(less.outputs[0],mix.inputs[0]);links.new(surface,mix.inputs[1]);links.new(transparent.outputs[0],mix.inputs[2]);links.new(mix.outputs[0],output.inputs['Surface'])
+    # Restrict the removed wedge to a Z window; outside it retain the full wall.
+    low=nodes.new('ShaderNodeMath');low.name='ALICE opening z minimum';low.operation='LESS_THAN';low.inputs[1].default_value=z_interval[0]*.01 if z_interval else -1.e10
+    high=nodes.new('ShaderNodeMath');high.name='ALICE opening z maximum';high.operation='GREATER_THAN';high.inputs[1].default_value=z_interval[1]*.01 if z_interval else 1.e10
+    outside=nodes.new('ShaderNodeMath');outside.operation='MAXIMUM'
+    inside=nodes.new('ShaderNodeMath');inside.operation='SUBTRACT';inside.inputs[0].default_value=1
+    wedge=nodes.new('ShaderNodeMath');wedge.operation='MULTIPLY'
+    for node in (low,high):links.new(sep.outputs['Z'],node.inputs[0])
+    links.new(low.outputs[0],outside.inputs[0]);links.new(high.outputs[0],outside.inputs[1]);links.new(outside.outputs[0],inside.inputs[1])
+    links.new(inside.outputs[0],wedge.inputs[0]);links.new(less.outputs[0],wedge.inputs[1])
+    links.new(wedge.outputs[0],mix.inputs[0]);links.new(surface,mix.inputs[1]);links.new(transparent.outputs[0],mix.inputs[2]);links.new(mix.outputs[0],output.inputs['Surface'])
+
+def z_interval_cut(mat,interval=None):
+    """Keep global Z inside the interval; live edits retain all source meshes."""
+    nodes,links=mat.node_tree.nodes,mat.node_tree.links
+    output=nodes.get('Material Output');surface=output.inputs['Surface'].links[0].from_socket
+    geom=nodes.new('ShaderNodeNewGeometry');sep=nodes.new('ShaderNodeSeparateXYZ')
+    lower=nodes.new('ShaderNodeMath');lower.name='ALICE z minimum';lower.operation='LESS_THAN'
+    upper=nodes.new('ShaderNodeMath');upper.name='ALICE z maximum';upper.operation='GREATER_THAN'
+    lower.inputs[1].default_value=interval[0]*.01 if interval else -1.e10
+    upper.inputs[1].default_value=interval[1]*.01 if interval else 1.e10
+    outside=nodes.new('ShaderNodeMath');outside.operation='MAXIMUM'
+    transparent=nodes.new('ShaderNodeBsdfTransparent');mix=nodes.new('ShaderNodeMixShader')
+    links.new(geom.outputs['Position'],sep.inputs[0])
+    for bound in (lower,upper):links.new(sep.outputs['Z'],bound.inputs[0])
+    links.new(lower.outputs[0],outside.inputs[0]);links.new(upper.outputs[0],outside.inputs[1])
+    links.new(outside.outputs[0],mix.inputs[0]);links.new(surface,mix.inputs[1]);links.new(transparent.outputs[0],mix.inputs[2]);links.new(mix.outputs[0],output.inputs['Surface'])
 
 def collection(name):
     coll=bpy.data.collections.new(name);bpy.context.scene.collection.children.link(coll);return coll
@@ -417,14 +444,36 @@ def imported_geometry(name,path,settings,bounds_only=False):
     crossing_count=0;discarded_count=0
     opening_direction=settings.get('geometry_opening_directions',{}).get(name,-90.)
     cut_normal=Vector((-math.cos(math.radians(opening_direction)),-math.sin(math.radians(opening_direction)),0))
+    window=settings.get('geometry_opening_z_intervals_cm',{}).get(name)
+    window=[v*.01 for v in window] if window else None
     def clip_mesh(mesh,matrix):
         import bmesh
         mesh.materials.clear();mesh.materials.append(mat)
         mesh.transform(matrix)
         bm=bmesh.new();bm.from_mesh(mesh)
-        bmesh.ops.bisect_plane(bm,geom=[*bm.verts,*bm.edges,*bm.faces],dist=1.e-7,
-            plane_co=(0,0,0),plane_no=cut_normal,clear_inner=True)
-        bm.to_mesh(mesh);bm.free();mesh.update()
+        def bisect(part,point,normal,inner=False,outer=False):
+            bmesh.ops.bisect_plane(part,geom=[*part.verts,*part.edges,*part.faces],dist=1.e-7,
+                plane_co=point,plane_no=normal,clear_inner=inner,clear_outer=outer)
+        if window:
+            # Three disjoint slabs: retain both exterior slabs whole and cut
+            # only the middle slab. This avoids long transparent ray chains.
+            below=bm.copy();bisect(below,(0,0,window[0]),(0,0,1),outer=True)
+            above=bm.copy();bisect(above,(0,0,window[1]),(0,0,1),inner=True)
+            bisect(bm,(0,0,window[0]),(0,0,1),inner=True)
+            bisect(bm,(0,0,window[1]),(0,0,1),outer=True)
+            bisect(bm,(0,0,0),cut_normal,inner=True)
+            vertices=[];faces=[];smooth=[]
+            for part in (below,bm,above):
+                part.verts.index_update();offset=len(vertices)
+                vertices.extend(tuple(v.co) for v in part.verts)
+                for face in part.faces:faces.append([offset+v.index for v in face.verts]);smooth.append(face.smooth)
+                part.free()
+            mesh.clear_geometry();mesh.from_pydata(vertices,[],faces)
+            for face,value in zip(mesh.polygons,smooth):face.use_smooth=value
+        else:
+            bisect(bm,(0,0,0),cut_normal,inner=True)
+            bm.to_mesh(mesh);bm.free()
+        mesh.update()
     for obj in meshes:
         obj.data.materials.clear();obj.data.materials.append(mat)
         if obj.get('alice_geometry_excluded'):continue
@@ -448,8 +497,12 @@ def imported_geometry(name,path,settings,bounds_only=False):
                 matrix=Euler(rotations[i].vector,'XYZ').to_matrix() @ Matrix.Diagonal(scales[i].vector)
                 pose=matrix.to_4x4();pose.translation=point.co
                 pose=obj.matrix_world@pose
-                ys=[(pose@c).dot(cut_normal) for c in corners]
+                world_corners=[pose@c for c in corners];ys=[c.dot(cut_normal) for c in world_corners]
                 positive=min(ys)>=-1.e-6;negative=max(ys)<-1.e-6
+                if window:
+                    zmin=min(c.z for c in world_corners);zmax=max(c.z for c in world_corners)
+                    positive=positive or zmax<=window[0] or zmin>=window[1]
+                    negative=negative and zmin>=window[0] and zmax<=window[1]
                 keep.append(positive)
                 if negative:discarded_count+=1
                 elif not positive:
@@ -466,7 +519,7 @@ def imported_geometry(name,path,settings,bounds_only=False):
             mesh=obj.data.copy();clip_mesh(mesh,obj.matrix_world)
             obj.data=mesh;obj.parent=None;obj.matrix_world=Matrix.Identity(4)
     return {'lod':detail,'requested_detail':detail,'display':style,**lod,'track_region':track_region,'meshes':len(meshes),'excluded_objects':excluded,'exclusion_patterns':patterns,'components':component_info,'inner_mask':inner_rule,'inner_masked_instances':inner_removed,'opening_direction_degrees':opening_direction,'cutaway_crossing_instances':crossing_count,
-            'cutaway_discarded_instances':discarded_count,
+            'cutaway_discarded_instances':discarded_count,'opening_z_interval_cm':settings.get('geometry_opening_z_intervals_cm',{}).get(name),
             'cutaway_method':('ALICE global Y>=0 mesh clipping' if opening_direction==-90 else 'ALICE global oriented plane clipping') if physical_cut else 'shader wedge' if name in settings.get('geometry_openings',{}) else 'none'}
 
 def schematic_region(name):
@@ -525,6 +578,8 @@ def render(job_path,interactive=False):
             region=info.pop('track_region',None)
             if region:regions[name]=region
             metadata['geometry'][name]={'type':'asset','path':settings['geometry_assets'][name],**info}
+    from beampipe import update_beampipe
+    metadata['beampipe']=update_beampipe(settings)
     print('ALICE_STAGE Preparing track clipping and event data',flush=True)
     for name in required-set(regions):
         asset=settings['geometry_assets'].get(name)

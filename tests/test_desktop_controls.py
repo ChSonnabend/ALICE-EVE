@@ -528,3 +528,16 @@ def test_background_jobs_have_one_row_and_controls_survive_window_close(window,m
     assert buttons['continue'].isEnabled() and not buttons['stop'].isEnabled()
     w.close()
     assert render_jobs.get(w.library.path,identity)['state']['status']=='paused'
+
+
+def test_geometry_z_pipe_gui_roundtrip(window):
+    w,application,root=window
+    w.z_detector.setCurrentText('TPC');w.z_enabled.setChecked(True);w.z_min.setValue(-80);w.z_max.setValue(35)
+    w.beampipe.setChecked(True);w.pipe_radius.setValue(1.8);w.pipe_z_min.setValue(-420);w.pipe_z_max.setValue(310)
+    w.opening_z_enabled.setChecked(True);w.opening_z_min.setValue(-27.11);w.opening_z_max.setValue(12.89)
+    w.preview_preserve_geometry.setChecked(True)
+    cfg=w.settings();assert cfg.geometry_z_intervals_cm['TPC']==[-80,35] and cfg.beampipe
+    w.apply_scene(cfg);assert w.settings().geometry_z_intervals_cm==cfg.geometry_z_intervals_cm
+    assert w.settings().beampipe_z_cm==[-420,310] and w.settings().preview_preserve_geometry
+    assert w.settings().geometry_opening_z_intervals_cm['TPC']==[-27.11,12.89]
+    w.show_complete_detectors();assert w.settings().geometry_z_intervals_cm=={} and w.settings().geometry_opening_z_intervals_cm=={}

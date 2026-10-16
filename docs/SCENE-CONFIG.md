@@ -248,3 +248,77 @@ reduce repeated darkening within the same object. Eevee still approximates
 transparent-object order and lighting; choose Accurate (Cycles) to inspect nested
 transparent surfaces using the final renderer. Exported material opacity, geometry,
 camera and lighting remain unchanged by the viewport-engine choice.
+
+## Detector Z intervals and the central beampipe
+
+In the desktop **Detectors** tab, choose a detector under **Detector Z interval**,
+check **Keep only this Z interval**, and enter its minimum and maximum in cm.
+The Blender sidebar has the same controls beneath each detector's angular opening.
+Z is the global ALICE beam axis. Each detector (and L3) can use its own interval,
+combined with its angular opening and component choices. **Show complete detectors**
+in the desktop clears both angular and Z cuts.
+
+Portable recipes store these limits as, for example:
+
+```json
+"geometry_z_intervals_cm": {"ITS": [-150, 90], "TPC": [-260, 260]}
+```
+
+Omit a detector's entry to retain its full Z extent. These are surface visibility
+cuts: they do not add artificial solid end caps, alter alignment, or clip event
+tracks/clusters. Limits must be finite with minimum < maximum. Live changes modify
+world-coordinate material masks without reimporting or replacing detector meshes.
+
+Enable **Central beampipe (display approximation)** to add a hollow, 512-face tube
+along global Z. Radius, Z extent and colour are editable in the desktop and Blender;
+`beampipe_wall_cm` is available in the recipe. The default radius is 1.8 cm and wall
+thickness 0.08 cm. This is a configurable display tube, not the complete engineering
+beamline with flanges, tapers and supports. Its visibility and colour change in place;
+changing its dimensions rebuilds only this small tube. Geometry-only rendering also
+works with just the beampipe enabled.
+
+**Keep configured geometry detail in Fast interactive** (`preview_preserve_geometry`)
+retains the selected native, instanced detector detail while using the fast Eevee
+viewport. This avoids substituting broad proxy surfaces when fine staves and ribs
+matter. It does not manufacture extra geometric detail or promise a frame rate;
+full detail still requires more GPU memory than proxies. Leave it off for the usual
+lightweight approximate surfaces. Detector buffers persist across Z/appearance edits.
+
+### ITS–TPC commissioning cutaway example
+
+Load [the portable cutaway recipe](../examples/its-tpc-z-cutaway.json), resolving
+assets from `geometry/run-560067`. It starts from the **ITS-TPC** favourite and adds
+an axial interior camera, opaque cobalt surfaces, a 180° ITS opening, Z limits,
+selected TPC supports, and a thin display beampipe (0.9 cm radius for this composition).
+It preserves native detail in the fast viewport. Select no events for the geometry-only
+view; add event data independently when desired.
+
+Ten Full-HD render/critic iterations informed this example. A final production render
+applies the critic's last corrections. It is an approximate recreation: the reference's
+ITS shell silhouette and outer framing differ, and particle counts were deliberately
+excluded from the comparison. Existing favourites and ALICE startup defaults are unchanged.
+
+### Close the detector beyond a cutaway's Z boundary
+
+**Open only within this Z window (closed outside)** restricts the angular cutaway,
+while retaining complete detector walls outside the selected interval. It is separate
+from **Keep only this Z interval**, which hides the geometry outside its limits.
+Both the desktop detector selector and each Blender detector panel expose this setting.
+The portable key is `geometry_opening_z_intervals_cm`, a per-detector map of global
+Z limits in cm. These limits are fixed scene coordinates, not automatically recentered
+when changing events.
+
+For an interaction point at Z = −7.1103 cm, opening the +Z side and closing the barrel
+20 cm behind the interaction point uses, for example:
+
+```json
+"geometry_openings": {"TPC": 180},
+"geometry_opening_z_intervals_cm": {"TPC": [-27.1103, 100000]},
+"geometry_z_intervals_cm": {}
+```
+
+The upper bound is placed beyond the detector extent to obtain a one-sided opening.
+Reverse the interval to open toward −Z instead. No artificial end disks are added at
+the boundary. These masks preserve meshes in the interactive view; final renders also
+retain geometry outside the opening window instead of permanently cutting the entire
+barrel in half.

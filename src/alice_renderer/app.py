@@ -97,7 +97,7 @@ class Window(QMainWindow):
             except Exception:self.saved={}
         else:self.saved={}
         self.scene_detector_selection=set(self.base.detectors)
-        self.scene_overrides={key:getattr(self.base,key) for key in ('render_engine','detector_setup','camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_opening_directions','geometry_exclusions','geometry_inner_masks','geometry_components','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
+        self.scene_overrides={key:getattr(self.base,key) for key in ('render_engine','detector_setup','camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_z_intervals_cm','geometry_opening_z_intervals_cm','beampipe_wall_cm','geometry_opening_directions','geometry_exclusions','geometry_inner_masks','geometry_components','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
         central=QWidget();self.setCentralWidget(central);layout=QVBoxLayout(central)
         title=QLabel('ALICE  /  EVENT RENDERER');title.setObjectName('title');layout.addWidget(title)
         self.summary=QLabel('Choose an input, select events and detectors, then preview or render.');layout.addWidget(self.summary)
@@ -198,12 +198,47 @@ class Window(QMainWindow):
             label=QLabel(name);self.detector_labels[name]=label
             grid.addWidget(label,row,0);grid.addWidget(data,row,1);grid.addWidget(mode,row,2);grid.addWidget(geometry,row,3);grid.addWidget(self.color_button(name),row,4)
         self.magnet=QCheckBox('L3 magnet');self.magnet.setChecked(self.base.magnet);self.magnet.toggled.connect(self.update_availability);layout.addWidget(self.magnet)
+        self.beampipe=QCheckBox('Central beampipe (display approximation)');self.beampipe.setChecked(self.base.beampipe);self.beampipe.toggled.connect(self.update_availability);layout.addWidget(self.beampipe)
+        pipe=QFormLayout();layout.addLayout(pipe)
+        self.pipe_radius=number(self.base.beampipe_radius_cm,.081,100,3);pipe.addRow('Pipe radius (cm)',self.pipe_radius)
+        self.pipe_z_min=number(self.base.beampipe_z_cm[0],-100000,100000,2);self.pipe_z_max=number(self.base.beampipe_z_cm[1],-100000,100000,2)
+        pipe.addRow('Pipe Z minimum (cm)',self.pipe_z_min);pipe.addRow('Pipe Z maximum (cm)',self.pipe_z_max)
+        self.pipe_color=QLineEdit(self.base.beampipe_color);pipe.addRow('Pipe colour',self.pipe_color)
+        self.z_detector=QComboBox();self.z_detector.addItems([*DETECTORS,'L3']);pipe.addRow('Detector Z interval',self.z_detector)
+        self.z_enabled=QCheckBox('Keep only this Z interval');pipe.addRow(self.z_enabled)
+        self.z_min=number(-250.,-100000,100000,2);self.z_max=number(250.,-100000,100000,2)
+        pipe.addRow('Z minimum (cm)',self.z_min);pipe.addRow('Z maximum (cm)',self.z_max)
+        self.opening_z_enabled=QCheckBox('Open only within this Z window (closed outside)');pipe.addRow(self.opening_z_enabled)
+        self.opening_z_min=number(-20.,-100000,100000,3);self.opening_z_max=number(20.,-100000,100000,3)
+        pipe.addRow('Opening Z minimum (cm)',self.opening_z_min);pipe.addRow('Opening Z maximum (cm)',self.opening_z_max)
+        self.opening_z_enabled.toggled.connect(self.change_opening_z_interval);self.opening_z_min.valueChanged.connect(self.change_opening_z_interval);self.opening_z_max.valueChanged.connect(self.change_opening_z_interval)
+        self.z_detector.currentTextChanged.connect(self.refresh_z_controls)
+        self.z_enabled.toggled.connect(self.change_z_interval);self.z_min.valueChanged.connect(self.change_z_interval);self.z_max.valueChanged.connect(self.change_z_interval)
+        self.refresh_z_controls()
+        self.preview_preserve_geometry=QCheckBox('Keep configured geometry detail in Fast interactive');self.preview_preserve_geometry.setChecked(self.base.preview_preserve_geometry);self.preview_preserve_geometry.setToolTip('Keep native instanced ribs and staves while using the fast rasterized viewport; skip coarse cache substitution.');layout.addWidget(self.preview_preserve_geometry)
         self.schematic=QCheckBox('Use approximate schematic envelopes');self.schematic.setChecked(self.base.schematic);self.schematic.setToolTip('Approximate dimensions, not calibrated detector geometry. This choice is recorded in render metadata.');layout.addWidget(self.schematic)
         self.cutaway=QCheckBox('Half cutaway (global Y plane)');self.cutaway.setChecked(self.base.cutaway);self.cutaway.toggled.connect(self.change_cutaway);layout.addWidget(self.cutaway)
-        opening_note=QLabel('Opening direction is configurable per detector in the interactive editor: 0° is +X, 90° is +Y, −90° is −Y. The half-cutaway shortcut uses −Y. Show complete detectors resets opening angles.');opening_note.setWordWrap(True);layout.addWidget(opening_note)
+        opening_note=QLabel('Opening direction is configurable per detector in the interactive editor: 0° is +X, 90° is +Y, −90° is −Y. The half-cutaway shortcut uses −Y. Show complete detectors resets angular and Z cuts. Z intervals use global detector coordinates in cm and affect surfaces only.');opening_note.setWordWrap(True);layout.addWidget(opening_note)
         self.geometry_opening_label=QLabel();self.geometry_opening_label.setWordWrap(True);layout.addWidget(self.geometry_opening_label);self.refresh_opening_summary()
         self.geometry_lod=QComboBox();self.geometry_lod.addItems(['full','proxy','structural','simplified']);self.geometry_lod.setCurrentText(self.base.geometry_lod);layout.addWidget(QLabel('Geometry detail (proxy = cached approximate surfaces)'));layout.addWidget(self.geometry_lod)
         self.opacity=number(self.base.geometry_opacity,0,1,2);form=QFormLayout();form.addRow('Geometry opacity',self.opacity);layout.addLayout(form);layout.addStretch()
+    def refresh_z_controls(self,*args):
+        interval=self.scene_overrides.get('geometry_z_intervals_cm',{}).get(self.z_detector.currentText())
+        for field in (self.z_enabled,self.z_min,self.z_max):field.blockSignals(True)
+        self.z_enabled.setChecked(interval is not None);self.z_min.setValue(interval[0] if interval else -250.);self.z_max.setValue(interval[1] if interval else 250.)
+        for field in (self.z_enabled,self.z_min,self.z_max):field.blockSignals(False)
+        interval=self.scene_overrides.get('geometry_opening_z_intervals_cm',{}).get(self.z_detector.currentText())
+        for field in (self.opening_z_enabled,self.opening_z_min,self.opening_z_max):field.blockSignals(True)
+        self.opening_z_enabled.setChecked(interval is not None);self.opening_z_min.setValue(interval[0] if interval else -20.);self.opening_z_max.setValue(interval[1] if interval else 20.)
+        for field in (self.opening_z_enabled,self.opening_z_min,self.opening_z_max):field.blockSignals(False)
+    def change_opening_z_interval(self,*args):
+        values=self.scene_overrides.setdefault('geometry_opening_z_intervals_cm',{});name=self.z_detector.currentText()
+        if self.opening_z_enabled.isChecked():values[name]=[self.opening_z_min.value(),self.opening_z_max.value()]
+        else:values.pop(name,None)
+    def change_z_interval(self,*args):
+        values=self.scene_overrides.setdefault('geometry_z_intervals_cm',{});name=self.z_detector.currentText()
+        if self.z_enabled.isChecked():values[name]=[self.z_min.value(),self.z_max.value()]
+        else:values.pop(name,None)
     def set_all_detector_modes(self,mode):
         for combo in self.detector_modes.values():combo.setCurrentText(mode)
         self.update_availability()
@@ -219,6 +254,7 @@ class Window(QMainWindow):
         self.refresh_opening_summary()
     def show_complete_detectors(self):
         self.cutaway.setChecked(False);self.scene_overrides['geometry_openings']={name:0 for name in (*DETECTORS,'L3')}
+        self.scene_overrides['geometry_z_intervals_cm']={};self.scene_overrides['geometry_opening_z_intervals_cm']={};self.refresh_z_controls()
         self.refresh_opening_summary()
     def refresh_opening_summary(self):
         values=self.scene_overrides.get('geometry_openings',{})
@@ -439,6 +475,8 @@ class Window(QMainWindow):
         cfg=RenderSettings(detectors=[d for d,c in self.data_checks.items() if c.isChecked() and c.isEnabled()],geometry=[d for d,c in self.geometry_checks.items() if c.isChecked()],magnet=self.magnet.isChecked(),mode=self.mode.currentText(),track_color_mode=self.track_mode.currentText(),cluster_color_mode=self.cluster_mode.currentText(),colors={k:b.text() for k,b in self.color_buttons.items()},scale_min=None if self.auto_range.isChecked() else self.minimum.value(),scale_max=None if self.auto_range.isChecked() else self.maximum.value(),palette=self.palette.currentText(),geometry_assets={k:v.text() for k,v in self.asset_fields.items() if v.text()},geometry_units=self.geometry_units.currentText(),geometry_opacity=self.opacity.value(),cutaway=self.cutaway.isChecked(),schematic=self.schematic.isChecked(),width=self.width.value(),height=self.height.value(),samples=self.samples.value(),denoise=self.denoise.isChecked(),backend=self.backend.currentText(),device=self.device.currentData() or '',threads=self.threads.value(),track_radius_cm=self.track_radius.value()/2,cluster_radius_cm=self.cluster_radius.value(),camera=self.camera.currentText(),azimuth=self.azimuth.value(),elevation=self.elevation.value(),distance_cm=self.distance.value(),target_cm=[s.value() for s in self.target],save_blend=self.save_blend.isChecked())
         for key,value in self.scene_overrides.items():setattr(cfg,key,value)
         cfg.detector_modes={name:combo.currentText() for name,combo in self.detector_modes.items()}
+        cfg.preview_preserve_geometry=self.preview_preserve_geometry.isChecked()
+        cfg.beampipe=self.beampipe.isChecked();cfg.beampipe_radius_cm=self.pipe_radius.value();cfg.beampipe_z_cm=[self.pipe_z_min.value(),self.pipe_z_max.value()];cfg.beampipe_color=self.pipe_color.text()
         cfg.track_representation=self.track_representation.currentData();cfg.highlight_tracks_by_event=parse_event_highlights(self.highlight_events.toPlainText());cfg.highlight_track_ids=parse_track_ids(self.highlight_ids.text());cfg.highlight_track_radius_cm=self.highlight_width.value()/2;cfg.highlight_cluster_radius_cm=self.highlight_clusters.value();cfg.highlight_override_color=self.highlight_override.isChecked();cfg.highlight_track_color=self.highlight_track_color.text();cfg.highlight_cluster_color=self.highlight_cluster_color.text();cfg.roll=self.roll.value()
         cfg.clip_tracks=self.clip_tracks.isChecked();cfg.include_ambiguous_tracks=self.include_ambiguous.isChecked()
         cfg.camera_orbit_axis=self.camera_orbit_axis.currentText()
@@ -608,7 +646,7 @@ class Window(QMainWindow):
             for i in range(combo.count()):combo.model().item(i).setEnabled(combo.itemText(i) in supported)
             if combo.currentText() not in supported and not self.requested_modes:combo.setCurrentText('solid')
         self.selection_label.setText(f'{len(rows)} / {len(self.model.rows)} selected')
-        renderable=bool(rows) or any(c.isChecked() for c in self.geometry_checks.values()) or self.magnet.isChecked()
+        renderable=bool(rows) or any(c.isChecked() for c in self.geometry_checks.values()) or self.magnet.isChecked() or self.beampipe.isChecked()
         self.render_button.setEnabled(renderable);self.editor_button.setEnabled(renderable)
         self.render_button.setText('Render selected events' if rows else 'Render geometry only')
         self.play_button.setEnabled(len(rows)>=2)
@@ -702,12 +740,15 @@ class Window(QMainWindow):
             self.apply_scene(cfg);self.register_scene(path,'config',cfg);self.message('Scene loaded. Choose the local input and event, then preview or render.')
         except Exception as exc:self.failure(str(exc))
     def apply_scene(self,cfg):
+        self.preview_preserve_geometry.setChecked(cfg.preview_preserve_geometry)
+        self.beampipe.setChecked(cfg.beampipe);self.pipe_radius.setValue(cfg.beampipe_radius_cm);self.pipe_z_min.setValue(cfg.beampipe_z_cm[0]);self.pipe_z_max.setValue(cfg.beampipe_z_cm[1]);self.pipe_color.setText(cfg.beampipe_color)
         self.detector_setup.setCurrentText(cfg.detector_setup)
         self.scene_detector_selection=set(cfg.detectors);self.requested_modes=(cfg.track_color_mode,cfg.cluster_color_mode)
         if self.palette.findText(cfg.palette)<0:self.palette.addItem(cfg.palette)
         for combo,mode in ((self.track_mode,cfg.track_color_mode),(self.cluster_mode,cfg.cluster_color_mode)):
             if combo.findText(mode)<0:combo.addItem(mode)
-        self.scene_overrides={key:getattr(cfg,key) for key in ('render_engine','detector_setup','camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_opening_directions','geometry_exclusions','geometry_inner_masks','geometry_components','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
+        self.scene_overrides={key:getattr(cfg,key) for key in ('render_engine','detector_setup','camera_pose','color_ranges','geometry_lod','geometry_lods','geometry_schematics','geometry_display','geometry_openings','geometry_z_intervals_cm','geometry_opening_z_intervals_cm','beampipe_wall_cm','geometry_opening_directions','geometry_exclusions','geometry_inner_masks','geometry_components','geometry_opacities','roughness','metallic','shading','world_strength','lights','colors_linear','palette_lut')}
+        self.refresh_z_controls()
         for name,box in self.data_checks.items():box.setChecked(name in cfg.detectors)
         for name,combo in self.detector_modes.items():combo.setCurrentText(cfg.detector_modes.get(name,cfg.mode))
         for name,box in self.geometry_checks.items():box.setChecked(name in cfg.geometry)

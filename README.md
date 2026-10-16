@@ -74,6 +74,12 @@ New O2 exports include aligned module footprint vectors and cell/module identifi
 
 For a cleaner TPC view, the Blender sidebar's **TPC sectors + inner wall** keeps only readout-sector chambers and inner wall/shields. **Add lights around detector** supplies adjustable side/end lights without changing the camera or background. Both choices export with the scene.
 
+**Z cutaways and beampipe:** the Detectors tab and Blender sidebar can keep each detector
+inside a chosen global Z interval (cm), together with its angular opening. A configurable
+hollow central beampipe is available for geometry-only and event scenes. For detailed
+ribs/staves with the rasterized viewport, enable **Keep configured geometry detail in
+Fast interactive**. See [controls and the ITS-TPC cutaway example](docs/SCENE-CONFIG.md#detector-z-intervals-and-the-central-beampipe).
+
 **Use fast ITS/TPC surfaces** loads prebuilt broad ITS stave panels and TPC walls/sectors, keeping the existing camera, opening angles, colours and lighting. This display approximation uses full aligned track-clipping bounds. Prepare its small caches once with `alice-render prepare-geometry --geometry-root /local/geometry --detectors ITS,TPC --units m`; then choose **Large surfaces (cached, fast)** / `structural` detail. See [large surfaces](docs/LARGE-SURFACES.md).
 
 Fresh desktop installations use the saved ALICE2 scene exported from `editor-20261012-130704-860001`. Appearance → Detector setup offers ALICE2, ALICE2 + ITS3, and ALICE3 defaults with shared camera and lighting. Saved local preferences take priority. The earlier commissioning style remains available through **Use commissioning defaults**. See [detector setups](docs/DETECTOR-SETUPS.md).

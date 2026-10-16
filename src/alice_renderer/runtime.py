@@ -148,6 +148,7 @@ def fast_editor_settings(settings):
     from .geometry_selection import is_schematic
     from .structural_geometry import load
     cfg=copy.deepcopy(settings)
+    if cfg.preview_preserve_geometry:return cfg
     values=cfg.to_dict()
     for name in cfg.geometry+(['L3'] if cfg.magnet else []):
         if name not in ('ITS','TPC') and cfg.geometry_lods.get(name,cfg.geometry_lod)=='structural':cfg.geometry_lods[name]='full'
@@ -170,7 +171,7 @@ def render_events(blender: str, paths: list[Path], settings: RenderSettings, out
     if settings.video_enabled:return render_video(blender,paths,settings,output,preview=preview,progress=progress,cancelled=cancelled,library_path=library_path)
     output=Path(output)
     if not paths:
-        if not settings.geometry and not settings.magnet:raise ValueError('Select detector geometry for a geometry-only render')
+        if not settings.geometry and not settings.magnet and not settings.beampipe:raise ValueError('Select detector geometry for a geometry-only render')
         paths=[geometry_only_input(output)]
         settings=dataclasses.replace(settings,detectors=[],highlight_track_ids=[])
     settings.validate()
@@ -237,7 +238,7 @@ def launch_editor(blender, event_path, settings, output, *, library_path=None, f
     import copy
     cfg=materialize(fast_editor_settings(settings) if fast else copy.deepcopy(settings))
     if event_path is None:
-        if not cfg.geometry and not cfg.magnet:raise ValueError('Select detector geometry for a geometry-only scene')
+        if not cfg.geometry and not cfg.magnet and not cfg.beampipe:raise ValueError('Select detector geometry for a geometry-only scene')
         event_path=geometry_only_input(output)
         cfg=dataclasses.replace(cfg,detectors=[],highlight_track_ids=[])
     for name in cfg.geometry+(['L3'] if cfg.magnet else []):

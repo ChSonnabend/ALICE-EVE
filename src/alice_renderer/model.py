@@ -206,6 +206,14 @@ class RenderSettings:
     geometry_schematics: dict = field(default_factory=dict)
     geometry_display: dict = field(default_factory=dict)
     geometry_openings: dict = field(default_factory=dict)
+    geometry_z_intervals_cm: dict = field(default_factory=dict)
+    geometry_opening_z_intervals_cm: dict = field(default_factory=dict)
+    preview_preserve_geometry: bool = False
+    beampipe: bool = False
+    beampipe_radius_cm: float = 1.8
+    beampipe_wall_cm: float = .08
+    beampipe_z_cm: list = field(default_factory=lambda:[-450.,450.])
+    beampipe_color: str = '#0700b5'
     geometry_opening_directions: dict = field(default_factory=dict)
     geometry_exclusions: dict = field(default_factory=dict)
     geometry_components: dict = field(default_factory=dict)
@@ -311,6 +319,16 @@ class RenderSettings:
         for name,angle in self.geometry_openings.items():
             if name!='L3':detector(name)
             if not math.isfinite(angle) or not 0<=angle<=360:raise ValueError('Opening must be 0–360 degrees')
+        for intervals in (self.geometry_z_intervals_cm,self.geometry_opening_z_intervals_cm):
+            if not isinstance(intervals,dict):raise ValueError('Geometry z intervals must be a detector mapping')
+            for name,interval in intervals.items():
+                if name!='L3':detector(name)
+                if not isinstance(interval,(list,tuple)) or len(interval)!=2 or any(isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) for v in interval) or interval[0]>=interval[1]:raise ValueError('Geometry z interval needs finite minimum < maximum, in cm')
+        if not isinstance(self.preview_preserve_geometry,bool):raise ValueError('Preview geometry preservation must be boolean')
+        if not isinstance(self.beampipe,bool):raise ValueError('Beampipe visibility must be boolean')
+        if not all(isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v) for v in (self.beampipe_radius_cm,self.beampipe_wall_cm)) or not 0<self.beampipe_wall_cm<self.beampipe_radius_cm:raise ValueError('Beampipe needs 0 < wall thickness < radius')
+        if not isinstance(self.beampipe_z_cm,(list,tuple)) or len(self.beampipe_z_cm)!=2 or any(not isinstance(v,(int,float)) or isinstance(v,bool) or not math.isfinite(v) for v in self.beampipe_z_cm) or self.beampipe_z_cm[0]>=self.beampipe_z_cm[1]:raise ValueError('Invalid beampipe z interval')
+        if not isinstance(self.beampipe_color,str) or not re.fullmatch(r'#[0-9a-fA-F]{6}',self.beampipe_color):raise ValueError('Invalid beampipe colour')
         for name,angle in self.geometry_opening_directions.items():
             if name!='L3':detector(name)
             if not math.isfinite(angle) or not -360<=angle<=360:raise ValueError('Opening direction must be between −360 and 360 degrees')
