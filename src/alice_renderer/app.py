@@ -23,6 +23,22 @@ from .defaults import startup_settings,commissioning_settings,local_geometry_ass
 
 ROOT=Path(__file__).resolve().parents[2]
 
+class InputDialog(QFileDialog):
+    """One chooser for an existing file or an event directory."""
+    def __init__(self,parent,directory):
+        super().__init__(parent,'Open ALICE data',str(directory))
+        self.setOption(QFileDialog.DontUseNativeDialog)
+        self.setFileMode(QFileDialog.AnyFile)
+        self.setAcceptMode(QFileDialog.AcceptOpen)
+        self.setLabelText(QFileDialog.FileName,'File or folder:')
+        self.setNameFilters(['ALICE data (*.tf *.rawtf *.root *.ctf *.json *.jsonl *.json.gz *.jsonl.gz)','All files (*)'])
+    def accept(self):
+        paths=self.selectedFiles()
+        if paths and Path(paths[0]).exists():
+            # QFileDialog's normal accept navigates into directories instead.
+            QDialog.accept(self)
+        else:QMessageBox.warning(self,'Choose input','Select an existing file or folder.')
+
 class Task(QThread):
     message=Signal(str);result=Signal(object);failed=Signal(str);cancelled=Signal(str)
     def __init__(self,fn,parent):super().__init__(parent);self.fn=fn;self.cancel=threading.Event()
@@ -88,8 +104,7 @@ class Window(QMainWindow):
         top=QHBoxLayout();layout.addLayout(top)
         self.source=QLineEdit();self.source.setPlaceholderText('Paste a file or folder path, then press Enter or Load input');self.source.returnPressed.connect(self.load_typed_input);top.addWidget(self.source,1)
         self.open_button=QPushButton('Load input');self.open_button.clicked.connect(self.load_typed_input);top.addWidget(self.open_button)
-        self.browse_button=QPushButton('Browse file…');self.browse_button.clicked.connect(self.open_input);top.addWidget(self.browse_button)
-        self.folder_button=QPushButton('Browse folder…');self.folder_button.clicked.connect(self.open_folder);top.addWidget(self.folder_button)
+        self.browse_button=QPushButton('Browse…');self.browse_button.setToolTip('Select a file or folder; its input format is detected automatically');self.browse_button.clicked.connect(self.open_input);top.addWidget(self.browse_button)
         self.timeframe_button=QPushButton('Whole-TF detector views');self.timeframe_button.setEnabled(False);self.timeframe_button.clicked.connect(self.toggle_timeframe_views);top.addWidget(self.timeframe_button)
         self.demo_button=QPushButton('Synthetic demonstration');self.demo_button.clicked.connect(self.open_demo);top.addWidget(self.demo_button)
         inputs=QHBoxLayout();layout.addLayout(inputs);inputs.addWidget(QLabel('Recent data:'))
@@ -99,10 +114,8 @@ class Window(QMainWindow):
         self.refresh_recent_inputs()
         reuse=QHBoxLayout();layout.addLayout(reuse)
         reuse.addWidget(QLabel('Reuse scene settings:'))
-        self.recent_picker=QComboBox();self.recent_picker.setMinimumWidth(0);self.recent_picker.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred);reuse.addWidget(self.recent_picker,1)
-        self.favourite_picker=QComboBox();self.favourite_picker.setMinimumWidth(0);self.favourite_picker.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred);reuse.addWidget(self.favourite_picker,1)
-        self.reuse_recent_button=QPushButton('Use recent');self.reuse_recent_button.clicked.connect(lambda:self.use_library_entry(self.recent_picker.currentData(),True));reuse.addWidget(self.reuse_recent_button)
-        self.reuse_favourite_button=QPushButton('Use favourite');self.reuse_favourite_button.clicked.connect(lambda:self.use_library_entry(self.favourite_picker.currentData(),True));reuse.addWidget(self.reuse_favourite_button)
+        self.config_picker=QComboBox();self.config_picker.setMinimumWidth(0);self.config_picker.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred);reuse.addWidget(self.config_picker,1)
+        self.reuse_config_button=QPushButton('Use config');self.reuse_config_button.clicked.connect(lambda:self.use_library_entry(self.config_picker.currentData(),True));reuse.addWidget(self.reuse_config_button)
         split=QSplitter();layout.addWidget(split,1)
         self.tabs=QTabWidget();split.addWidget(self.tabs)
         self.detector_modes={};self.data_checks={};self.geometry_checks={};self.asset_fields={};self.color_buttons={};self.detector_labels={}
@@ -339,12 +352,15 @@ class Window(QMainWindow):
         signature=json.dumps([recent,favourites],sort_keys=True)
         if signature==self.library_signature:return
         self.library_signature=signature
-        for combo,entries,label in ((self.recent_picker,recent,'Recent scenes…'),(self.favourite_picker,favourites,'Favourites…')):
-            chosen=combo.currentData();chosen_id=chosen.get('id') if chosen else None
-            combo.clear();combo.addItem(label,None)
+        combo=self.config_picker;chosen=combo.currentData();chosen_id=chosen.get('id') if chosen else None
+        combo.clear();combo.addItem('Choose a config…',None)
+        favourite_ids={entry['id'] for entry in favourites}
+        remaining=[entry for entry in recent if entry['id'] not in favourite_ids]
+        for entries,is_favourite in ((favourites,True),(remaining,False)):
+            if entries and not is_favourite and favourites:combo.insertSeparator(combo.count())
             for entry in entries:
-                combo.addItem(('★ ' if entry['favourite'] else '')+entry['title'],entry)
-                combo.setItemData(combo.count()-1,entry['config'],Qt.ToolTipRole)
+                combo.addItem(('★ ' if is_favourite else '')+entry['title'],entry)
+                combo.setItemData(combo.count()-1,('Favourite' if is_favourite else 'Recent')+'\n'+entry['config'],Qt.ToolTipRole)
                 if entry['id']==chosen_id:combo.setCurrentIndex(combo.count()-1)
         for is_favourite,listing in self.library_lists.items():
             old=listing.currentItem();chosen_id=old.data(Qt.UserRole)['id'] if old else None
@@ -454,7 +470,7 @@ class Window(QMainWindow):
         return {'conditions':self.aod_conditions.text(),'bz_kG':self.aod_bz.value() if self.aod_use_bz.isChecked() else None}
     def busy(self,on):
         self.render_progress.setRange(0,0 if on else 100)
-        for w in (self.fast_interactive,self.input_recent_picker,self.input_recent_load,self.input_recent_clear,self.tabs,self.source,self.open_button,self.browse_button,self.folder_button,self.demo_button,self.table,self.all_button,self.none_button,self.render_button,self.editor_button,self.play_button,self.export_config_button,self.load_config_button,self.recent_picker,self.favourite_picker,self.reuse_recent_button,self.reuse_favourite_button):w.setEnabled(not on)
+        for w in (self.fast_interactive,self.input_recent_picker,self.input_recent_load,self.input_recent_clear,self.tabs,self.source,self.open_button,self.browse_button,self.demo_button,self.table,self.all_button,self.none_button,self.render_button,self.editor_button,self.play_button,self.export_config_button,self.load_config_button,self.config_picker,self.reuse_config_button):w.setEnabled(not on)
         self.cancel_button.setEnabled(on)
         self.timeframe_button.setEnabled(not on and self.timeframe_source is not None)
         if not on:self.update_availability();self.refresh_recent_inputs()
@@ -501,11 +517,9 @@ class Window(QMainWindow):
             text=QUrl(text).toLocalFile()
         self.load_input(Path(text).expanduser())
     def open_input(self):
-        path=QFileDialog.getOpenFileName(self,'Open ALICE data',str(ROOT/'data'),'ALICE data (*.tf *.rawtf *.root *.ctf *.json *.jsonl *.json.gz *.jsonl.gz);;All files (*)')[0]
-        if path:self.load_input(Path(path))
-    def open_folder(self):
-        path=QFileDialog.getExistingDirectory(self,'Import event JSON folder')
-        if path:self.load_input(Path(path))
+        current=Path(self.source.text()).expanduser() if self.source.text().strip() else ROOT/'data'
+        dialog=InputDialog(self,current if current.is_dir() else current.parent)
+        if dialog.exec()==QDialog.Accepted:self.load_input(Path(dialog.selectedFiles()[0]))
     def open_demo(self):
         path=generate(ROOT/'examples'/'synthetic-events.jsonl');self.load_input(path)
     def toggle_timeframe_views(self):
@@ -516,11 +530,11 @@ class Window(QMainWindow):
     def load_input(self,path,event_selector=None,retain_scene_geometry=False):
         retain_scene_geometry=retain_scene_geometry or self.scene_overrides.get('detector_setup','ALICE2')!='ALICE2'
         path=Path(path).expanduser()
-        if path.is_dir() and not any(path.glob('*.json*')):
+        if path.is_dir() and not any(p for p in path.glob('*.json*') if not p.name.endswith('.renderer.json')):
             candidates=sorted(p for p in path.iterdir() if p.is_file() and p.suffix.lower() in ('.tf','.rawtf','.root','.ctf'))
             if len(candidates)==1:path=candidates[0]
             elif candidates:
-                name,ok=QInputDialog.getItem(self,'Choose input in folder','TF / CTF file',[p.name for p in candidates],0,False)
+                name,ok=QInputDialog.getItem(self,'Choose input in folder','Data file',[p.name for p in candidates],0,False)
                 if not ok:return
                 path=path/name
         self.source.setText(str(path));profile=self.profile.text();aod_options=self.aod_options()

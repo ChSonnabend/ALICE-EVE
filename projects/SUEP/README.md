@@ -147,7 +147,7 @@ favourite includes the matching event-highlight map. The portable recipe does
 not embed this dataset's IDs; load its TF-specific event-highlights JSON when
 using the portable file. AO2D highlight IDs do not match native TF tracks.
 
-Load the TF export folder, select **SoftBombs → Use favourite**, and begin with
+Load the TF export folder, select **SoftBombs → Use config**, and begin with
 one collision for an interactive scene or a small selection for playback.
 The ALICE general favourite shares the updated reference scene settings.
 

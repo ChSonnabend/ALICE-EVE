@@ -52,7 +52,7 @@ To save a favourite, select the scene in **Recent scenes**, click **Add to
 favourites…**, and give it a name. After editing in Blender, **Export config**
 registers a snapshot you can select there; the autosaved interactive session is
 also available. To apply a favourite to another event, load/select that input
-and event first, choose the favourite and click **Use favourite** (or **Use for
+and event first, choose the favourite and click **Use config** (or **Use for
 current input / event** in the tab).
 
 **Load config…** reuses geometry already configured in Setup when its asset

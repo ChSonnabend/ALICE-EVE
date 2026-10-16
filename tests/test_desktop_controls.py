@@ -282,10 +282,10 @@ def test_recent_clone_retains_new_input_and_event_and_favourites_picker(window):
     cfg=RenderSettings(schematic=True,geometry=['TPC'],roll=39,highlight_track_ids=['old-id'],geometry_openings={'TPC':215})
     path=root/'saved.json';save_config(path,recipe(cfg));w.library.register(path,input_path='missing-old-file',event='old-event')
     entry=w.library.entries()[0];w.library.favourite(entry,title='Reference view');w.refresh_library()
-    assert w.recent_picker.count()==2 and w.favourite_picker.count()==4
+    assert w.config_picker.count()==4
     assert w.library_lists[True].count()==3
     original_path=w.source.text();original_selected=w.model.selected.copy()
-    w.use_library_entry(w.favourite_picker.itemData(1),True)
+    w.use_library_entry(w.config_picker.itemData(1),True)
     assert w.source.text()==original_path and w.model.selected==original_selected
     assert w.settings().roll==39 and w.settings().geometry_openings['TPC']==215
     assert w.settings().highlight_track_ids==[]
@@ -322,10 +322,10 @@ def test_library_tab_buttons_accept_qt_clicked_argument(window,monkeypatch):
     use.click();assert w.settings().roll==28
     monkeypatch.setattr(QInputDialog,'getText',lambda *args,**kwargs:('Pinned scene',True))
     add=next(b for b in recent_tab.findChildren(QPushButton) if b.text()=='Add to favourites…')
-    add.click();assert w.favourite_picker.count()==4 and w.library.entries(True)[0]['title']=='Pinned scene'
+    add.click();assert w.config_picker.count()==4 and w.library.entries(True)[0]['title']=='Pinned scene'
     w.library_lists[True].setCurrentRow(0)
     remove=next(b for b in w.library_lists[True].parentWidget().findChildren(QPushButton) if b.text()=='Remove favourite')
-    remove.click();assert w.favourite_picker.count()==3
+    remove.click();assert w.config_picker.count()==5
 
 def test_installed_favourites_visible_and_apply_to_selected_event(window):
     from alice_renderer.scene_config import load_config
@@ -333,7 +333,7 @@ def test_installed_favourites_visible_and_apply_to_selected_event(window):
     w.model.selected={1};w.update_availability()
     entries={e['title']:e for e in w.library.entries(True)}
     assert set(entries)=={'ITS-TPC','ALICE general'}
-    assert w.favourite_picker.count()==3 and w.library_lists[True].count()==2
+    assert w.config_picker.count()==3 and w.library_lists[True].count()==2
     before=w.loaded_input
     for entry in entries.values():
         w.use_library_entry(entry,True)
@@ -342,6 +342,48 @@ def test_installed_favourites_visible_and_apply_to_selected_event(window):
         assert set(actual.geometry)==set(scene['geometry'])
         assert all(actual.colors[name]==value for name,value in scene['colors'].items())
         assert w.model.selected=={1} and w.loaded_input==before
+
+def test_combined_configs_order_snapshot_dedup_and_refresh_selection(window):
+    from alice_renderer.scene_config import recipe,save_config
+    w,application,root=window
+    a=root/'a.json';b=root/'b.json'
+    save_config(a,recipe(RenderSettings(roll=11)));save_config(b,recipe(RenderSettings(roll=22)))
+    w.library.register(a,title='Pinned');w.library.favourite(w.library.entries()[0])
+    w.library.register(b,title='Recent');w.refresh_library()
+    combo=w.config_picker
+    entries=[combo.itemData(i) for i in range(combo.count()) if combo.itemData(i)]
+    assert len(entries)==4 and all(e['favourite'] for e in entries[:3])
+    assert entries[-1]['title']=='Recent'
+    assert sum(e['id']==str(a) for e in entries)==1
+    combo.setCurrentIndex(combo.count()-1);w.reuse_config_button.click()
+    assert w.settings().roll==22
+    w.library_signature=None;w.refresh_library()
+    assert combo.currentData()['id']==str(b)
+
+@pytest.mark.parametrize('directory',[False,True])
+def test_unified_browse_accepts_existing_files_and_folders(window,monkeypatch,directory):
+    from PySide6.QtWidgets import QDialog,QDialogButtonBox
+    w,application,root=window;path=root/('events' if directory else 'event.json')
+    if directory:path.mkdir()
+    else:path.write_text('{}')
+    dialog=app_module.InputDialog(w,root);dialog.selectFile(str(path));dialog.show();application.processEvents()
+    dialog.findChild(QDialogButtonBox).button(QDialogButtonBox.Open).click()
+    assert dialog.result()==QDialog.Accepted and Path(dialog.selectedFiles()[0])==path
+    dialog.deleteLater()
+    selected=[];monkeypatch.setattr(w,'load_input',selected.append)
+    def choose(d):
+        d.selectFile(str(path));d.accept();return d.result()
+    monkeypatch.setattr(app_module.InputDialog,'exec',choose)
+    w.browse_button.click();assert selected==[path]
+
+def test_folder_conditions_sidecar_does_not_hide_root_input(window,monkeypatch):
+    w,application,root=window;folder=root/'ao2d';folder.mkdir()
+    (folder/'AO2D.root').write_bytes(b'placeholder')
+    (folder/'AO2D.root.renderer.json').write_text('{"fields":{}}')
+    # Inspect selection without starting a ROOT reader on this fixture.
+    monkeypatch.setattr(w,'start_task',lambda *args:None)
+    w.load_input(folder)
+    assert w.source.text()==str(folder/'AO2D.root')
 
 
 def test_changed_unloaded_input_does_not_render_previous_event(window,monkeypatch):
